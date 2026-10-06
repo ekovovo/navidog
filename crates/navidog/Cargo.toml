@@ -1,0 +1,31 @@
+[package]
+name = "navidog"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+gpui-kit.workspace = true
+rust-i18n.workspace = true
+navidog-ui.workspace = true
+navidog-core.workspace = true
+navidog-db.workspace = true
+navidog-plugin.workspace = true
+navidog-connection.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+
+[dev-dependencies]
+gpui-kit = { workspace = true, features = ["test-support"] }
+
+# 需要 Metal，默认 `cargo test` 不运行；手动执行 `cargo test -p navidog --test snapshot`
+[[test]]
+name = "snapshot"
+harness = false
+test = false

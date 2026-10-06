@@ -28,6 +28,8 @@ navidog 用 [gpui-kit](https://gpui-kit.com/zh-CN/docs/) 全家桶（GPUI、`gpu
 | `cargo xtask help-index` | `reference/help-index.json` | 400 个中文帮助页的文件名与标题，功能清单的数据源 |
 | `swift tools/colors-dump.swift` | `reference/colors.json` | AppKit 语义色在浅色和深色下的 sRGB 值 |
 | `swift tools/ax-dump.swift` | `reference/ax/*.json` | 运行中 Navicat 的窗口元素几何和完整菜单栏，需要给终端授予“辅助功能”权限 |
+| `cargo test -p navidog --test snapshot` | `target/snapshots/*.png` | 用 Metal headless 渲染器把 navidog 主窗口和对话框画成 PNG（浅色、深色），供并排目测，不需要屏幕录制权限 |
+| `swift tools/window-shot.swift <进程名> <png>` | 指定的 PNG | 截取运行中应用（例如 Navicat）的主窗口，需要给终端授予“屏幕录制”权限 |
 
 帮助页原文位于 `/Applications/Navicat Premium.app/Contents/Resources/zh-Hans.lproj/Navicat Help/`，规格中只引用文件名（例如 `con_ssh_settings.html`），不复制原文。中文界面文案参考 `zh-Hans.lproj/*.strings` 中的术语，由我们自己写入 `locales/`，不批量导入。
 

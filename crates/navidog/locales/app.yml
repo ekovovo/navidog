@@ -1,0 +1,236 @@
+_version: 2
+menu:
+  about:
+    en: About navidog
+    zh-CN: 关于 navidog
+  preferences:
+    en: Settings…
+    zh-CN: 偏好设置…
+  check_updates:
+    en: Check for Updates…
+    zh-CN: 检查更新…
+  services:
+    en: Services
+    zh-CN: 服务
+  hide:
+    en: Hide navidog
+    zh-CN: 隐藏 navidog
+  hide_others:
+    en: Hide Others
+    zh-CN: 隐藏其他
+  show_all:
+    en: Show All
+    zh-CN: 全部显示
+  quit:
+    en: Quit navidog
+    zh-CN: 退出 navidog
+  file:
+    en: File
+    zh-CN: 文件
+  new:
+    en: New
+    zh-CN: 新建
+  connection:
+    en: Connection
+    zh-CN: 连接
+  group:
+    en: Group
+    zh-CN: 组
+  close_tab:
+    en: Close Tab
+    zh-CN: 关闭选项卡
+  close_window:
+    en: Close Window
+    zh-CN: 关闭窗口
+  edit:
+    en: Edit
+    zh-CN: 编辑
+  undo:
+    en: Undo
+    zh-CN: 撤销
+  redo:
+    en: Redo
+    zh-CN: 重做
+  cut:
+    en: Cut
+    zh-CN: 剪切
+  copy:
+    en: Copy
+    zh-CN: 拷贝
+  paste:
+    en: Paste
+    zh-CN: 粘贴
+  select_all:
+    en: Select All
+    zh-CN: 全选
+  view:
+    en: View
+    zh-CN: 查看
+  navigation_pane:
+    en: Navigation Pane
+    zh-CN: 导航窗格
+  show_navigation_pane:
+    en: Show Navigation Pane
+    zh-CN: 显示导航窗格
+  hide_groups:
+    en: Hide Connection Groups
+    zh-CN: 隐藏连接组
+  filter_on_top:
+    en: Show Filter On Top
+    zh-CN: 在顶部显示筛选
+  info_pane:
+    en: Information Pane
+    zh-CN: 信息窗格
+  show_info_pane:
+    en: Show Information Pane
+    zh-CN: 显示信息窗格
+  show_status_bar:
+    en: Show Status Bar
+    zh-CN: 显示状态栏
+  show_toolbar:
+    en: Show Toolbar
+    zh-CN: 显示工具栏
+  full_screen:
+    en: Enter Full Screen
+    zh-CN: 进入全屏幕
+  window:
+    en: Window
+    zh-CN: 窗口
+  minimize:
+    en: Minimize
+    zh-CN: 最小化
+  zoom:
+    en: Zoom
+    zh-CN: 缩放
+  reset_layout:
+    en: Reset Layout
+    zh-CN: 重置布局
+  show_main_window:
+    en: Show Main Window
+    zh-CN: 显示主窗口
+  bring_all_to_front:
+    en: Bring All to Front
+    zh-CN: 全部置于顶层
+  help:
+    en: Help
+    zh-CN: 帮助
+  navidog_help:
+    en: navidog Help
+    zh-CN: navidog 帮助
+  report_issue:
+    en: Report an Issue
+    zh-CN: 反馈问题
+toolbar:
+  connection:
+    en: Connection
+    zh-CN: 连接
+  new_query:
+    en: New Query
+    zh-CN: 新建查询
+  table:
+    en: Table
+    zh-CN: 表
+  view:
+    en: View
+    zh-CN: 视图
+  function:
+    en: Function
+    zh-CN: 函数
+  user:
+    en: User
+    zh-CN: 用户
+  others:
+    en: Others
+    zh-CN: 其它
+  query:
+    en: Query
+    zh-CN: 查询
+  backup:
+    en: Backup
+    zh-CN: 备份
+  automation:
+    en: Automation
+    zh-CN: 自动运行
+  model:
+    en: Model
+    zh-CN: 模型
+  bi:
+    en: BI
+    zh-CN: BI
+prefs:
+  title:
+    en: Settings
+    zh-CN: 偏好设置
+  general:
+    en: General
+    zh-CN: 常规
+  advanced:
+    en: Advanced
+    zh-CN: 高级
+  appearance:
+    en: Appearance
+    zh-CN: 外观
+  appearance_system:
+    en: System
+    zh-CN: 跟随系统
+  appearance_light:
+    en: Light
+    zh-CN: 浅色
+  appearance_dark:
+    en: Dark
+    zh-CN: 深色
+  language:
+    en: Language
+    zh-CN: 语言
+  language_system:
+    en: System
+    zh-CN: 跟随系统
+  auto_connect:
+    en: Open connections marked “Auto connect” on startup
+    zh-CN: 启动时打开勾选了“自动连接”的连接
+  settings_location:
+    en: Settings Location
+    zh-CN: 设置位置
+  reveal:
+    en: Show in Finder
+    zh-CN: 在 Finder 中显示
+  master_password:
+    en: Master Password
+    zh-CN: 主密码
+  master_set:
+    en: Set Master Password…
+    zh-CN: 设置主密码…
+  master_change:
+    en: Change Master Password…
+    zh-CN: 修改主密码…
+  master_clear:
+    en: Remove Master Password
+    zh-CN: 清除主密码
+  master_new:
+    en: New master password
+    zh-CN: 新主密码
+  master_confirm:
+    en: Confirm
+    zh-CN: 确认
+  master_mismatch:
+    en: The passwords do not match
+    zh-CN: 两次输入的密码不一致
+  master_enabled:
+    en: Saved passwords are protected by a master password.
+    zh-CN: 保存的密码受主密码保护。
+  master_disabled:
+    en: Saved passwords are encrypted with a key stored in the Keychain.
+    zh-CN: 保存的密码使用钥匙串中的密钥加密。
+  ok:
+    en: OK
+    zh-CN: 确定
+  cancel:
+    en: Cancel
+    zh-CN: 取消
+about:
+  version:
+    en: "Version %{version}"
+    zh-CN: "版本 %{version}"
+  description:
+    en: A database client built with GPUI Kit, modeled after Navicat.
+    zh-CN: 基于 GPUI Kit 构建、复刻 Navicat 的数据库客户端。

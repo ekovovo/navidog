@@ -1,0 +1,30 @@
+//! 外壳级命令（10-shell.md 第 9 节）。
+
+gpui_kit::actions!(
+    navidog,
+    [
+        About,
+        Preferences,
+        CheckForUpdates,
+        Hide,
+        HideOthers,
+        ShowAll,
+        Quit,
+        CloseTab,
+        CloseWindow,
+        ToggleNavigator,
+        ToggleInfoPane,
+        ToggleHideGroups,
+        ToggleFilterOnTop,
+        ToggleStatusBar,
+        ToggleToolbar,
+        ToggleFullScreen,
+        Minimize,
+        Zoom,
+        ResetLayout,
+        ShowMainWindow,
+        BringAllToFront,
+        OpenHelp,
+        ReportIssue,
+    ]
+);

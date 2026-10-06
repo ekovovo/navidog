@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: fmt
+        run: cargo fmt --all --check
+      - name: 裸值检查
+        run: |
+          brew list ripgrep >/dev/null 2>&1 || brew install ripgrep
+          scripts/check-raw-px.sh
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      # 实库测试（navidog-db/tests/live.rs）依赖 docker-compose，macOS runner 没有 Docker，在本地运行
+      - name: test
+        run: cargo test --workspace
+
+  bundle:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: check
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: 构建 .app 与 .dmg（未签名，签名公证在 M15）
+        run: scripts/bundle-macos.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: navidog-macos
+          path: target/bundle/*.dmg

@@ -1,0 +1,437 @@
+_version: 2
+conn:
+  new_connection:
+    en: New Connection
+    zh-CN: 新建连接
+  new_connection_of:
+    en: "New Connection (%{driver})"
+    zh-CN: "新建连接 (%{driver})"
+  edit_connection_title:
+    en: "Edit Connection - %{name}"
+    zh-CN: "编辑连接 - %{name}"
+  select_type:
+    en: "Select a connection type:"
+    zh-CN: "选择连接类型:"
+  category_all:
+    en: All
+    zh-CN: 全部
+  category_relational:
+    en: Relational
+    zh-CN: 关系型
+  category_nosql:
+    en: NoSQL
+    zh-CN: NoSQL
+  category_cloud:
+    en: Cloud
+    zh-CN: 云
+  new_from_uri:
+    en: New Connection from URI…
+    zh-CN: 通过 URI 新建连接…
+  search:
+    en: Search
+    zh-CN: 搜索
+  next:
+    en: Next
+    zh-CN: 下一步
+  cancel:
+    en: Cancel
+    zh-CN: 取消
+  ok:
+    en: OK
+    zh-CN: 确定
+  test:
+    en: Test Connection
+    zh-CN: 测试连接
+  testing:
+    en: Testing…
+    zh-CN: 正在测试…
+  test_ok:
+    en: Connection Successful
+    zh-CN: 连接成功
+  test_failed:
+    en: Connection Failed
+    zh-CN: 连接失败
+  tab_general:
+    en: General
+    zh-CN: 常规
+  tab_advanced:
+    en: Advanced
+    zh-CN: 高级
+  tab_databases:
+    en: Databases
+    zh-CN: 数据库
+  tab_ssl:
+    en: SSL
+    zh-CN: SSL
+  tab_ssh:
+    en: SSH
+    zh-CN: SSH
+  tab_remark:
+    en: Remark
+    zh-CN: 备注
+  name:
+    en: Connection Name
+    zh-CN: 连接名称
+  add_to:
+    en: Add To
+    zh-CN: 添加到
+  my_connections:
+    en: My Connections
+    zh-CN: 我的连接
+  host:
+    en: Host
+    zh-CN: 主机
+  port:
+    en: Port
+    zh-CN: 端口
+  initial_database:
+    en: Initial Database
+    zh-CN: 初始数据库
+  user:
+    en: User Name
+    zh-CN: 用户名
+  password:
+    en: Password
+    zh-CN: 密码
+  save_password:
+    en: Save password
+    zh-CN: 保存密码
+  password_note:
+    en: "* All passwords are encrypted and stored on this Mac"
+    zh-CN: "* 所有密码都加密保存在本机"
+  sqlite_type:
+    en: Type
+    zh-CN: 类型
+  sqlite_existing:
+    en: Existing Database File
+    zh-CN: 现有的数据库文件
+  sqlite_new:
+    en: New SQLite 3
+    zh-CN: 新建 SQLite 3
+  database_file:
+    en: Database File
+    zh-CN: 数据库文件
+  choose:
+    en: Choose…
+    zh-CN: 选择…
+  settings_location:
+    en: Settings Location
+    zh-CN: 设置位置
+  reveal_in_finder:
+    en: Show in Finder
+    zh-CN: 在 Finder 中显示
+  charset:
+    en: Client Character Set
+    zh-CN: 客户端字符集
+  encoding:
+    en: Encoding
+    zh-CN: 编码
+  keepalive:
+    en: "Keepalive interval (sec):"
+    zh-CN: "保持连接间隔（秒）:"
+  connect_timeout:
+    en: "Connection Timeout (sec):"
+    zh-CN: "连接超时（秒）:"
+  read_timeout:
+    en: "Read Timeout (sec):"
+    zh-CN: "读取超时（秒）:"
+  write_timeout:
+    en: "Write Timeout (sec):"
+    zh-CN: "写入超时（秒）:"
+  compression:
+    en: Use compression
+    zh-CN: 使用压缩
+  auto_connect:
+    en: Auto connect
+    zh-CN: 自动连接
+  socket:
+    en: "Use socket file:"
+    zh-CN: "使用套接字文件:"
+  session_limit:
+    en: "Limit connection sessions:"
+    zh-CN: "限制连接会话:"
+  params:
+    en: Connection Parameters
+    zh-CN: 连接参数
+  initial_queries:
+    en: Initial Queries
+    zh-CN: 初始查询
+  auto:
+    en: Auto
+    zh-CN: 自动
+  use_custom_db_list:
+    en: Use custom database list
+    zh-CN: 使用自定义数据库列表
+  col_auto_open:
+    en: Auto Open
+    zh-CN: 自动打开
+  col_name:
+    en: Name
+    zh-CN: 名称
+  col_file:
+    en: Database File
+    zh-CN: 数据库文件
+  new_database_name:
+    en: Database name
+    zh-CN: 数据库名称
+  use_ssl:
+    en: Use SSL
+    zh-CN: 使用 SSL
+  ssl_mode:
+    en: SSL Mode
+    zh-CN: SSL 模式
+  use_auth:
+    en: Use authentication
+    zh-CN: 使用验证
+  client_key:
+    en: Client Key
+    zh-CN: 客户端密钥
+  client_cert:
+    en: Client Certificate
+    zh-CN: 客户端证书
+  ca_cert:
+    en: CA Certificate
+    zh-CN: CA 证书
+  root_cert:
+    en: Root Certificate
+    zh-CN: 根证书
+  verify_ca:
+    en: Verify server certificate against CA
+    zh-CN: 验证针对 CA 的服务器证书
+  cipher:
+    en: Specified Cipher
+    zh-CN: 指定密码
+  crl:
+    en: Certificate Revocation List
+    zh-CN: 证书撤消列表
+  use_ssh:
+    en: Use SSH tunnel
+    zh-CN: 使用 SSH 隧道
+  auth_method:
+    en: Authentication Method
+    zh-CN: 验证方法
+  auth_password:
+    en: Password
+    zh-CN: 密码
+  auth_public_key:
+    en: Public Key
+    zh-CN: 公钥
+  auth_both:
+    en: Password and Public Key
+    zh-CN: 密码和公钥
+  private_key:
+    en: Private Key
+    zh-CN: 私钥
+  passphrase:
+    en: Passphrase
+    zh-CN: 通行短语
+  save_passphrase:
+    en: Save passphrase
+    zh-CN: 保存通行短语
+  copy_suffix:
+    en: copy
+    zh-CN: 副本
+  confirm_delete:
+    en: "Are you sure you want to delete connection “%{name}”?"
+    zh-CN: "确定要删除连接“%{name}”吗？"
+  confirm_delete_group:
+    en: "Are you sure you want to delete group “%{name}”? Its connections will be moved to the parent group."
+    zh-CN: "确定要删除组“%{name}”吗？组内的连接会移到上一级。"
+  delete:
+    en: Delete
+    zh-CN: 删除
+  reopen_required:
+    en: Changes take effect after the connection is reopened.
+    zh-CN: 需要重新打开连接才能生效。
+  reopen_now:
+    en: Reopen Now
+    zh-CN: 立即重新打开
+  later:
+    en: Later
+    zh-CN: 稍后
+  open_failed:
+    en: Failed to open connection
+    zh-CN: 无法打开连接
+  ask_password_title:
+    en: "Enter password for “%{name}”"
+    zh-CN: "输入“%{name}”的密码"
+  ssh_password:
+    en: SSH Password
+    zh-CN: SSH 密码
+  unlock_title:
+    en: Unlock navidog
+    zh-CN: 解锁 navidog
+  unlock_prompt:
+    en: Enter the master password to decrypt saved passwords.
+    zh-CN: 输入主密码以解密保存的密码。
+  master_password:
+    en: Master Password
+    zh-CN: 主密码
+  unlock:
+    en: Unlock
+    zh-CN: 解锁
+  unlock_failed:
+    en: Incorrect master password
+    zh-CN: 主密码不正确
+  required_name:
+    en: Connection name is required
+    zh-CN: 请输入连接名称
+nav:
+  open_connection:
+    en: Open Connection
+    zh-CN: 打开连接
+  close_connection:
+    en: Close Connection
+    zh-CN: 关闭连接
+  edit_connection:
+    en: Edit Connection…
+    zh-CN: 编辑连接…
+  duplicate_connection:
+    en: Duplicate Connection
+    zh-CN: 复制连接
+  delete_connection:
+    en: Delete Connection…
+    zh-CN: 删除连接…
+  new_group:
+    en: New Group
+    zh-CN: 新建组
+  rename_group:
+    en: Rename Group…
+    zh-CN: 重命名…
+  delete_group:
+    en: Delete Group…
+    zh-CN: 删除组…
+  color:
+    en: Color
+    zh-CN: 颜色
+  color_none:
+    en: None
+    zh-CN: 无
+  color_red:
+    en: Red
+    zh-CN: 红
+  color_orange:
+    en: Orange
+    zh-CN: 橙
+  color_yellow:
+    en: Yellow
+    zh-CN: 黄
+  color_green:
+    en: Green
+    zh-CN: 绿
+  color_blue:
+    en: Blue
+    zh-CN: 蓝
+  color_purple:
+    en: Purple
+    zh-CN: 紫
+  color_gray:
+    en: Gray
+    zh-CN: 灰
+  move_to_group:
+    en: Move To Group
+    zh-CN: 移动到组
+  top_level:
+    en: Top Level
+    zh-CN: 顶层
+  refresh:
+    en: Refresh
+    zh-CN: 刷新
+  open_database:
+    en: Open Database
+    zh-CN: 打开数据库
+  close_database:
+    en: Close Database
+    zh-CN: 关闭数据库
+  new_query:
+    en: New Query
+    zh-CN: 新建查询
+  console:
+    en: Console
+    zh-CN: 命令列界面
+  new_database:
+    en: New Database…
+    zh-CN: 新建数据库…
+  group_name:
+    en: Group name
+    zh-CN: 组名称
+  new_group_default:
+    en: New Group
+    zh-CN: 新建组
+  filter_types:
+    en: Filter by connection type
+    zh-CN: 按连接类型筛选
+  filter_active:
+    en: Show only active objects
+    zh-CN: 仅显示活跃对象
+  filter_starred:
+    en: Show starred
+    zh-CN: 显示已标星
+obj:
+  objects_tab:
+    en: Objects
+    zh-CN: 对象
+  empty_hint:
+    en: "Click “Connection” in the toolbar to get started"
+    zh-CN: "点击工具栏中的“连接”开始"
+  not_connected:
+    en: Not connected
+    zh-CN: 未连接
+  connecting:
+    en: Connecting…
+    zh-CN: 正在连接…
+  items:
+    en: "%{count} items"
+    zh-CN: "%{count} 个项目"
+  items_selected:
+    en: "%{count} items (1 selected)"
+    zh-CN: "%{count} 个项目（已选择 1 个）"
+info:
+  general:
+    en: General
+    zh-CN: 常规
+  nothing_selected:
+    en: No object selected
+    zh-CN: 没有选择对象
+  type:
+    en: Type
+    zh-CN: 类型
+  host:
+    en: Host
+    zh-CN: 主机
+  port:
+    en: Port
+    zh-CN: 端口
+  user:
+    en: User Name
+    zh-CN: 用户名
+  file:
+    en: Database File
+    zh-CN: 数据库文件
+  server_version:
+    en: Server Version
+    zh-CN: 服务器版本
+  status:
+    en: Status
+    zh-CN: 状态
+  sessions:
+    en: Sessions
+    zh-CN: 会话
+  group:
+    en: Group
+    zh-CN: 组
+  connections:
+    en: Connections
+    zh-CN: 连接数
+  database:
+    en: Database
+    zh-CN: 数据库
+  connection:
+    en: Connection
+    zh-CN: 连接
+  status_open:
+    en: Open
+    zh-CN: 已打开
+  status_closed:
+    en: Closed
+    zh-CN: 已关闭

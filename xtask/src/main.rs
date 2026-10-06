@@ -273,13 +273,19 @@ impl<'a> Nib<'a> {
             .map(|item| {
                 let mut node = Map::new();
                 node.insert("title".into(), json!(self.string_field(item, "NSTitle")));
-                if let Some(key) = self.string_field(item, "NSKeyEquiv").filter(|k| !k.is_empty()) {
+                if let Some(key) = self
+                    .string_field(item, "NSKeyEquiv")
+                    .filter(|k| !k.is_empty())
+                {
                     node.insert("key".into(), json!(key));
                     if let Some(mods) = self.field(item, "NSKeyEquivModMask") {
                         node.insert("mods".into(), self.primitive(mods));
                     }
                 }
-                if matches!(self.field(item, "NSIsSeparator"), Some(ValueVariant::Bool(true))) {
+                if matches!(
+                    self.field(item, "NSIsSeparator"),
+                    Some(ValueVariant::Bool(true))
+                ) {
                     node.insert("separator".into(), json!(true));
                 }
                 if let Some(ValueVariant::ObjectRef(sub)) = self.field(item, "NSSubmenu") {
@@ -349,7 +355,11 @@ fn print_menu(menu: &Json, depth: usize) {
             Some(k) => format!("  ⌘{k} mods={}", item["mods"]),
             None => String::new(),
         };
-        println!("{}  - {}{key}", "  ".repeat(depth), item["title"].as_str().unwrap_or(""));
+        println!(
+            "{}  - {}{key}",
+            "  ".repeat(depth),
+            item["title"].as_str().unwrap_or("")
+        );
         if item.get("submenu").is_some() {
             print_menu(&item["submenu"], depth + 2);
         }
@@ -363,7 +373,11 @@ fn print_node(node: &Json, depth: usize) {
         .or_else(|| attrs.get("NSFrameSize"))
         .and_then(Json::as_str)
         .unwrap_or("");
-    let mut line = format!("{}{} {frame}", "  ".repeat(depth), node["class"].as_str().unwrap_or("?"));
+    let mut line = format!(
+        "{}{} {frame}",
+        "  ".repeat(depth),
+        node["class"].as_str().unwrap_or("?")
+    );
     let cell = &attrs["NSCell"];
     if let Some(s) = cell["NSContents"].as_str().filter(|s| !s.is_empty()) {
         line.push_str(&format!(" \"{s}\""));

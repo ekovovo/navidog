@@ -1,0 +1,58 @@
+# navidog 开发与测试数据库。端口与账号同 crates/navidog-db/tests/live.rs。
+# 启动：docker compose up -d --wait
+# 驱动实库测试：NAVIDOG_LIVE=1 cargo test -p navidog-db --test live
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: navidog
+    ports: ["13306:3306"]
+    volumes:
+      - ./docker/seed/mysql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-pnavidog"]
+      interval: 3s
+      retries: 40
+
+  mariadb:
+    image: mariadb:11
+    environment:
+      MARIADB_ROOT_PASSWORD: navidog
+    ports: ["13307:3306"]
+    volumes:
+      - ./docker/seed/mysql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 3s
+      retries: 40
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: navidog
+    # 使用镜像自带的自签名证书开启 SSL，用于测试 SSL 模式
+    command: >
+      -c ssl=on
+      -c ssl_cert_file=/etc/ssl/certs/ssl-cert-snakeoil.pem
+      -c ssl_key_file=/etc/ssl/private/ssl-cert-snakeoil.key
+    ports: ["15432:5432"]
+    volumes:
+      - ./docker/seed/postgres:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "pagila"]
+      interval: 3s
+      retries: 40
+
+  # SSH 跳板机：隧道内通过服务名 mysql、postgres 访问数据库
+  ssh:
+    image: lscr.io/linuxserver/openssh-server:latest
+    environment:
+      USER_NAME: navidog
+      USER_PASSWORD: navidog
+      PASSWORD_ACCESS: "true"
+      DOCKER_MODS: linuxserver/mods:openssh-server-ssh-tunnel
+    ports: ["12222:2222"]
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 2222"]
+      interval: 3s
+      retries: 40

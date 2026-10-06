@@ -1,9 +1,39 @@
-[package]
-name = "navidog"
+[workspace]
+resolver = "3"
+members = ["crates/*", "xtask"]
+default-members = ["crates/navidog"]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.92"
+license = "Apache-2.0"
+publish = false
 
-[dependencies]
+[workspace.dependencies]
+navidog-ui = { path = "crates/navidog-ui" }
+navidog-core = { path = "crates/navidog-core" }
+navidog-db = { path = "crates/navidog-db" }
+navidog-plugin = { path = "crates/navidog-plugin" }
+navidog-connection = { path = "crates/navidog-connection" }
 
-[workspace]
-members = ["xtask"]
+gpui-kit = "0.7"
+rust-i18n = "4"
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "sync", "macros", "io-util"] }
+futures = "0.3"
+uuid = { version = "1", features = ["v4"] }
+
+# gpui-kit 文档建议：debug 构建中优化渲染相关依赖，避免界面卡顿
+[profile.dev.package.gpui-pre]
+opt-level = 3
+[profile.dev.package.gpui-component]
+opt-level = 3
+[profile.dev.package.gpui-base]
+opt-level = 3
+[profile.dev.package.taffy]
+opt-level = 3

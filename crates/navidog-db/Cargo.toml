@@ -1,0 +1,26 @@
+[package]
+name = "navidog-db"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+navidog-core.workspace = true
+gpui-kit.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+futures.workspace = true
+tracing.workspace = true
+# rustls 后端：客户端证书直接使用 PEM（native-tls 后端只接受 PKCS#12）
+mysql_async = { version = "0.37", default-features = false, features = ["default-rustls-ring"] }
+tokio-postgres = "0.7"
+postgres-native-tls = "0.5"
+native-tls = "0.2"
+rusqlite = { version = "0.40", features = ["bundled", "column_decltype"] }
+russh = { version = "0.64", default-features = false, features = ["flate2", "ring", "rsa"] }
+
+[dev-dependencies]
+tempfile = "3"
