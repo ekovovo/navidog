@@ -13,6 +13,8 @@ navidog 用 [gpui-kit](https://gpui-kit.com/zh-CN/docs/) 全家桶（GPUI、`gpu
 | [03-plugin-api.md](03-plugin-api.md) | 注册表、插件 manifest、HostModule `navidog`、JS 驱动协议 |
 | [10-shell.md](10-shell.md) | M1：主窗口、工具栏、Dock、菜单栏、状态栏 |
 | [11-connection.md](11-connection.md) | M1：连接管理与连接对话框 |
+| [20-objects.md](20-objects.md) | M2：对象树、对象选项卡、信息窗格、编辑器选项卡 |
+| [21-table-viewer.md](21-table-viewer.md) | M2：表查看器与结果网格（含技术验证的判定规则） |
 | [db/](db/) | MySQL、PostgreSQL、SQLite 以外数据库的专属功能清单 |
 
 每个里程碑开工前，先在本目录补齐该里程碑的详细规格（编号 `1x-*.md`），规格 PR 合并后再开代码 PR。

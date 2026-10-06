@@ -69,6 +69,19 @@
 | `list.header.height` | 23 | nib:MainObjectViewController/NSTableHeaderView（高 23） |
 | `list.row.height` | 22 | 暂定，待 AX |
 
+## 5.1 表查看器与结果网格（M2）
+
+| token | 值 | 来源 |
+| --- | --- | --- |
+| `grid.header.height` | 28 | nib:GridViewController/NSTableHeaderView（高 28） |
+| `grid.row_number_width` | 20 | nib:GridViewController/行号 NSScrollView（宽 20） |
+| `grid.row.height` | 20 | 暂定，待 AX |
+| `viewer.bottom_bar.height` | 28 | nib:TableViewViewController/底部栏（1153 × 28） |
+| `viewer.bottom_bar.button` | 20 × 16 | nib:TableViewViewController/NSButton |
+| `viewer.limit.width` | 212 | nib:TableViewViewController/“Limit … records per page”（212 × 24，11pt） |
+| `viewer.pager.width` | 86 | nib:TableViewViewController/分页按钮组（86 × 27，按钮间距 28） |
+| `filter.segmented.width` | 115 | nib:FilterAndSortManager/NSSegmentedControl（115 × 24） |
+
 ## 6. 信息窗格
 
 | token | 值 | 来源 |
