@@ -203,6 +203,24 @@ fn multi_select_drag_and_rename(cx: &mut TestAppContext) {
     command(cx, Box::new(RenameGroup));
     type_then(cx, "zzz", "escape");
     assert_eq!(group_names(cx)[1].0, "Prod");
+
+    // Quick filter: only starred connections
+    cx.update(|cx| {
+        ConnectionStore::global(cx).update(cx, |s, cx| s.update(&a, |c| c.starred = true, cx))
+    });
+    cx.update_window(handle, |_, window, cx| {
+        window.click("nav-filter-starred", cx);
+        window.render_frame(cx);
+        assert!(window.try_find(row_a.clone()).is_some(), "starred A stays");
+        assert!(
+            window.try_find(row_b.clone()).is_none(),
+            "unstarred B is filtered out"
+        );
+        window.click("nav-filter-starred", cx);
+        window.render_frame(cx);
+        assert!(window.try_find(row_b.clone()).is_some());
+    })
+    .unwrap();
     let _ = host;
     let _ = std::fs::remove_dir_all(home);
 }

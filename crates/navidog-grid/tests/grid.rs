@@ -1,4 +1,5 @@
-//! 结果网格的 headless UI 测试：点击选中、⇧ + 方向键扩展选区、⌘C 复制、回车就地编辑。
+//! Headless UI tests for the result grid: click to select, ⇧ + arrow keys to extend the selection,
+//! ⌘C to copy, Return to edit in place.
 
 use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{AppContext as _, Entity, TestAppContext, WindowBounds, WindowOptions, size};
@@ -22,7 +23,7 @@ fn select_copy_and_edit(cx: &mut TestAppContext) {
         navidog_grid::init(cx);
     });
     let (handle, grid): (_, Entity<ResultGrid>) = cx.update(|cx| {
-        // raw-px: 测试窗口尺寸
+        // raw-px: test window size
         let test_size = size(gpui_kit::px(800.), gpui_kit::px(400.));
         let bounds = gpui_kit::Bounds {
             origin: Default::default(),
@@ -52,10 +53,11 @@ fn select_copy_and_edit(cx: &mut TestAppContext) {
     });
 
     cx.update_window(handle, |_, window, cx| {
-        // 水平虚拟列表在第一帧布局后才知道可见列
+        // The horizontal virtual list only knows its visible columns after the first frame's layout
         window.render_frame(cx);
         window.render_frame(cx);
-        // 单元格没有登记到测试注册表，按行内偏移点击第一个数据列（第 0 列是标记列）
+        // Cells are not in the test registry; click the first data column by its offset within
+        // the row (column 0 is the marker column)
         let rem = window.rem_size();
         let x = tokens::grid::ROW_NUMBER_WIDTH.to_pixels(rem)
             + tokens::grid::COLUMN_WIDTH.to_pixels(rem) / 2.;
@@ -72,7 +74,7 @@ fn select_copy_and_edit(cx: &mut TestAppContext) {
     let copied = cx.update(|cx| cx.read_from_clipboard().and_then(|c| c.text()));
     assert_eq!(copied.as_deref(), Some("1\ta\n2\tb"));
 
-    // 回车编辑选区的活动格 (1, 1)，全选后输入新值并回车提交
+    // Return edits the selection's active cell (1, 1); select all, type a new value, Return commits
     cx.update_window(handle, |_, window, cx| {
         window.press("enter", cx);
         window.render_frame(cx);
@@ -93,7 +95,7 @@ fn select_copy_and_edit(cx: &mut TestAppContext) {
         [("id".to_string(), Some("2".to_string()))]
     );
 
-    // Esc 取消编辑，值不变
+    // Esc cancels the edit and leaves the value unchanged
     cx.update_window(handle, |_, window, cx| {
         window.press("enter", cx);
         window.render_frame(cx);
@@ -104,4 +106,58 @@ fn select_copy_and_edit(cx: &mut TestAppContext) {
     .unwrap();
     let v = cx.update(|cx| grid.read(cx).model(cx).value(1, 1).cloned());
     assert_eq!(v, Some(Some("bb".into())));
+}
+
+#[gpui_kit::test]
+fn wide_tables_scroll_horizontally(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        navidog_ui::theme::init(cx);
+        navidog_grid::init(cx);
+    });
+    let (handle, grid): (_, Entity<ResultGrid>) = cx.update(|cx| {
+        // raw-px: test window size
+        let test_size = size(gpui_kit::px(600.), gpui_kit::px(300.));
+        let bounds = gpui_kit::Bounds {
+            origin: Default::default(),
+            size: test_size,
+        };
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
+            ..Default::default()
+        };
+        gpui_kit::open_window(options, cx, |window, cx| {
+            cx.new(|cx| ResultGrid::new(window, cx))
+        })
+        .unwrap()
+    });
+    let columns = (0..30).map(|i| col(&format!("c{i}"), i == 0)).collect();
+    let rows = (0..5)
+        .map(|r| (0..30).map(|c| Some(format!("{r}-{c}").into())).collect())
+        .collect();
+    cx.update(|cx| grid.update(cx, |g, cx| g.set_data(columns, rows, cx)));
+    let last_header = gpui_kit::ElementId::NamedInteger("col-header".into(), 30);
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.render_frame(cx);
+        assert!(
+            window.try_find(last_header.clone()).is_none(),
+            "the last column starts off screen"
+        );
+        // raw-px: a scroll far past the last column
+        let dx = gpui_kit::px(-5000.);
+        let delta = gpui_kit::ScrollDelta::Pixels(gpui_kit::point(dx, gpui_kit::Pixels::ZERO));
+        window.scroll(
+            gpui_kit::ElementId::NamedInteger("row".into(), 0),
+            delta,
+            cx,
+        );
+        window.render_frame(cx);
+        window.render_frame(cx);
+        assert!(
+            window.try_find(last_header).is_some(),
+            "scrolling right reveals the last column"
+        );
+    })
+    .unwrap();
 }

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use navidog_db::dialect::Dialect;
 use navidog_db::{ConnectParams, Driver, connect, runtime, sqlite::SqliteDriver};
 
 #[test]
@@ -9,7 +10,7 @@ fn sqlite_create_attach_execute_and_error_codes() {
     let other = dir.path().join("other.db");
 
     runtime::runtime().block_on(async {
-        // 附加库先建出来
+        // Create the attached database first
         let mk = ConnectParams { file: Some(other.clone()), create_new: true, ..Default::default() };
         let s = connect(Arc::new(SqliteDriver::default()), mk).await.unwrap();
         s.close().await.unwrap();
@@ -73,6 +74,34 @@ fn sqlite_metadata_and_change_sets() {
         .await
         .unwrap();
         let scope = Scope::new("c", "main", None);
+        rel.execute(
+            "CREATE TABLE role(id INTEGER PRIMARY KEY, actor_id INTEGER REFERENCES actor(id))",
+        )
+        .await
+        .unwrap();
+        let children = rel.table_children(&scope, "actor").await.unwrap();
+        assert_eq!(
+            (children.indexes, children.triggers),
+            (vec!["idx_name".into()], vec!["trg".into()])
+        );
+        let role = rel.table_children(&scope, "role").await.unwrap();
+        assert_eq!(role.foreign_keys, ["→ actor"]);
+        // Duplicating rewrites the CREATE TABLE statement, keeping the primary key
+        let ddl = rel
+            .object_ddl(&scope, ObjectKind::Table, "role")
+            .await
+            .unwrap();
+        for sql in Dialect::Sqlite
+            .duplicate_table(&scope, "role", "role_copy1", true, Some(&ddl))
+            .unwrap()
+        {
+            rel.execute(&sql).await.unwrap();
+        }
+        let cols = rel.table_columns(&scope, "role_copy1").await.unwrap();
+        assert!(cols[0].primary_key, "{ddl}");
+        rel.execute("DROP TABLE role_copy1; DROP TABLE role")
+            .await
+            .unwrap();
         assert_eq!(rel.list_schemas().await.unwrap(), Vec::<String>::new());
         assert_eq!(
             rel.object_kinds(),
@@ -115,7 +144,7 @@ fn sqlite_metadata_and_change_sets() {
         assert!(cols[0].primary_key && !cols[1].nullable && cols[2].nullable);
         assert_eq!(cols[1].default.as_deref(), Some("'x'"));
 
-        // 网格修改集合在真实数据库上执行
+        // Run grid change sets against a real database
         let d = rel.dialect();
         let insert = ChangeSet {
             inserts: vec![

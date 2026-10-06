@@ -1,6 +1,6 @@
-//! 跨 feature 共享的命令。feature crate 之间不互相依赖，通过这里的 Action 协作：
-//! 发出方只派发，处理方在窗口根元素或自己的面板上绑定。
-//! 除带参数的命令外，都作用于工作区当前选择。
+//! Commands shared across features. Feature crates do not depend on each other and cooperate
+//! through these actions: the sender only dispatches, the handler binds them on the window root
+//! or its own panel. Unless they carry parameters, commands act on the workspace selection.
 
 use gpui_kit::{Action, SharedString};
 
@@ -21,31 +21,66 @@ gpui_kit::actions!(
         Refresh,
         OpenDatabase,
         CloseDatabase,
+        ToggleStar,
     ]
 );
 
-/// 直接新建某种数据库类型的连接（工具栏下拉、菜单栏子菜单）。
+// View > Navigation Pane options; the shell persists them and passes them to the navigator
+gpui_kit::actions!(
+    navigator,
+    [ToggleOnlyActive, ToggleShowHidden, ToggleHideObjectGroups]
+);
+
+// Operations on the selected objects (navigator tree, objects tab, menu bar)
+gpui_kit::actions!(
+    objects,
+    [
+        DeleteObjects,
+        EmptyTables,
+        TruncateTables,
+        RenameObject,
+        NewVirtualGroup,
+        RemoveFromVirtualGroup
+    ]
+);
+
+/// Duplicates the selected table, structure only or with its data.
+#[derive(Clone, PartialEq, Debug, Action)]
+#[action(namespace = objects, no_json)]
+pub struct DuplicateTable {
+    pub with_data: bool,
+}
+
+/// Moves the selected objects into a virtual group.
+#[derive(Clone, PartialEq, Debug, Action)]
+#[action(namespace = objects, no_json)]
+pub struct AddToVirtualGroup {
+    pub group: SharedString,
+}
+
+/// Create a connection of a specific database type directly (toolbar dropdown, menu bar submenu).
 #[derive(Clone, PartialEq, Debug, Action)]
 #[action(namespace = connection, no_json)]
 pub struct NewConnectionOf {
     pub driver: SharedString,
 }
 
-/// 设置连接颜色，`None` 为清除。
+/// Set the connection color; `None` clears it.
 #[derive(Clone, PartialEq, Debug, Action)]
 #[action(namespace = connection, no_json)]
 pub struct SetColor {
     pub color: Option<SharedString>,
 }
 
-/// 移动连接到组，`None` 为顶层。
+/// Move the connection to a group; `None` means the top level.
 #[derive(Clone, PartialEq, Debug, Action)]
 #[action(namespace = connection, no_json)]
 pub struct MoveToGroup {
     pub group: Option<SharedString>,
 }
 
-/// 在对象窗格中打开对象：表打开表查看器，其他对象在 M4 之前打开只读 DDL。
+/// Open an object in the object pane: tables open in the table viewer; other objects open as
+/// read-only DDL until M4.
 #[derive(Clone, PartialEq, Debug, Action)]
 #[action(namespace = objects, no_json)]
 pub struct OpenObject {

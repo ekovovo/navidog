@@ -95,15 +95,21 @@ pub fn bind_actions<E: InteractiveElement>(el: E) -> E {
             let color = a.color.as_ref().map(|c| c.to_string());
             ConnectionStore::global(cx).update(cx, |s, cx| s.update(&id, |c| c.color = color, cx));
         })
+        .on_action(|_: &ToggleStar, _, cx| {
+            let ids = selected_connections(cx);
+            let store = ConnectionStore::global(cx);
+            // Star them all unless every selected connection is starred already
+            let star = ids
+                .iter()
+                .any(|id| store.read(cx).get(id).is_some_and(|c| !c.starred));
+            store.update(cx, |s, cx| {
+                for id in &ids {
+                    s.update(id, |c| c.starred = star, cx);
+                }
+            });
+        })
         .on_action(|a: &MoveToGroup, _, cx| {
-            let ids: Vec<String> = Workspace::global(cx)
-                .read(cx)
-                .selections()
-                .filter_map(|s| match s {
-                    Selection::Connection(id) => Some(id.clone()),
-                    _ => None,
-                })
-                .collect();
+            let ids = selected_connections(cx);
             let group = a.group.as_ref().map(|g| g.to_string());
             ConnectionStore::global(cx).update(cx, |s, cx| {
                 for id in &ids {
@@ -111,6 +117,18 @@ pub fn bind_actions<E: InteractiveElement>(el: E) -> E {
                 }
             });
         })
+}
+
+/// All selected connections (⌘-click selects several in the navigator).
+fn selected_connections(cx: &App) -> Vec<String> {
+    Workspace::global(cx)
+        .read(cx)
+        .selections()
+        .filter_map(|s| match s {
+            Selection::Connection(id) => Some(id.clone()),
+            _ => None,
+        })
+        .collect()
 }
 
 pub(crate) fn selected_connection(cx: &App) -> Option<String> {

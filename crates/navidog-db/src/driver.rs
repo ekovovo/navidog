@@ -1,5 +1,7 @@
-//! 驱动抽象：`Driver` 创建 `Session`，会话按数据库类别暴露 `Relational`、`Document`、`KeyValue`。
-//! 一期只实现 `Relational`；另外两类只定义接口，M14 接入 MongoDB、Redis 时实现。
+//! Driver abstraction: a `Driver` creates a `Session`, and the session exposes `Relational`,
+//! `Document` or `KeyValue` depending on the database family.
+//! Phase one implements only `Relational`; the other two are interfaces only, implemented when
+//! MongoDB and Redis land in M14.
 
 use std::sync::Arc;
 
@@ -11,7 +13,8 @@ use navidog_core::registry::Registry;
 use crate::dialect::Dialect;
 use crate::params::ConnectParams;
 
-/// 驱动错误。`code` 保留数据库的原始错误码，显示为 Navicat 的“1045 - Access denied …”格式。
+/// Driver error. `code` keeps the database's original error code, displayed in Navicat's
+/// "1045 - Access denied …" format.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub struct DbError {
     pub code: Option<String>,
@@ -54,14 +57,15 @@ pub enum Family {
 
 #[derive(Clone, Debug)]
 pub struct DriverInfo {
-    /// 注册键，也是 connections.json 中的 `driver`
+    /// Registry key, also the `driver` field in connections.json
     pub id: SharedString,
     pub name: SharedString,
     pub family: Family,
     pub default_port: Option<u16>,
     pub supports_ssl: bool,
     pub supports_ssh: bool,
-    /// 一个会话只能访问一个数据库（PostgreSQL），浏览其他数据库时需要另开会话
+    /// A session can access only one database (PostgreSQL); browsing another database needs
+    /// a separate session
     pub per_database_sessions: bool,
 }
 
@@ -70,11 +74,11 @@ pub trait Driver: Send + Sync + 'static {
     fn connect(&self, params: ConnectParams) -> BoxFuture<'static, DbResult<Box<dyn Session>>>;
 }
 
-/// 取消正在执行的语句。
+/// Cancels the statement currently executing.
 pub type CancelHandle = Arc<dyn Fn() -> BoxFuture<'static, DbResult<()>> + Send + Sync>;
 
 pub trait Session: Send + 'static {
-    /// 连接时取得的服务器版本
+    /// Server version obtained when connecting
     fn server_version(&self) -> &str;
     fn ping(&mut self) -> BoxFuture<'_, DbResult<()>>;
     fn cancel_handle(&self) -> Option<CancelHandle>;
@@ -94,11 +98,11 @@ pub trait Session: Send + 'static {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Column {
     pub name: String,
-    /// 类型名；文本协议拿不到类型时为空
+    /// Type name; empty when the text protocol does not provide the type
     pub type_name: String,
 }
 
-/// 文本形式的结果集，`None` 表示 NULL。
+/// Result set in text form; `None` means NULL.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ResultSet {
     pub columns: Vec<Column>,
@@ -106,14 +110,22 @@ pub struct ResultSet {
     pub affected_rows: Option<u64>,
 }
 
-/// 对象列表中的一项（对象选项卡的列表与详细信息视图）。
+/// One entry in an object list (the List and Detail views of the Objects tab).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ObjectInfo {
     pub name: String,
     pub kind: ObjectKind,
     pub comment: Option<String>,
-    /// 详细信息视图的列，键是稳定的英文名（rows、data_length、engine、created……）
+    /// Detail view columns; keys are stable English names (rows, data_length, engine, created, …)
     pub properties: Vec<(String, String)>,
+}
+
+/// Elements shown under a table in the navigator, besides its fields.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TableChildren {
+    pub indexes: Vec<String>,
+    pub foreign_keys: Vec<String>,
+    pub triggers: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -129,12 +141,14 @@ pub struct ColumnInfo {
 pub trait Relational: Send {
     fn dialect(&self) -> Dialect;
     fn list_databases(&mut self) -> BoxFuture<'_, DbResult<Vec<String>>>;
-    /// 以文本协议执行一条或多条语句，每条返回一个结果集。
+    /// Execute one or more statements over the text protocol; each returns one result set.
     fn execute<'a>(&'a mut self, sql: &'a str) -> BoxFuture<'a, DbResult<Vec<ResultSet>>>;
 
-    // 元数据：默认实现按方言生成 SQL 并经 `execute` 执行（metadata.rs）
+    // Metadata: default implementations generate SQL per dialect and run it via `execute`
+    // (metadata.rs)
 
-    /// 当前会话所连数据库中的模式；没有模式层级的方言返回空列表。
+    /// Schemas in the database this session is connected to; dialects without a schema level
+    /// return an empty list.
     fn list_schemas(&mut self) -> BoxFuture<'_, DbResult<Vec<String>>> {
         Box::pin(crate::metadata::list_schemas(self))
     }
@@ -163,6 +177,13 @@ pub trait Relational: Send {
     ) -> BoxFuture<'a, DbResult<Vec<ColumnInfo>>> {
         Box::pin(crate::metadata::table_columns(self, scope, table))
     }
+    fn table_children<'a>(
+        &'a mut self,
+        scope: &'a Scope,
+        table: &'a str,
+    ) -> BoxFuture<'a, DbResult<TableChildren>> {
+        Box::pin(crate::metadata::table_children(self, scope, table))
+    }
 }
 
 pub trait Document: Send {
@@ -171,7 +192,7 @@ pub trait Document: Send {
         &'a mut self,
         database: &'a str,
     ) -> BoxFuture<'a, DbResult<Vec<String>>>;
-    /// 按 JSON 筛选条件查询，返回 JSON 文本形式的文档。
+    /// Query with a JSON filter; returns documents as JSON text.
     fn find<'a>(
         &'a mut self,
         database: &'a str,
@@ -183,7 +204,7 @@ pub trait Document: Send {
 
 pub trait KeyValue: Send {
     fn databases(&mut self) -> BoxFuture<'_, DbResult<Vec<u32>>>;
-    /// SCAN 一批键，返回下一个游标与键列表。
+    /// SCAN a batch of keys; returns the next cursor and the keys.
     fn scan<'a>(
         &'a mut self,
         db: u32,
@@ -194,7 +215,7 @@ pub trait KeyValue: Send {
     fn get<'a>(&'a mut self, db: u32, key: &'a str) -> BoxFuture<'a, DbResult<Option<String>>>;
 }
 
-/// 已注册的驱动：内置驱动与插件 JS 驱动（M5）共用。
+/// Registered drivers, shared by built-in drivers and plugin JS drivers (M5).
 #[derive(Default)]
 pub struct DriverRegistry(pub Registry<Arc<dyn Driver>>);
 

@@ -1,5 +1,6 @@
-//! 元数据缓存：模式、对象列表、DDL、字段。加载只在展开节点或选择变化时触发（render 中不启动任务），
-//! 连接关闭或刷新时失效。
+//! Metadata cache: schemas, object lists, DDL, fields and table children. Loads only start when a
+//! node expands or the selection changes (never in render), and are invalidated when the
+//! connection closes or refreshes.
 
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -7,7 +8,7 @@ use std::hash::Hash;
 use gpui_kit::{App, AppContext as _, Context, Entity, Global, SharedString, Task};
 use navidog_core::object::{ObjectKind, ObjectRef, Scope};
 use navidog_db::sessions::{Sessions, SessionsEvent};
-use navidog_db::{ColumnInfo, DbResult, ObjectInfo};
+use navidog_db::{ColumnInfo, DbResult, ObjectInfo, TableChildren};
 use tokio::task::JoinHandle;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -23,6 +24,7 @@ pub struct Catalog {
     objects: HashMap<(Scope, ObjectKind), Load<Vec<ObjectInfo>>>,
     ddl: HashMap<ObjectRef, Load<String>>,
     columns: HashMap<(Scope, String), Load<Vec<ColumnInfo>>>,
+    children: HashMap<(Scope, String), Load<TableChildren>>,
     tasks: HashMap<String, Task<()>>,
 }
 
@@ -59,6 +61,10 @@ impl Catalog {
         self.columns.get(&(scope.clone(), table.to_string()))
     }
 
+    pub fn table_children(&self, scope: &Scope, table: &str) -> Option<&Load<TableChildren>> {
+        self.children.get(&(scope.clone(), table.to_string()))
+    }
+
     fn load<K, T>(
         &mut self,
         key: K,
@@ -83,7 +89,7 @@ impl Catalog {
                 Err(e) => Load::Failed(e.to_string().into()),
             };
             let _ = this.update(cx, |this, cx| {
-                // 失效后的过期结果丢弃
+                // Results arriving after an invalidation are stale; drop them
                 if slot(this).contains_key(&key) {
                     slot(this).insert(key, result);
                 }
@@ -156,16 +162,39 @@ impl Catalog {
         );
     }
 
-    /// 连接关闭或刷新连接时清空它的全部缓存。
+    pub fn ensure_table_children(
+        &mut self,
+        scope: &Scope,
+        table: &str,
+        force: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let (s, t) = (scope.clone(), table.to_string());
+        let job = Sessions::global(cx).read(cx).run_rel(
+            &scope.connection,
+            Some(&scope.database),
+            move |r| Box::pin(async move { r.table_children(&s, &t).await }),
+        );
+        self.load(
+            (scope.clone(), table.to_string()),
+            |c| &mut c.children,
+            job,
+            force,
+            cx,
+        );
+    }
+
+    /// Drops everything cached for a connection (closed or refreshed).
     pub fn invalidate_connection(&mut self, conn: &str, cx: &mut Context<Self>) {
         self.schemas.retain(|(c, _), _| c != conn);
         self.objects.retain(|(s, _), _| s.connection != conn);
         self.ddl.retain(|o, _| o.scope.connection != conn);
         self.columns.retain(|(s, _), _| s.connection != conn);
+        self.children.retain(|(s, _), _| s.connection != conn);
         cx.notify();
     }
 
-    /// 刷新作用域（数据库或模式）下已加载的内容。
+    /// Reloads what is loaded under a scope (a database or schema).
     pub fn refresh_scope(&mut self, scope: &Scope, cx: &mut Context<Self>) {
         let kinds: Vec<_> = self
             .objects
@@ -175,6 +204,7 @@ impl Catalog {
             .collect();
         self.ddl.retain(|o, _| &o.scope != scope);
         self.columns.retain(|(s, _), _| s != scope);
+        self.children.retain(|(s, _), _| s != scope);
         for kind in kinds {
             self.ensure_objects(scope, kind, true, cx);
         }

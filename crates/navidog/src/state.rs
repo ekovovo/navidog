@@ -1,4 +1,4 @@
-//! state.json：窗口位置尺寸、Dock 布局、各窗格显示状态（10-shell.md 第 11 节）。
+//! state.json: window position and size, Dock layout, visibility of each pane (10-shell.md §11).
 
 use gpui_kit::{Bounds, Global, Pixels, WindowBounds, point, px, size};
 use navidog_core::paths;
@@ -26,9 +26,9 @@ impl Frame {
     }
 
     pub fn to_bounds(self) -> WindowBounds {
-        // raw-px: 窗口几何来自上次运行时的测量值
+        // raw-px: window geometry is measured values from the previous run
         let origin = point(px(self.x), px(self.y));
-        // raw-px: 同上
+        // raw-px: same as above
         let b: Bounds<Pixels> = Bounds::new(origin, size(px(self.width), px(self.height)));
         if self.maximized {
             WindowBounds::Maximized(b)
@@ -46,11 +46,12 @@ pub struct AppState {
     pub dock: Option<serde_json::Value>,
     pub show_toolbar: bool,
     pub show_status_bar: bool,
-    pub filter_on_top: bool,
-    pub hide_groups: bool,
+    /// View > Navigation Pane options (flattened: older files kept these at the top level)
+    #[serde(flatten)]
+    pub view: navidog_navigator::ViewOptions,
 }
 
-/// 菜单栏的勾选状态读取全局副本，由主窗口在修改后同步。
+/// The menu bar reads its check marks from this global copy, which the main window keeps in sync.
 impl Global for AppState {}
 
 impl Default for AppState {
@@ -61,8 +62,7 @@ impl Default for AppState {
             dock: None,
             show_toolbar: true,
             show_status_bar: true,
-            filter_on_top: false,
-            hide_groups: false,
+            view: Default::default(),
         }
     }
 }

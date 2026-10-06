@@ -1,18 +1,20 @@
 //! Read-only DDL tab: until the M4 designers, double-clicking a non-table object opens this.
 
 use gpui_kit::component::dock::{
-    BasePanel, Panel, PanelEvent, PanelInfo, PanelState, panel_handle, register_panel,
+    BasePanel, Panel, PanelEvent, PanelId, PanelInfo, PanelState, TabGroup, panel_handle,
+    register_panel,
 };
 use gpui_kit::component::input::{Editor, EditorState};
 use gpui_kit::component::v_flex;
 use gpui_kit::{
     App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable,
-    InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString, Styled as _,
-    Subscription, Window,
+    InteractiveElement as _, IntoElement, ParentElement as _, Render, Styled as _, Subscription,
+    WeakEntity, Window,
 };
 use navidog_core::object::ObjectRef;
 use navidog_db::sessions::{Sessions, SessionsEvent};
-use navidog_ui::palette;
+use navidog_ui::assets::lucide;
+use navidog_ui::{palette, tabs};
 
 use crate::catalog::{Catalog, Load};
 
@@ -60,14 +62,25 @@ impl BasePanel for DdlPanel {
             info: PanelInfo::panel(serde_json::to_value(&self.object).unwrap_or_default()),
         }
     }
+    fn on_added_to(&mut self, group: WeakEntity<TabGroup>, _: &mut Window, cx: &mut Context<Self>) {
+        tabs::added(PanelId::from(cx.entity_id()), group, cx);
+    }
+    fn set_active(&mut self, active: bool, _: &mut Window, cx: &mut Context<Self>) {
+        tabs::set_active(PanelId::from(cx.entity_id()), active, cx);
+    }
+    fn on_removed(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        let _ = tabs::removed(PanelId::from(cx.entity_id()), cx);
+    }
 }
 
 impl Panel for DdlPanel {
-    fn tab_name(&self, _: &App) -> Option<SharedString> {
-        Some(self.object.name.clone().into())
-    }
-    fn title(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        self.object.name.clone()
+    fn title(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let icon = lucide(crate::navigator::kind_icon(self.object.kind));
+        tabs::title(
+            PanelId::from(cx.entity_id()),
+            Some(icon),
+            self.object.name.clone(),
+        )
     }
 }
 

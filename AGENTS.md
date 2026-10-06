@@ -14,6 +14,8 @@ navidog 用 gpui-kit 0.7 复刻 Navicat Premium 17（macOS）。决策、架构�
 - **token**：Navicat 的实测数值只写在 `crates/navidog-ui/src/tokens.rs`（`Pt(n).rems()`，基准 13）和 `themes/navicat.json`，新 token 在 `docs/design/02-design-tokens.md` 登记来源。界面代码用具名 token 和 `palette(cx)`；必须写裸值时在同一行或上一行注明 `// raw-px: <理由>`。
 - **图标**：`lucide(name)` 只能取到 `navidog-ui/src/assets.rs` 中 `ExtraIcons` 列出的图标和 gpui-kit 默认的 101 个，缺失的图标只在日志里留下加载错误、界面上显示为空白，新图标先加进列表。
 - **文案**：每个 crate 的 `locales/*.yml` 同时写 `en` 和 `zh-CN`，中文用词照 Navicat（`reference/help-text/`）。
+- **单行文本**：对象名、字段值、属性、选项卡标题等显示数据或用户输入的文本，一律用 `navidog_ui::skin::truncated`：不换行，超出部分显示省略号，悬停时显示全文。它所在的 flex 容器要加 `min_w_0`，否则文本会撑开容器而不会被截断。网格单元格例外：只截断，不加悬停提示，因为每个单元格一个命中区域会拖慢滚动。
+- **选项卡**：对象窗格中的面板在 `on_added_to`、`set_active`、`on_removed` 里调用 `navidog_ui::tabs` 的同名函数，`title()` 返回 `tabs::title(...)`（`tab_name` 保持 `None`），这样关闭、右键菜单、⌘W、在新窗口中打开才对它生效。`on_removed` 里 `tabs::removed` 返回 `true` 时，面板只是移到新窗口，不能关闭会话或丢弃修改。
 - **注释**：代码注释用英文；改动一个文件时，把该文件里的中文注释顺手改成英文。`docs/` 和 `CONTEXT.md` 用中文。
 - **数据库调用**：驱动在 `navidog_db::runtime` 上执行，界面用 `Sessions::run_rel`（元数据会话）或 `sessions::run_on`（自己持有的会话，表查看器这类编辑器经 `Sessions::new_session` 获得），在 `cx.spawn` 中等待结果。
 - 组件能力不够时在外层补（delegate、自定义渲染），再不行基于 `gpui-base` 自建；gpui-kit 不 fork，`gpui-pre-*` 不单独覆盖。依赖不引入 GPL。

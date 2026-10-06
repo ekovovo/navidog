@@ -3,12 +3,13 @@
 
 use std::collections::HashSet;
 
+use gpui_kit::component::button::ButtonVariants as _;
 use gpui_kit::component::dock::{BasePanel, Panel, PanelEvent, panel_handle, register_panel};
 use gpui_kit::component::input::{Escape, Input, InputEvent, InputState};
 use gpui_kit::component::list::ListItem;
 use gpui_kit::component::native_menu::NativeMenu;
 use gpui_kit::component::tree::{TreeEntry, TreeEvent, TreeItem, TreeState, tree};
-use gpui_kit::component::{Icon, IconName, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{Icon, IconName, Selectable as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, AppContext as _, ClickEvent, Context, ElementId, Entity, EventEmitter,
@@ -19,11 +20,14 @@ use gpui_kit::{
 use navidog_core::actions::*;
 use navidog_core::connection::Connection;
 use navidog_core::object::{ObjectKind, ObjectRef, Scope};
+use navidog_core::settings::Settings;
 use navidog_core::store::ConnectionStore;
+use navidog_core::vgroups::VirtualGroups;
 use navidog_core::workspace::{Selection, Workspace, WorkspaceEvent};
 use navidog_db::dialect::Dialect;
 use navidog_db::sessions::{ConnState, Sessions, SessionsEvent};
 use navidog_ui::assets::{driver_icon, lucide};
+use navidog_ui::skin::truncated;
 use navidog_ui::{palette, tokens};
 use rust_i18n::t;
 
@@ -37,6 +41,10 @@ struct ActiveNavigator(WeakEntity<NavigatorPanel>);
 impl Global for ActiveNavigator {}
 
 pub(crate) fn init(cx: &mut App) {
+    cx.bind_keys([
+        gpui_kit::KeyBinding::new("delete", DeleteSelected, Some("Navigator")),
+        gpui_kit::KeyBinding::new("cmd-backspace", DeleteSelected, Some("Navigator")),
+    ]);
     register_panel(cx, PANEL, |_, window, cx| {
         panel_handle(NavigatorPanel::shared(window, cx))
     });
@@ -51,8 +59,53 @@ pub(crate) enum Node {
     Schema(Scope),
     Category(Scope, ObjectKind),
     Object(ObjectRef),
+    /// A virtual group of objects in a category (F-NAV-007)
+    VGroup(Scope, ObjectKind, String),
+    /// A folder under a table (fields, indexes, …) when "Show objects under tables" is on
+    TableFolder(ObjectRef, Child),
+    TableItem(ObjectRef, Child, String),
     /// Placeholder child before loading, so the parent shows a disclosure arrow
     Placeholder(String),
+}
+
+/// Element folders shown under a table (F-NAV-002).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Child {
+    Fields,
+    Indexes,
+    ForeignKeys,
+    Triggers,
+}
+
+impl Child {
+    const ALL: [Child; 4] = [
+        Child::Fields,
+        Child::Indexes,
+        Child::ForeignKeys,
+        Child::Triggers,
+    ];
+
+    fn key(self) -> &'static str {
+        match self {
+            Child::Fields => "fields",
+            Child::Indexes => "indexes",
+            Child::ForeignKeys => "foreign_keys",
+            Child::Triggers => "triggers",
+        }
+    }
+
+    fn from_key(key: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|c| c.key() == key)
+    }
+
+    fn icon(self) -> &'static str {
+        match self {
+            Child::Fields => "columns-3",
+            Child::Indexes => "list-ordered",
+            Child::ForeignKeys => "key-round",
+            Child::Triggers => "zap",
+        }
+    }
 }
 
 fn scope_id(s: &Scope) -> String {
@@ -83,6 +136,18 @@ impl Node {
                 o.kind.key(),
                 o.name
             ),
+            Self::VGroup(s, k, g) => format!("v:{}{SEP}{}{SEP}{g}", scope_id(s), k.key()),
+            Self::TableFolder(t, c) => {
+                format!("t:{}{SEP}{}{SEP}{}", scope_id(&t.scope), t.name, c.key())
+            }
+            Self::TableItem(t, c, n) => {
+                format!(
+                    "e:{}{SEP}{}{SEP}{}{SEP}{n}",
+                    scope_id(&t.scope),
+                    t.name,
+                    c.key()
+                )
+            }
             Self::Placeholder(p) => format!("p:{p}"),
         }
         .into()
@@ -105,6 +170,23 @@ impl Node {
                 kind: ObjectKind::from_key(parts.get(3)?)?,
                 name: parts.get(4..)?.join(&SEP.to_string()),
             }),
+            "v" => Self::VGroup(
+                parse_scope(parts.get(..3)?)?,
+                ObjectKind::from_key(parts.get(3)?)?,
+                parts.get(4)?.to_string(),
+            ),
+            "t" | "e" => {
+                let table = ObjectRef {
+                    scope: parse_scope(parts.get(..3)?)?,
+                    kind: ObjectKind::Table,
+                    name: parts.get(3)?.to_string(),
+                };
+                let child = Child::from_key(parts.get(4)?)?;
+                match kind {
+                    "t" => Self::TableFolder(table, child),
+                    _ => Self::TableItem(table, child, parts.get(5..)?.join(&SEP.to_string())),
+                }
+            }
             "p" => Self::Placeholder(rest.into()),
             _ => return None,
         })
@@ -117,12 +199,15 @@ impl Node {
             Self::Database(c, d) => Selection::Database(c, d),
             Self::Schema(s) => Selection::Schema(s),
             Self::Category(s, k) => Selection::Category(s, k),
-            Self::Object(o) => Selection::Object(o),
+            Self::Object(o) | Self::TableFolder(o, _) | Self::TableItem(o, _, _) => {
+                Selection::Object(o)
+            }
+            Self::VGroup(s, k, _) => Selection::Category(s, k),
             Self::Placeholder(_) => return None,
         })
     }
 
-    fn from_selection(s: &Selection) -> Option<Self> {
+    pub(crate) fn from_selection(s: &Selection) -> Option<Self> {
         Some(match s.clone() {
             Selection::Group(g) => Self::Group(g),
             Selection::Connection(c) => Self::Connection(c),
@@ -162,6 +247,13 @@ impl Node {
     }
 }
 
+/// Quick filter: show only connections of one driver (`None` shows all).
+#[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+#[action(namespace = navigator, no_json)]
+struct FilterByType {
+    driver: Option<SharedString>,
+}
+
 /// Connections being dragged onto a group (or onto the blank area, meaning top level).
 #[derive(Clone)]
 struct DraggedConnections {
@@ -192,9 +284,56 @@ fn move_connections(ids: &[String], group: Option<String>, cx: &mut App) {
     });
 }
 
-/// Group being renamed in place.
+/// A group or object being renamed in place.
+#[derive(Clone, PartialEq)]
+enum RenameTarget {
+    Group(String),
+    VGroup(String),
+    Object(ObjectRef),
+}
+
+/// Objects being dragged onto a virtual group (or onto their category, meaning no group).
+#[derive(Clone)]
+struct DraggedObjects {
+    objects: Vec<ObjectRef>,
+    label: SharedString,
+}
+
+impl Render for DraggedObjects {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let p = palette(cx);
+        div()
+            .px_2()
+            .py_1()
+            .rounded_md()
+            .bg(p.window_bg)
+            .border_1()
+            .border_color(p.separator)
+            .text_color(p.label)
+            .child(self.label.clone())
+    }
+}
+
+fn move_objects(objects: &[ObjectRef], group: Option<&str>, cx: &mut App) {
+    VirtualGroups::global(cx).update(cx, |g, cx| g.move_objects(objects, group, cx));
+}
+
+#[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+#[action(namespace = navigator, no_json)]
+struct RenameVirtualGroup {
+    group: SharedString,
+}
+
+#[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+#[action(namespace = navigator, no_json)]
+struct DeleteVirtualGroup {
+    group: SharedString,
+}
+
+gpui_kit::actions!(navigator, [CopyObjectNames, DeleteSelected]);
+
 struct Rename {
-    group: String,
+    target: RenameTarget,
     input: Entity<InputState>,
     _subscription: Subscription,
 }
@@ -209,9 +348,26 @@ pub struct NavigatorPanel {
     /// Anchor of ⇧-click range selection
     anchor: Option<SharedString>,
     renaming: Option<Rename>,
-    pub filter_on_top: bool,
-    pub hide_groups: bool,
+    view: ViewOptions,
+    /// Quick filters next to the search field
+    type_filter: Option<SharedString>,
+    only_starred: bool,
     _subscriptions: Vec<Subscription>,
+}
+
+/// View > Navigation Pane options, persisted by the shell.
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct ViewOptions {
+    pub filter_on_top: bool,
+    /// "Hide Connection Groups" (flat connections)
+    pub hide_groups: bool,
+    /// Only open connections and their opened (expanded) databases
+    pub only_active: bool,
+    /// Show system databases and schemas
+    pub show_hidden: bool,
+    /// Ignore virtual groups of objects (flat object lists)
+    pub hide_object_groups: bool,
 }
 
 impl EventEmitter<PanelEvent> for NavigatorPanel {}
@@ -266,6 +422,8 @@ impl NavigatorPanel {
                 cx.new(|cx| InputState::new(window, cx).placeholder(t!("nav.search").to_string()));
             let subs = vec![
                 cx.observe(&ConnectionStore::global(cx), |this, _, cx| this.rebuild(cx)),
+                cx.observe_global::<Settings>(|this, cx| this.rebuild(cx)),
+                cx.observe(&VirtualGroups::global(cx), |this, _, cx| this.rebuild(cx)),
                 cx.observe(&Sessions::global(cx), |this, _, cx| this.rebuild(cx)),
                 cx.observe(&Catalog::global(cx), |this, _, cx| this.rebuild(cx)),
                 cx.subscribe(&Sessions::global(cx), |this, _, e: &SessionsEvent, cx| {
@@ -317,8 +475,9 @@ impl NavigatorPanel {
                 marked: HashSet::new(),
                 anchor: None,
                 renaming: None,
-                filter_on_top: false,
-                hide_groups: false,
+                view: ViewOptions::default(),
+                type_filter: None,
+                only_starred: false,
                 _subscriptions: subs,
             };
             this.rebuild(cx);
@@ -344,6 +503,14 @@ impl NavigatorPanel {
             Node::Category(scope, kind) => {
                 catalog.update(cx, |cat, cx| cat.ensure_objects(scope, *kind, force, cx))
             }
+            Node::Object(t) | Node::TableFolder(t, _)
+                if t.kind == ObjectKind::Table && Settings::global(cx).show_table_children =>
+            {
+                catalog.update(cx, |cat, cx| {
+                    cat.ensure_columns(&t.scope, &t.name, force, cx);
+                    cat.ensure_table_children(&t.scope, &t.name, force, cx);
+                })
+            }
             _ => {}
         }
     }
@@ -356,10 +523,12 @@ impl NavigatorPanel {
             store: ConnectionStore::global(cx).read(cx),
             sessions: Sessions::global(cx).read(cx),
             catalog: Catalog::global(cx).read(cx),
+            vgroups: VirtualGroups::global(cx).read(cx),
             query: &query,
             filtering,
+            show_children: Settings::global(cx).show_table_children,
         };
-        let items = if self.hide_groups {
+        let items = if self.view.hide_groups {
             let mut conns: Vec<_> = builder
                 .store
                 .connections()
@@ -486,6 +655,20 @@ impl NavigatorPanel {
             .collect()
     }
 
+    /// Selected objects of the same category dragged together with `o` (just `o` when it is not selected).
+    fn drag_objects(&self, id: &SharedString, o: &ObjectRef) -> Vec<ObjectRef> {
+        if !self.marked.contains(id) {
+            return vec![o.clone()];
+        }
+        self.marked
+            .iter()
+            .filter_map(|m| match Node::parse(m) {
+                Some(Node::Object(x)) if x.scope == o.scope && x.kind == o.kind => Some(x),
+                _ => None,
+            })
+            .collect()
+    }
+
     pub(crate) fn new_group(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let parent = match Workspace::global(cx).read(cx).selection() {
             Selection::Group(g) => Some(g.clone()),
@@ -516,6 +699,64 @@ impl NavigatorPanel {
         else {
             return;
         };
+        self.start_rename_target(RenameTarget::Group(group), name, window, cx);
+    }
+
+    fn start_rename_vgroup(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+        let name = VirtualGroups::global(cx)
+            .read(cx)
+            .get(&id)
+            .map(|g| g.name.clone());
+        if let Some(name) = name {
+            self.start_rename_target(RenameTarget::VGroup(id), name, window, cx);
+        }
+    }
+
+    /// Creates a virtual group in the selected category (moving the selected objects into it)
+    /// and edits its name in place.
+    pub(crate) fn new_virtual_group(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let objects = crate::ops::selected_objects(cx);
+        let (scope, kind) = match Workspace::global(cx).read(cx).selection() {
+            Selection::Category(s, k) => (s.clone(), *k),
+            Selection::Object(o) => (o.scope.clone(), o.kind),
+            _ => return,
+        };
+        self.expanded
+            .insert(Node::Category(scope.clone(), kind).id());
+        let name = t!("nav.new_group_default").to_string();
+        let id = VirtualGroups::global(cx).update(cx, |g, cx| {
+            let id = g.add_group(scope, kind, name, cx);
+            g.move_objects(&objects, Some(&id), cx);
+            id
+        });
+        self.start_rename_vgroup(id, window, cx);
+    }
+
+    /// Edits an object's name in place; Enter runs the dialect's `RENAME` statement.
+    pub(crate) fn start_rename_object(
+        &mut self,
+        obj: ObjectRef,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let renamable = Sessions::global(cx)
+            .read(cx)
+            .dialect(&obj.scope.connection)
+            .and_then(|d| d.rename_object(&obj.scope, obj.kind, &obj.name, &obj.name))
+            .is_some();
+        if renamable {
+            let name = obj.name.clone();
+            self.start_rename_target(RenameTarget::Object(obj), name, window, cx);
+        }
+    }
+
+    fn start_rename_target(
+        &mut self,
+        target: RenameTarget,
+        name: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let input = cx.new(|cx| InputState::new(window, cx).default_value(name));
         input.update(cx, |s, cx| {
             s.focus(window, cx);
@@ -528,7 +769,7 @@ impl NavigatorPanel {
                 }
             });
         self.renaming = Some(Rename {
-            group,
+            target,
             input,
             _subscription: subscription,
         });
@@ -546,14 +787,33 @@ impl NavigatorPanel {
             return;
         };
         let name = r.input.read(cx).value().trim().to_string();
-        if commit && !name.is_empty() {
-            ConnectionStore::global(cx).update(cx, |s, cx| s.rename_group(&r.group, name, cx));
-        }
         window.focus(&self.focus_handle, cx);
         self.refresh_rows(cx);
+        if !commit || name.is_empty() {
+            return;
+        }
+        match r.target {
+            RenameTarget::Group(g) => {
+                ConnectionStore::global(cx).update(cx, |s, cx| s.rename_group(&g, name, cx))
+            }
+            RenameTarget::VGroup(g) => {
+                VirtualGroups::global(cx).update(cx, |s, cx| s.rename_group(&g, name, cx))
+            }
+            RenameTarget::Object(o) if o.name != name => {
+                let sql = Sessions::global(cx)
+                    .read(cx)
+                    .dialect(&o.scope.connection)
+                    .and_then(|d| d.rename_object(&o.scope, o.kind, &o.name, &name));
+                if let Some(sql) = sql {
+                    let renamed = Selection::Object(ObjectRef { name, ..o.clone() });
+                    crate::ops::run(vec![(o, sql)], Some(renamed), window, cx);
+                }
+            }
+            RenameTarget::Object(_) => {}
+        }
     }
 
-    fn context_menu(node: Option<&Node>, cx: &App) -> NativeMenu {
+    pub(crate) fn context_menu(node: Option<&Node>, cx: &App) -> NativeMenu {
         let new_conn =
             navidog_db::DriverRegistry::all(cx)
                 .into_iter()
@@ -656,14 +916,25 @@ impl NavigatorPanel {
                             Box::new(DeleteConnection),
                         )
                 };
+                let starred = ConnectionStore::global(cx)
+                    .read(cx)
+                    .get(id)
+                    .is_some_and(|c| c.starred);
+                let star = if starred {
+                    t!("nav.unstar")
+                } else {
+                    t!("nav.star")
+                };
                 let mut menu = menu
                     .separator()
-                    .submenu(t!("nav.color").to_string(), colors);
+                    .submenu(t!("nav.color").to_string(), colors)
+                    .menu(star.to_string(), Box::new(ToggleStar));
                 if !open {
                     menu = menu.submenu(t!("nav.move_to_group").to_string(), move_menu);
                 }
                 refresh(menu)
             }
+            // Items of later milestones (designers M4, queries M3, SQL files M6) are disabled
             Some(Node::Database(..)) => refresh(
                 NativeMenu::new()
                     .menu(t!("nav.open_database").to_string(), Box::new(OpenDatabase))
@@ -672,14 +943,149 @@ impl NavigatorPanel {
                         Box::new(CloseDatabase),
                     )
                     .separator()
-                    .menu_with_disabled(t!("nav.new_query").to_string(), true, Box::new(Refresh)),
+                    .menu_with_disabled(t!("nav.new_database").to_string(), true, Box::new(Refresh))
+                    .menu_with_disabled(
+                        t!("nav.edit_database").to_string(),
+                        true,
+                        Box::new(Refresh),
+                    )
+                    .menu_with_disabled(
+                        t!("nav.delete_database").to_string(),
+                        true,
+                        Box::new(Refresh),
+                    )
+                    .separator()
+                    .menu_with_disabled(t!("nav.new_query").to_string(), true, Box::new(Refresh))
+                    .menu_with_disabled(t!("nav.run_sql_file").to_string(), true, Box::new(Refresh))
+                    .menu_with_disabled(
+                        t!("nav.dump_sql_file").to_string(),
+                        true,
+                        Box::new(Refresh),
+                    ),
             ),
-            Some(Node::Object(o)) => refresh(NativeMenu::new().menu(
-                t!("obj.open").to_string(),
-                Box::new(OpenObject { object: o.clone() }),
+            Some(Node::Schema(_)) => refresh(NativeMenu::new().menu_with_disabled(
+                t!("nav.new_query").to_string(),
+                true,
+                Box::new(Refresh),
             )),
+            Some(Node::Category(_, k)) => refresh(
+                NativeMenu::new()
+                    .menu_with_disabled(
+                        t!("obj.new_object", kind = kind_label(*k)).to_string(),
+                        true,
+                        Box::new(Refresh),
+                    )
+                    .separator()
+                    .submenu(
+                        t!("obj.manage_groups").to_string(),
+                        NativeMenu::new()
+                            .menu(t!("obj.new_vgroup").to_string(), Box::new(NewVirtualGroup)),
+                    ),
+            ),
+            Some(Node::VGroup(_, _, g)) => refresh(
+                NativeMenu::new()
+                    .menu(
+                        t!("obj.rename").to_string(),
+                        Box::new(RenameVirtualGroup {
+                            group: g.clone().into(),
+                        }),
+                    )
+                    .menu(
+                        t!("nav.delete_group").to_string(),
+                        Box::new(DeleteVirtualGroup {
+                            group: g.clone().into(),
+                        }),
+                    ),
+            ),
+            Some(Node::Object(o)) => refresh(Self::object_menu(o, cx)),
             Some(_) => NativeMenu::new().menu(t!("nav.refresh").to_string(), Box::new(Refresh)),
         }
+    }
+
+    /// Context menu of an object, shared with the objects tab.
+    pub(crate) fn object_menu(o: &ObjectRef, cx: &App) -> NativeMenu {
+        let d = Sessions::global(cx).read(cx).dialect(&o.scope.connection);
+        let kind = kind_label(o.kind);
+        let droppable = d.and_then(|d| d.drop_keyword(o.kind)).is_some();
+        let renamable = d
+            .and_then(|d| d.rename_object(&o.scope, o.kind, &o.name, &o.name))
+            .is_some();
+        let mut menu = NativeMenu::new()
+            .menu(
+                t!("obj.open_kind", kind = kind).to_string(),
+                Box::new(OpenObject { object: o.clone() }),
+            )
+            .menu_with_disabled(
+                t!("obj.design_kind", kind = kind).to_string(),
+                true,
+                Box::new(Refresh),
+            )
+            .menu_with_disabled(
+                t!("obj.new_object", kind = kind).to_string(),
+                true,
+                Box::new(Refresh),
+            )
+            .menu_with_disabled(
+                t!("obj.delete_kind", kind = kind).to_string(),
+                !droppable,
+                Box::new(DeleteObjects),
+            );
+        if o.kind == ObjectKind::Table {
+            menu = menu.menu(t!("obj.empty_table").to_string(), Box::new(EmptyTables));
+            if d != Some(Dialect::Sqlite) {
+                menu = menu.menu(
+                    t!("obj.truncate_table").to_string(),
+                    Box::new(TruncateTables),
+                );
+            }
+            menu = menu.submenu(
+                t!("obj.duplicate").to_string(),
+                NativeMenu::new()
+                    .menu(
+                        t!("obj.duplicate_data").to_string(),
+                        Box::new(DuplicateTable { with_data: true }),
+                    )
+                    .menu(
+                        t!("obj.duplicate_structure").to_string(),
+                        Box::new(DuplicateTable { with_data: false }),
+                    ),
+            );
+        }
+        let vgroups = VirtualGroups::global(cx).read(cx);
+        let add = vgroups
+            .groups_for(&o.scope, o.kind)
+            .fold(NativeMenu::new(), |m, g| {
+                m.menu(
+                    g.name.clone(),
+                    Box::new(AddToVirtualGroup {
+                        group: g.id.clone().into(),
+                    }),
+                )
+            });
+        let has_groups = vgroups.groups_for(&o.scope, o.kind).next().is_some();
+        let mut groups =
+            NativeMenu::new().menu(t!("obj.new_vgroup").to_string(), Box::new(NewVirtualGroup));
+        groups = if has_groups {
+            groups.submenu(t!("obj.add_to_vgroup").to_string(), add)
+        } else {
+            groups.menu_with_disabled(t!("obj.add_to_vgroup").to_string(), true, Box::new(Refresh))
+        };
+        let grouped = vgroups.group_of(o).is_some();
+        menu.menu_with_disabled(
+            t!("obj.rename").to_string(),
+            !renamable,
+            Box::new(RenameObject),
+        )
+        .separator()
+        .submenu(
+            t!("obj.manage_groups").to_string(),
+            groups.menu_with_disabled(
+                t!("obj.remove_from_vgroup").to_string(),
+                !grouped,
+                Box::new(RemoveFromVirtualGroup),
+            ),
+        )
+        .menu(t!("obj.copy_name").to_string(), Box::new(CopyObjectNames))
     }
 
     fn row_icon(
@@ -729,6 +1135,17 @@ impl NavigatorPanel {
             Some(Node::Category(_, k)) | Some(Node::Object(ObjectRef { kind: k, .. })) => {
                 (tinted(kind_icon(*k)), None)
             }
+            Some(Node::TableFolder(_, c)) | Some(Node::TableItem(_, c, _)) => {
+                (tinted(c.icon()), None)
+            }
+            Some(Node::VGroup(..)) => (
+                tinted(if entry.is_expanded() {
+                    "folder-open"
+                } else {
+                    "folder"
+                }),
+                None,
+            ),
             _ => (div().into_any_element(), None),
         }
     }
@@ -774,11 +1191,19 @@ impl NavigatorPanel {
         });
         let right_node = node.clone();
         let click_node = node.clone();
-        let label = match (&node, &self.renaming) {
-            (Some(Node::Group(g)), Some(r)) if *g == r.group => {
-                Input::new(&r.input).xsmall().into_any_element()
-            }
-            _ => entry.item().label.clone().into_any_element(),
+        let renaming = match (&node, &self.renaming) {
+            (Some(Node::Group(g)), Some(r)) => r.target == RenameTarget::Group(g.clone()),
+            (Some(Node::VGroup(_, _, g)), Some(r)) => r.target == RenameTarget::VGroup(g.clone()),
+            (Some(Node::Object(o)), Some(r)) => r.target == RenameTarget::Object(o.clone()),
+            _ => false,
+        };
+        let label = match &self.renaming {
+            Some(r) if renaming => Input::new(&r.input).xsmall().into_any_element(),
+            _ => truncated(
+                SharedString::from(format!("{id}-label")),
+                entry.item().label.clone(),
+            )
+            .into_any_element(),
         };
         let row = ListItem::new(ElementId::Name(id.clone()))
             .h(tokens::navigator::ROW_HEIGHT.rems())
@@ -812,6 +1237,35 @@ impl NavigatorPanel {
                     cx.new(|_| d.clone())
                 })
             }
+            Some(Node::Object(o)) => {
+                let objects = self.drag_objects(&id, o);
+                let label = if objects.len() > 1 {
+                    t!("nav.n_objects", n = objects.len()).to_string().into()
+                } else {
+                    entry.item().label.clone()
+                };
+                row.on_drag(DraggedObjects { objects, label }, |d, _, _, cx| {
+                    cx.new(|_| d.clone())
+                })
+            }
+            _ => row,
+        };
+        // Objects dropped onto a virtual group join it; onto their category, they leave their group
+        let row = match &node {
+            Some(Node::VGroup(_, _, g)) => {
+                let g = g.clone();
+                row.drag_over::<DraggedObjects>(move |s, _, _, _| s.bg(p.fill))
+                    .on_drop(cx.listener(move |_, d: &DraggedObjects, _, cx| {
+                        cx.stop_propagation();
+                        move_objects(&d.objects, Some(&g), cx);
+                    }))
+            }
+            Some(Node::Category(..)) => row
+                .drag_over::<DraggedObjects>(move |s, _, _, _| s.bg(p.fill))
+                .on_drop(cx.listener(|_, d: &DraggedObjects, _, cx| {
+                    cx.stop_propagation();
+                    move_objects(&d.objects, None, cx);
+                })),
             _ => row,
         };
         // Dropping onto a group moves into it; onto a connection, into that connection's group
@@ -858,8 +1312,20 @@ impl NavigatorPanel {
         }))
     }
 
-    fn render_filter(&self, cx: &App) -> AnyElement {
+    fn render_filter(&self, cx: &mut Context<Self>) -> AnyElement {
         let p = palette(cx);
+        let quick = |id: &'static str, icon: &'static str, on: bool, tip: String| {
+            gpui_kit::component::button::Button::new(id)
+                .ghost()
+                .small()
+                .tooltip(tip)
+                .selected(on)
+                .icon(
+                    lucide(icon)
+                        .size(tokens::navigator::FILTER_ICON.rems())
+                        .text_color(if on { p.accent } else { p.label_secondary }),
+                )
+        };
         h_flex()
             .h(tokens::navigator::FILTER_HEIGHT.rems())
             .px(tokens::navigator::FILTER_INSET_X.rems())
@@ -871,12 +1337,55 @@ impl NavigatorPanel {
                     .cleanable(true)
                     .flex_1(),
             )
-            .children(["database", "circle-check", "star"].map(|i| {
-                // Quick filters are not implemented yet; shown disabled
-                lucide(i)
-                    .size(tokens::navigator::FILTER_ICON.rems())
-                    .text_color(p.disabled_text)
-            }))
+            .child(
+                quick(
+                    "nav-filter-type",
+                    "database",
+                    self.type_filter.is_some(),
+                    t!("nav.filter_type").to_string(),
+                )
+                .on_click(|e, window, cx| {
+                    let menu = navidog_db::DriverRegistry::all(cx).into_iter().fold(
+                        NativeMenu::new()
+                            .menu(
+                                t!("nav.filter_all_types").to_string(),
+                                Box::new(FilterByType { driver: None }),
+                            )
+                            .separator(),
+                        |m, d| {
+                            let info = d.info();
+                            m.menu(
+                                info.name.clone(),
+                                Box::new(FilterByType {
+                                    driver: Some(info.id.clone()),
+                                }),
+                            )
+                        },
+                    );
+                    menu.show(e.position(), window, cx);
+                }),
+            )
+            .child(
+                quick(
+                    "nav-filter-active",
+                    "circle-check",
+                    self.view.only_active,
+                    t!("nav.filter_active").to_string(),
+                )
+                .on_click(|_, window, cx| window.dispatch_action(Box::new(ToggleOnlyActive), cx)),
+            )
+            .child(
+                quick(
+                    "nav-filter-starred",
+                    "star",
+                    self.only_starred,
+                    t!("nav.filter_starred").to_string(),
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.only_starred = !this.only_starred;
+                    this.rebuild(cx);
+                })),
+            )
             .into_any_element()
     }
 
@@ -926,13 +1435,85 @@ struct TreeBuilder<'a> {
     store: &'a ConnectionStore,
     sessions: &'a Sessions,
     catalog: &'a Catalog,
+    vgroups: &'a VirtualGroups,
     query: &'a str,
     filtering: bool,
+    show_children: bool,
 }
 
 impl TreeBuilder<'_> {
     fn matches(&self, label: &str) -> bool {
         !self.filtering || label.to_lowercase().contains(self.query)
+    }
+
+    fn object_item(&self, scope: &Scope, kind: ObjectKind, name: &str) -> TreeItem {
+        let obj = ObjectRef {
+            scope: scope.clone(),
+            kind,
+            name: name.to_string(),
+        };
+        if kind == ObjectKind::Table && self.show_children {
+            let children = self.table_children(&obj);
+            self.item(Node::Object(obj), name.to_string(), children)
+        } else {
+            TreeItem::new(Node::Object(obj).id(), name.to_string())
+        }
+    }
+
+    /// Fields, indexes, foreign keys and triggers folders under a table.
+    fn table_children(&self, table: &ObjectRef) -> Vec<TreeItem> {
+        Child::ALL
+            .into_iter()
+            .map(|child| {
+                let folder = Node::TableFolder(table.clone(), child);
+                let names = match child {
+                    Child::Fields => match self.catalog.columns(&table.scope, &table.name) {
+                        Some(Load::Ready(cols)) => {
+                            Some(cols.iter().map(|c| c.name.clone()).collect())
+                        }
+                        _ => None,
+                    },
+                    _ => match self.catalog.table_children(&table.scope, &table.name) {
+                        Some(Load::Ready(c)) => Some(match child {
+                            Child::Indexes => c.indexes.clone(),
+                            Child::ForeignKeys => c.foreign_keys.clone(),
+                            _ => c.triggers.clone(),
+                        }),
+                        _ => None,
+                    },
+                };
+                let items = match names {
+                    Some(names) => names
+                        .into_iter()
+                        .map(|n: String| {
+                            TreeItem::new(Node::TableItem(table.clone(), child, n.clone()).id(), n)
+                        })
+                        .collect(),
+                    None => Self::placeholder(&folder, t!("nav.loading").to_string()),
+                };
+                self.item(
+                    folder,
+                    t!(format!("nav.child_{}", child.key())).to_string(),
+                    items,
+                )
+            })
+            .collect()
+    }
+
+    /// Whether the search or a quick filter is hiding nodes (empty groups are hidden then).
+    fn narrowing(&self) -> bool {
+        let p = self.panel;
+        self.filtering || p.view.only_active || p.only_starred || p.type_filter.is_some()
+    }
+
+    fn shows_connection(&self, c: &Connection) -> bool {
+        let p = self.panel;
+        !c.hidden
+            && (!p.only_starred || c.starred)
+            && (!p.view.only_active || self.sessions.state(&c.id).is_open())
+            && p.type_filter
+                .as_ref()
+                .is_none_or(|t| t.as_ref() == c.driver)
     }
 
     fn expanded(&self, node: &Node) -> bool {
@@ -967,7 +1548,9 @@ impl TreeBuilder<'_> {
             .filter(|g| g.parent.as_deref() == parent)
         {
             let children = self.groups(Some(&g.id));
-            if children.is_empty() && !self.matches(&g.name) {
+            if children.is_empty()
+                && (!self.matches(&g.name) || (self.narrowing() && !self.filtering))
+            {
                 continue;
             }
             items.push(self.item(Node::Group(g.id.clone()), g.name.clone(), children));
@@ -983,6 +1566,9 @@ impl TreeBuilder<'_> {
     }
 
     fn connection(&self, c: &Connection) -> Option<TreeItem> {
+        if !self.shows_connection(c) {
+            return None;
+        }
         let dbs: Vec<TreeItem> = match self.sessions.state(&c.id) {
             ConnState::Open { databases, .. } => {
                 let dialect = self.sessions.dialect(&c.id);
@@ -1010,10 +1596,17 @@ impl TreeBuilder<'_> {
         let Some(dialect) = dialect else {
             return Some(self.item(node, db.to_string(), Vec::new()));
         };
+        let view = &self.panel.view;
+        if (!view.show_hidden && dialect.is_system_database(db))
+            || (view.only_active && !self.panel.expanded.contains(&node.id()))
+        {
+            return None;
+        }
         let children = if dialect.has_schemas() {
             match self.catalog.schemas(conn, db) {
                 Some(Load::Ready(list)) => list
                     .iter()
+                    .filter(|s| view.show_hidden || !dialect.is_system_schema(s))
                     .map(|s| {
                         let scope = Scope::new(conn, db, Some(s.clone()));
                         self.item(
@@ -1042,18 +1635,40 @@ impl TreeBuilder<'_> {
             .filter_map(|&kind| {
                 let node = Node::Category(scope.clone(), kind);
                 let children = match self.catalog.objects(scope, kind) {
-                    Some(Load::Ready(list)) => list
-                        .iter()
-                        .filter(|o| self.matches(&o.name))
-                        .map(|o| {
-                            let obj = ObjectRef {
-                                scope: scope.clone(),
-                                kind,
-                                name: o.name.clone(),
-                            };
-                            TreeItem::new(Node::Object(obj).id(), o.name.clone())
-                        })
-                        .collect(),
+                    Some(Load::Ready(list)) => {
+                        let names: Vec<&str> = list
+                            .iter()
+                            .map(|o| o.name.as_str())
+                            .filter(|n| self.matches(n))
+                            .collect();
+                        let mut items = Vec::new();
+                        let mut grouped = HashSet::new();
+                        if !self.panel.view.hide_object_groups {
+                            for g in self.vgroups.groups_for(scope, kind) {
+                                let members: Vec<TreeItem> = g
+                                    .members
+                                    .iter()
+                                    .filter(|m| names.contains(&m.as_str()))
+                                    .map(|m| {
+                                        grouped.insert(m.as_str());
+                                        self.object_item(scope, kind, m)
+                                    })
+                                    .collect();
+                                if self.filtering && members.is_empty() && !self.matches(&g.name) {
+                                    continue;
+                                }
+                                let vg = Node::VGroup(scope.clone(), kind, g.id.clone());
+                                items.push(self.item(vg, g.name.clone(), members));
+                            }
+                        }
+                        items.extend(
+                            names
+                                .iter()
+                                .filter(|n| !grouped.contains(**n))
+                                .map(|n| self.object_item(scope, kind, n)),
+                        );
+                        items
+                    }
                     Some(Load::Failed(e)) => Self::placeholder(&node, e.to_string()),
                     _ if self.filtering => return None,
                     _ => Self::placeholder(&node, t!("nav.loading").to_string()),
@@ -1098,7 +1713,7 @@ impl Render for NavigatorPanel {
                 cx.listener(|_, d: &DraggedConnections, _, cx| move_connections(&d.ids, None, cx)),
             )
             .child(tree_view);
-        let filter = if self.filter_on_top {
+        let filter = if self.view.filter_on_top {
             div().border_b_1().border_color(p.separator).child(filter)
         } else {
             div().border_t_1().border_color(p.separator).child(filter)
@@ -1108,6 +1723,34 @@ impl Render for NavigatorPanel {
             .key_context("Navigator")
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::on_refresh))
+            .on_action(cx.listener(|this, a: &FilterByType, _, cx| {
+                this.type_filter = a.driver.clone();
+                this.rebuild(cx);
+            }))
+            .on_action(cx.listener(|this, a: &RenameVirtualGroup, window, cx| {
+                this.start_rename_vgroup(a.group.to_string(), window, cx)
+            }))
+            .on_action(|a: &DeleteVirtualGroup, _, cx| {
+                VirtualGroups::global(cx).update(cx, |g, cx| g.delete_group(&a.group, cx))
+            })
+            .on_action(|_: &CopyObjectNames, _, cx| {
+                let names: Vec<String> = crate::ops::selected_objects(cx)
+                    .into_iter()
+                    .map(|o| o.name)
+                    .collect();
+                cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(names.join("\n")));
+            })
+            // Delete / ⌘⌫: delete what is selected, after confirming
+            .on_action(|_: &DeleteSelected, window, cx| {
+                let action: Box<dyn gpui_kit::Action> =
+                    match Workspace::global(cx).read(cx).selection() {
+                        Selection::Group(_) => Box::new(DeleteGroup),
+                        Selection::Connection(_) => Box::new(DeleteConnection),
+                        Selection::Object(_) => Box::new(DeleteObjects),
+                        _ => return,
+                    };
+                window.dispatch_action(action, cx);
+            })
             .on_action(cx.listener(|this, _: &Escape, window, cx| {
                 if this.renaming.is_some() {
                     this.finish_rename(false, window, cx);
@@ -1120,13 +1763,21 @@ impl Render for NavigatorPanel {
             .size_full()
             .bg(p.control_bg)
             .map(|v| {
-                if self.filter_on_top {
+                if self.view.filter_on_top {
                     v.child(filter).child(body)
                 } else {
                     v.child(body).child(filter)
                 }
             })
     }
+}
+
+/// The navigator's View > Navigation Pane options (defaults before it exists).
+pub(crate) fn view_options(cx: &App) -> ViewOptions {
+    cx.try_global::<ActiveNavigator>()
+        .and_then(|a| a.0.upgrade())
+        .map(|n| n.read(cx).view)
+        .unwrap_or_default()
 }
 
 fn with_navigator(cx: &mut App, f: impl FnOnce(&mut NavigatorPanel, &mut Context<NavigatorPanel>)) {
@@ -1139,23 +1790,41 @@ fn with_navigator(cx: &mut App, f: impl FnOnce(&mut NavigatorPanel, &mut Context
     panel.update(cx, f);
 }
 
-/// Group commands edit the name in place in the navigator, wherever they are dispatched from.
+/// Group and object commands, wherever they are dispatched from (menus, toolbars, keys).
+/// Renaming edits the name in place in the navigator.
 pub fn bind_actions<E: gpui_kit::InteractiveElement>(el: E) -> E {
-    el.on_action(|_: &NewGroup, window, cx| {
-        with_navigator(cx, |this, cx| this.new_group(window, cx))
-    })
-    .on_action(|_: &RenameGroup, window, cx| {
-        if let Selection::Group(g) = Workspace::global(cx).read(cx).selection().clone() {
-            with_navigator(cx, |this, cx| this.start_rename(g, window, cx));
-        }
-    })
+    let el = el
+        .on_action(|_: &NewGroup, window, cx| {
+            with_navigator(cx, |this, cx| this.new_group(window, cx))
+        })
+        .on_action(|_: &RenameGroup, window, cx| {
+            if let Selection::Group(g) = Workspace::global(cx).read(cx).selection().clone() {
+                with_navigator(cx, |this, cx| this.start_rename(g, window, cx));
+            }
+        })
+        .on_action(|_: &RenameObject, window, cx| {
+            if let Selection::Object(o) = Workspace::global(cx).read(cx).selection().clone() {
+                with_navigator(cx, |this, cx| this.start_rename_object(o, window, cx));
+            }
+        })
+        .on_action(|_: &NewVirtualGroup, window, cx| {
+            with_navigator(cx, |this, cx| this.new_virtual_group(window, cx))
+        })
+        .on_action(|a: &AddToVirtualGroup, _, cx| {
+            let objects = crate::ops::selected_objects(cx);
+            move_objects(&objects, Some(&a.group), cx);
+        })
+        .on_action(|_: &RemoveFromVirtualGroup, _, cx| {
+            let objects = crate::ops::selected_objects(cx);
+            move_objects(&objects, None, cx);
+        });
+    crate::ops::bind(el)
 }
 
-/// Toggles "Show filter at top" and "Hide connection groups" (View > Navigation Pane).
-pub fn set_view_options(filter_on_top: bool, hide_groups: bool, cx: &mut App) {
+/// Sets the View > Navigation Pane options.
+pub fn set_view_options(view: ViewOptions, cx: &mut App) {
     with_navigator(cx, |this, cx| {
-        this.filter_on_top = filter_on_top;
-        this.hide_groups = hide_groups;
+        this.view = view;
         this.rebuild(cx);
     });
 }
@@ -1174,11 +1843,21 @@ mod tests {
             Node::Schema(scope.clone()),
             Node::Category(Scope::new("c-1", "main", None), ObjectKind::View),
             Node::Object(ObjectRef {
-                scope,
+                scope: scope.clone(),
                 kind: ObjectKind::Table,
                 name: "a:b".into(),
             }),
+            Node::VGroup(scope.clone(), ObjectKind::View, "vg-1".into()),
         ];
+        let table = ObjectRef {
+            scope,
+            kind: ObjectKind::Table,
+            name: "actor".into(),
+        };
+        let nodes = nodes.into_iter().chain([
+            Node::TableFolder(table.clone(), Child::ForeignKeys),
+            Node::TableItem(table, Child::Indexes, "idx:name".into()),
+        ]);
         for n in nodes {
             assert_eq!(Node::parse(&n.id()), Some(n.clone()), "{}", n.id());
         }

@@ -78,6 +78,15 @@ menu:
   filter_on_top:
     en: Show Filter On Top
     zh-CN: 在顶部显示筛选
+  only_active:
+    en: Show Only Active Objects
+    zh-CN: 仅显示活跃对象
+  show_hidden:
+    en: Show Hidden Items
+    zh-CN: 显示隐藏项目
+  hide_object_groups:
+    en: Hide Object Groups
+    zh-CN: 隐藏对象组
   info_pane:
     en: Information Pane
     zh-CN: 信息窗格

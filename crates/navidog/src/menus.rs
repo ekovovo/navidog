@@ -1,8 +1,12 @@
-//! 快捷键与菜单栏。`bind_keys` 必须在 `set_menus` 之前调用，菜单才会显示快捷键。
+//! Key bindings and the menu bar. Call `bind_keys` before `set_menus`, or menus show no shortcuts.
 
 use gpui_kit::base::input::{Copy, Cut, Paste, Redo, SelectAll, Undo};
 use gpui_kit::{App, KeyBinding, Menu, MenuItem, OsAction, SystemMenuType};
-use navidog_core::actions::{CloseConnection, NewConnection, NewConnectionOf, NewGroup, Refresh};
+use navidog_core::actions::{
+    CloseConnection, NewConnection, NewConnectionOf, NewGroup, Refresh, ToggleHideObjectGroups,
+    ToggleOnlyActive, ToggleShowHidden,
+};
+use navidog_ui::tabs::{CloseTab, NextTab, PrevTab};
 use rust_i18n::t;
 
 use crate::actions::*;
@@ -14,6 +18,8 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("alt-cmd-h", HideOthers, None),
         KeyBinding::new("cmd-q", Quit, None),
         KeyBinding::new("cmd-w", CloseTab, None),
+        KeyBinding::new("cmd-}", NextTab, None),
+        KeyBinding::new("cmd-{", PrevTab, None),
         KeyBinding::new("shift-cmd-w", CloseWindow, None),
         KeyBinding::new("cmd-1", ToggleNavigator, None),
         KeyBinding::new("cmd-2", ToggleInfoPane, None),
@@ -95,14 +101,29 @@ pub fn set_menus(cx: &mut App) {
                 checked(
                     t!("menu.hide_groups").to_string(),
                     Box::new(ToggleHideGroups),
-                    state.hide_groups,
+                    state.view.hide_groups,
                 ),
                 checked(
                     t!("menu.filter_on_top").to_string(),
                     Box::new(ToggleFilterOnTop),
-                    state.filter_on_top,
+                    state.view.filter_on_top,
+                ),
+                checked(
+                    t!("menu.only_active").to_string(),
+                    Box::new(ToggleOnlyActive),
+                    state.view.only_active,
                 ),
             ])),
+            checked(
+                t!("menu.show_hidden").to_string(),
+                Box::new(ToggleShowHidden),
+                state.view.show_hidden,
+            ),
+            checked(
+                t!("menu.hide_object_groups").to_string(),
+                Box::new(ToggleHideObjectGroups),
+                state.view.hide_object_groups,
+            ),
             MenuItem::submenu(Menu::new(t!("menu.info_pane").to_string()).items([
                 MenuItem::action(t!("menu.show_info_pane").to_string(), ToggleInfoPane),
             ])),

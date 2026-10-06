@@ -1,4 +1,5 @@
-//! AppKit 外观的皮肤组件。行为沿用 GPUI 元素与 gpui-component 组件，只负责外观与尺寸。
+//! Skin components with the AppKit look. Behavior comes from GPUI elements and gpui-component
+//! components; these only handle appearance and sizing.
 
 use gpui_kit::component::{Icon, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -11,7 +12,26 @@ use crate::tokens::{self, palette};
 
 type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 
-/// 主工具栏条目：图标在上、文字在下（Navicat Expanded 样式工具栏）。
+/// Single-line text as Navicat shows it: never wraps, overflow ends in an ellipsis, and the full
+/// text appears on hover. Use it for every label whose content comes from data or user input.
+// ponytail: the tooltip also shows when the text fits; measuring the shaped line would hide it then
+pub fn truncated(
+    id: impl Into<ElementId>,
+    text: impl Into<SharedString>,
+) -> gpui_kit::Stateful<gpui_kit::Div> {
+    let text = text.into();
+    let tip = text.clone();
+    div()
+        .id(id)
+        .min_w_0()
+        .truncate()
+        .tooltip(move |window, cx| {
+            gpui_kit::component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
+        })
+        .child(text)
+}
+
+/// Main toolbar item: icon on top, label below (Navicat's Expanded toolbar style).
 #[derive(IntoElement)]
 pub struct ToolbarItem {
     id: ElementId,
@@ -76,7 +96,8 @@ impl RenderOnce for ToolbarItem {
     }
 }
 
-/// 表单行：右对齐标签 + 6pt 间距 + 控件，对齐 Navicat 连接表单的 nib 布局。
+/// Form row: right-aligned label + 6pt gap + control, matching the nib layout of Navicat's
+/// connection form.
 #[derive(IntoElement)]
 pub struct FormRow {
     label: Option<SharedString>,
@@ -95,7 +116,7 @@ impl FormRow {
         }
     }
 
-    /// 没有标签、控件与上方控件左对齐的行（例如复选框）。
+    /// A row without a label whose control is left-aligned with the controls above (e.g. a checkbox).
     pub fn bare(control: impl IntoElement) -> Self {
         Self {
             label: None,
@@ -105,7 +126,7 @@ impl FormRow {
         }
     }
 
-    /// 高级页的紧凑行（22pt）。
+    /// Compact row (22pt) used on the Advanced page.
     pub fn compact(mut self) -> Self {
         self.compact = true;
         self
@@ -136,7 +157,7 @@ impl RenderOnce for FormRow {
     }
 }
 
-/// 表单下方的 11pt 说明文字。
+/// 11pt note text below a form.
 pub fn form_note(text: impl Into<SharedString>, cx: &App) -> impl IntoElement {
     div()
         .text_size(tokens::font::SIZE_SMALL.rems())
@@ -145,7 +166,7 @@ pub fn form_note(text: impl Into<SharedString>, cx: &App) -> impl IntoElement {
         .child(text.into())
 }
 
-/// 对话框标题（Semibold 13pt）。
+/// Dialog heading (Semibold 13pt).
 pub fn heading(text: impl Into<SharedString>) -> impl IntoElement {
     div().font_weight(FontWeight::SEMIBOLD).child(text.into())
 }

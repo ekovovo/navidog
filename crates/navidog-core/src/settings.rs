@@ -13,7 +13,7 @@ pub enum Appearance {
 }
 
 impl Appearance {
-    /// `None` 表示跟随系统。
+    /// `None` means follow the system.
     pub fn is_dark(self) -> Option<bool> {
         match self {
             Self::System => None,
@@ -33,7 +33,7 @@ pub enum Language {
 }
 
 impl Language {
-    /// 解析为 rust-i18n 的 locale。
+    /// The rust-i18n locale.
     pub fn locale(self) -> &'static str {
         match self {
             Self::ZhCn => "zh-CN",
@@ -54,7 +54,7 @@ fn system_prefers_chinese(lang: &str) -> bool {
     if lang.starts_with("zh") {
         return true;
     }
-    // GUI 应用启动时通常没有 LANG，读取 macOS 的首选语言
+    // GUI apps usually start without LANG; read macOS's preferred languages
     #[cfg(target_os = "macos")]
     if lang.is_empty()
         && let Ok(out) = std::process::Command::new("defaults")
@@ -76,8 +76,21 @@ pub struct Settings {
     pub version: u32,
     pub appearance: Appearance,
     pub language: Language,
-    /// 启动时打开勾选了“自动连接”的连接
+    /// Open the connections marked "auto connect" at startup
     pub auto_connect_on_startup: bool,
+    /// General: show fields, indexes, foreign keys and triggers under tables in the navigator
+    pub show_table_children: bool,
+    /// Tabs: open editors in a new window instead of a new tab
+    pub open_in_new_window: bool,
+    /// Tabs: editors reopened at startup (the startup screen), as dock panel states
+    pub startup_tabs: Vec<serde_json::Value>,
+    /// Records: limit the records loaded per page
+    pub limit_records: bool,
+    pub records_per_page: u64,
+    /// Records: begin a transaction automatically when a table viewer opens
+    pub auto_begin_transaction: bool,
+    /// Objects tab detail view: hidden property columns per object kind ("Choose Columns")
+    pub object_hidden_columns: std::collections::BTreeMap<String, Vec<String>>,
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
 }
@@ -89,6 +102,13 @@ impl Default for Settings {
             appearance: Appearance::System,
             language: Language::System,
             auto_connect_on_startup: true,
+            show_table_children: false,
+            open_in_new_window: false,
+            startup_tabs: Vec::new(),
+            limit_records: true,
+            records_per_page: 1000,
+            auto_begin_transaction: false,
+            object_hidden_columns: Default::default(),
             extra: Default::default(),
         }
     }
@@ -119,7 +139,7 @@ impl Settings {
         cx.global::<Self>()
     }
 
-    /// 修改设置并立即保存。
+    /// Changes the settings and saves them right away.
     pub fn update(cx: &mut App, f: impl FnOnce(&mut Self)) {
         let settings = cx.global_mut::<Self>();
         f(settings);

@@ -1,9 +1,11 @@
 //! Main window: title bar, main toolbar, dock and status bar (10-shell.md §2–4, §8).
 
 use std::rc::Rc;
+use std::sync::Arc;
 
 use gpui_kit::component::dock::{
-    DockArea, DockAreaState, DockEvent, DockLayout, DockPlacement, DockSkin, PanelId, panel_handle,
+    BasePanelView, DockArea, DockAreaState, DockEvent, DockLayout, DockPlacement, DockSkin,
+    PanelId, panel_handle,
 };
 use gpui_kit::component::status_bar::StatusBar;
 use gpui_kit::component::{TitleBar, h_flex, v_flex};
@@ -12,9 +14,12 @@ use gpui_kit::{
     App, Context, Entity, FocusHandle, InteractiveElement as _, IntoElement, ParentElement as _,
     Render, Styled as _, Subscription, Window, div,
 };
-use navidog_core::actions::OpenObject;
+use navidog_core::actions::{
+    OpenObject, ToggleHideObjectGroups, ToggleOnlyActive, ToggleShowHidden,
+};
 use navidog_core::object::ObjectRef;
 use navidog_core::registry::CommandRegistry;
+use navidog_core::settings::Settings;
 use navidog_core::store::ConnectionStore;
 use navidog_core::workspace::Workspace;
 use navidog_navigator::{InfoPanel, NavigatorPanel, ObjectsPanel};
@@ -37,6 +42,8 @@ pub struct MainWindow {
     info_restore: Option<gpui_kit::Pixels>,
     /// Open editor tabs, so an object is not opened twice
     open_tabs: std::collections::HashMap<ObjectRef, PanelId>,
+    /// Editors popped out into their own windows
+    popped: std::collections::HashMap<PanelId, gpui_kit::AnyWindowHandle>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -101,6 +108,7 @@ const TOOLBAR: &[(&str, &str, &str, Option<&str>)] = &[
 impl MainWindow {
     pub fn new(state: AppState, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let (dock, skin) = DockSkin::dock_area("main-dock", Some(DOCK_VERSION), window, cx);
+        skin.set_close_button_visible(true, cx);
         let info = InfoPanel::shared(window, cx);
         NavigatorPanel::shared(window, cx);
         ObjectsPanel::shared(window, cx);
@@ -121,7 +129,7 @@ impl MainWindow {
                 let _ = weak.update(cx, |this, cx| this.toggle_info_maximized(window, cx));
             })
         });
-        navidog_navigator::set_view_options(state.filter_on_top, state.hide_groups, cx);
+        navidog_navigator::set_view_options(state.view, cx);
 
         let subs = vec![
             cx.subscribe_in(&dock, window, |this, _, e: &DockEvent, window, cx| {
@@ -155,6 +163,7 @@ impl MainWindow {
             state,
             info_restore: None,
             open_tabs: Default::default(),
+            popped: Default::default(),
             _subscriptions: subs,
         }
     }
@@ -210,7 +219,7 @@ impl MainWindow {
         cx: &mut Context<Self>,
     ) {
         f(&mut self.state);
-        navidog_navigator::set_view_options(self.state.filter_on_top, self.state.hide_groups, cx);
+        navidog_navigator::set_view_options(self.state.view, cx);
         cx.set_global(self.state.clone());
         crate::menus::set_menus(cx);
         self.save_state(window, cx);
@@ -251,19 +260,64 @@ impl MainWindow {
         self.save_state(window, cx);
     }
 
-    /// Opens an object in the object pane, switching to its tab if it is already open.
+    /// Opens an object in the object pane, switching to its tab (or its own window) if it is already open.
     fn open_object(&mut self, object: &ObjectRef, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(id) = self.open_tabs.get(object).copied()
-            && self.dock.read(cx).panel(id).is_some()
-        {
-            self.dock.update(cx, |a, cx| a.select_panel(id, window, cx));
-            return;
+        if let Some(id) = self.open_tabs.get(object).copied() {
+            if self.dock.read(cx).panel(id).is_some() {
+                self.dock.update(cx, |a, cx| a.select_panel(id, window, cx));
+                return;
+            }
+            if let Some(w) = self.popped.get(&id) {
+                let _ = w.update(cx, |_, window, _| window.activate_window());
+                return;
+            }
         }
         let panel = crate::editors::open(object.clone(), window, cx);
         let id = panel.panel_id(cx);
         self.open_tabs.insert(object.clone(), id);
+        if Settings::global(cx).open_in_new_window {
+            self.popped_out(panel, window, cx);
+            return;
+        }
         self.dock.update(cx, |a, cx| {
             a.add_panel_view(panel, DockPlacement::Center, None, window, cx)
+        });
+    }
+
+    fn pop_out(&mut self, panel: PanelId, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(view) = self.dock.read(cx).panel(panel).cloned() else {
+            return;
+        };
+        if !view.closable(cx) {
+            return;
+        }
+        navidog_ui::tabs::detach(panel, cx);
+        self.popped_out(view, window, cx);
+    }
+
+    fn popped_out(
+        &mut self,
+        view: Arc<dyn BasePanelView>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let id = view.panel_id(cx);
+        let main = cx.entity().downgrade();
+        if let Some(w) = crate::popout::open(view, main, window.window_handle(), cx) {
+            self.popped.insert(id, w);
+        }
+    }
+
+    /// Puts a popped-out editor back into the object pane (its window is closing).
+    pub(crate) fn restore_tab(
+        &mut self,
+        view: Arc<dyn BasePanelView>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.popped.remove(&view.panel_id(cx));
+        self.dock.update(cx, |a, cx| {
+            a.add_panel_view(view, DockPlacement::Center, None, window, cx)
         });
     }
 
@@ -337,10 +391,23 @@ impl Render for MainWindow {
                 this.toggle(|s| s.show_status_bar = !s.show_status_bar, window, cx)
             }))
             .on_action(cx.listener(|this, _: &ToggleHideGroups, window, cx| {
-                this.toggle(|s| s.hide_groups = !s.hide_groups, window, cx)
+                this.toggle(|s| s.view.hide_groups = !s.view.hide_groups, window, cx)
             }))
             .on_action(cx.listener(|this, _: &ToggleFilterOnTop, window, cx| {
-                this.toggle(|s| s.filter_on_top = !s.filter_on_top, window, cx)
+                this.toggle(|s| s.view.filter_on_top = !s.view.filter_on_top, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ToggleOnlyActive, window, cx| {
+                this.toggle(|s| s.view.only_active = !s.view.only_active, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ToggleShowHidden, window, cx| {
+                this.toggle(|s| s.view.show_hidden = !s.view.show_hidden, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ToggleHideObjectGroups, window, cx| {
+                this.toggle(
+                    |s| s.view.hide_object_groups = !s.view.hide_object_groups,
+                    window,
+                    cx,
+                )
             }))
             .on_action(
                 cx.listener(|this, _: &ResetLayout, window, cx| this.reset_layout(window, cx)),
@@ -352,9 +419,11 @@ impl Render for MainWindow {
                 this.save_state(window, cx);
                 window.remove_window();
             }))
-            .on_action(|_: &CloseTab, _, _| {
-                // ⌘W does not close editor tabs yet; they close from the tab's close button
-            });
+            .on_action(
+                cx.listener(|this, a: &navidog_ui::tabs::PopOutTab, window, cx| {
+                    this.pop_out(a.panel, window, cx)
+                }),
+            );
         let root = navidog_navigator::bind_actions(navidog_connection::bind_actions(root));
         let _ = window;
         root.child(

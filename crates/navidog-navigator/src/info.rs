@@ -17,7 +17,7 @@ use navidog_core::store::ConnectionStore;
 use navidog_core::workspace::{Selection, Workspace};
 use navidog_db::sessions::{ConnState, Sessions};
 use navidog_ui::assets::lucide;
-use navidog_ui::skin::heading;
+use navidog_ui::skin::{heading, truncated};
 use navidog_ui::{palette, tokens};
 use rust_i18n::t;
 
@@ -298,15 +298,15 @@ impl InfoPanel {
         v_flex()
             .p(tokens::info::INSET.rems())
             .gap(tokens::info::ROW_GAP.rems())
-            .children(fields.into_iter().map(|(k, v)| {
+            .children(fields.into_iter().enumerate().map(|(ix, (k, v))| {
                 v_flex()
+                    .min_w_0()
                     .child(
-                        div()
+                        truncated(("info-key", ix), k)
                             .text_size(tokens::font::SIZE_SMALL.rems())
-                            .text_color(p.label_secondary)
-                            .child(k),
+                            .text_color(p.label_secondary),
                     )
-                    .child(div().text_color(p.label).child(v))
+                    .child(truncated(("info-value", ix), v).text_color(p.label))
             }))
             .into_any_element()
     }
@@ -331,19 +331,19 @@ impl InfoPanel {
                     if let Some(d) = &c.default {
                         tags.push(format!("{}: {d}", t!("info.default")));
                     }
+                    let id = SharedString::from(format!("info-field-{}", c.name));
                     v_flex()
-                        .child(div().text_color(p.label).child(c.name.clone()))
+                        .min_w_0()
+                        .child(truncated(id.clone(), c.name.clone()).text_color(p.label))
                         .child(
-                            div()
+                            truncated(SharedString::from(format!("{id}-tags")), tags.join("  ·  "))
                                 .text_size(tokens::font::SIZE_SMALL.rems())
-                                .text_color(p.label_secondary)
-                                .child(tags.join("  ·  ")),
+                                .text_color(p.label_secondary),
                         )
                         .children(c.comment.clone().map(|m| {
-                            div()
+                            truncated(SharedString::from(format!("{id}-comment")), m)
                                 .text_size(tokens::font::SIZE_SMALL.rems())
                                 .text_color(p.label_tertiary)
-                                .child(m)
                         }))
                 }))
                 .into_any_element(),

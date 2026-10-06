@@ -17,6 +17,8 @@ pub fn init(cx: &mut App) {
     theme.light_theme = light;
     theme.dark_theme = dark;
     Theme::change(ThemeMode::Light, None, cx);
+    // Like NSScrollView: always-visible scroll bars when macOS says so (e.g. a mouse is connected)
+    Theme::sync_scrollbar_appearance(cx);
 }
 
 /// Applies the appearance: `None` follows the system, `Some(true)` forces dark, `Some(false)` forces light.

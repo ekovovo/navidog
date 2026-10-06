@@ -1,9 +1,11 @@
-//! 表查看器：分页、总行数、WHERE / ORDER BY 文本、编辑提交与事务（21-table-viewer.md 第 3 ~ 6 节）。
+//! Table viewer: paging, row count, WHERE / ORDER BY text, editing, commits and transactions
+//! (21-table-viewer.md §3–6).
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dock::{
-    BasePanel, Panel, PanelEvent, PanelInfo, PanelState, panel_handle, register_panel,
+    BasePanel, Panel, PanelEvent, PanelId, PanelInfo, PanelState, TabGroup, panel_handle,
+    register_panel,
 };
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{
@@ -13,14 +15,14 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable,
     InteractiveElement as _, IntoElement, KeyBinding, ParentElement as _, Render, SharedString,
-    Styled as _, Subscription, Task, Window, actions, div,
+    Styled as _, Subscription, Task, WeakEntity, Window, actions, div,
 };
 use navidog_core::object::{ObjectKind, ObjectRef, Scope};
 use navidog_db::dialect::Dialect;
 use navidog_db::sessions::{ConnState, Sessions, SessionsEvent, SharedSession, run_on};
 use navidog_db::{CancelHandle, ColumnInfo, DbResult, ResultSet};
 use navidog_ui::assets::lucide;
-use navidog_ui::{palette, tokens};
+use navidog_ui::{palette, tabs, tokens};
 use rust_i18n::t;
 
 use crate::grid::{GridEvent, GridTarget, ResultGrid};
@@ -65,7 +67,7 @@ pub struct TableViewer {
     columns: Vec<ColumnInfo>,
     in_transaction: bool,
     busy: bool,
-    /// 最近执行的 SQL 或错误
+    /// The most recently executed SQL or error
     status: SharedString,
     task: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
@@ -91,8 +93,19 @@ impl BasePanel for TableViewer {
         }
     }
 
-    /// 关闭选项卡时还有未提交的修改或未结束的事务：询问提交还是放弃，期间会话保持打开。
+    /// If the tab is closed with uncommitted changes or an open transaction, ask whether to commit or
+    /// discard; the session stays open meanwhile.
+    fn on_added_to(&mut self, group: WeakEntity<TabGroup>, _: &mut Window, cx: &mut Context<Self>) {
+        tabs::added(PanelId::from(cx.entity_id()), group, cx);
+    }
+    fn set_active(&mut self, active: bool, _: &mut Window, cx: &mut Context<Self>) {
+        tabs::set_active(PanelId::from(cx.entity_id()), active, cx);
+    }
+
     fn on_removed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if tabs::removed(PanelId::from(cx.entity_id()), cx) {
+            return;
+        }
         let Some(session) = self.session.take() else {
             return;
         };
@@ -146,23 +159,25 @@ impl BasePanel for TableViewer {
 }
 
 impl Panel for TableViewer {
-    fn tab_name(&self, _: &App) -> Option<SharedString> {
-        Some(self.object.name.clone().into())
-    }
-    fn title(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        self.object.name.clone()
+    fn title(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        tabs::title(
+            PanelId::from(cx.entity_id()),
+            Some(lucide("table")),
+            self.object.name.clone(),
+        )
     }
 }
 
-/// 修改语句与提交方式，供关闭选项卡时在后台执行。
+/// Change statements and how to commit them, run in the background when the tab is closed.
 #[derive(Clone)]
 struct Commit {
     statements: Vec<String>,
     begin: &'static str,
 }
 
-/// 执行修改：未开事务时包在一个事务里，失败回滚，保证全部成功或全部不生效。
-/// `end` 为 true 时结束已开启的事务（提交）。
+/// Applies the changes. Without an open transaction they are wrapped in one and rolled back on
+/// failure, so either all succeed or none take effect.
+/// When `end` is true, the already open transaction is ended (committed).
 async fn apply(
     rel: &mut dyn navidog_db::Relational,
     c: Commit,
@@ -316,7 +331,7 @@ impl TableViewer {
         })
     }
 
-    /// 为查看器另开一个会话，取得字段信息后加载第一页。
+    /// Opens a separate session for the viewer, fetches the field info, then loads the first page.
     fn connect(&mut self, cx: &mut Context<Self>) {
         let sessions = Sessions::global(cx).read(cx);
         if !matches!(
@@ -385,7 +400,7 @@ impl TableViewer {
         cx.notify();
     }
 
-    /// 加载当前页；`count` 时另外查询总行数（筛选条件变化时）。
+    /// Loads the current page; with `count`, also queries the total row count (when the filter changes).
     fn reload(&mut self, count: bool, cx: &mut Context<Self>) {
         let (Some(session), Some(d)) = (self.session.clone(), self.dialect) else {
             return;
@@ -470,7 +485,8 @@ impl TableViewer {
         }
     }
 
-    /// 提交网格修改；`end_transaction` 时一并提交已开启的事务。失败时弹出数据库错误，修改保留。
+    /// Commits the grid changes; with `end_transaction`, also commits the open transaction. On failure
+    /// the database error is shown and the changes are kept.
     fn apply_changes(
         &mut self,
         end_transaction: bool,

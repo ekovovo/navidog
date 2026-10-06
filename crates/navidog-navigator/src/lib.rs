@@ -10,6 +10,7 @@ mod ddl;
 mod info;
 mod navigator;
 mod objects;
+mod ops;
 mod selection;
 
 use gpui_kit::{Action, App, SharedString};
@@ -21,7 +22,7 @@ use rust_i18n::t;
 
 pub use ddl::DdlPanel;
 pub use info::InfoPanel;
-pub use navigator::{NavigatorPanel, bind_actions, set_view_options};
+pub use navigator::{NavigatorPanel, ViewOptions, bind_actions, set_view_options};
 pub use objects::ObjectsPanel;
 
 /// Category buttons of the main toolbar: show that category's objects in the current database or schema.

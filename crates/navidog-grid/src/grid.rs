@@ -1,4 +1,5 @@
-//! 结果网格：`DataTable` 外层补上矩形选区、就地编辑、修改标记与复制粘贴（21-table-viewer.md 第 1、7 节）。
+//! Result grid: wraps `DataTable` with rectangular selection, in-place editing, change markers, and
+//! copy/paste (21-table-viewer.md §1, §7).
 
 use gpui_kit::component::input::{Escape, Input, InputEvent, InputState};
 use gpui_kit::component::native_menu::NativeMenu;
@@ -15,6 +16,7 @@ use gpui_kit::{
 };
 use navidog_core::object::Scope;
 use navidog_db::dialect::Dialect;
+use navidog_ui::skin::truncated;
 use navidog_ui::{palette, tokens};
 use rust_i18n::t;
 
@@ -37,7 +39,7 @@ actions!(
     ]
 );
 
-/// “复制为”子菜单。
+/// The "Copy As" submenu.
 #[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
 #[action(namespace = grid, no_json)]
 pub struct CopyAs {
@@ -60,7 +62,7 @@ pub(crate) fn init(cx: &mut App) {
     ]);
 }
 
-/// 网格对应的表；有它时才能生成“复制为 INSERT / UPDATE”。
+/// The table behind the grid; "Copy As INSERT / UPDATE" is only available when it is set.
 #[derive(Clone)]
 pub struct GridTarget {
     pub dialect: Dialect,
@@ -69,9 +71,9 @@ pub struct GridTarget {
 }
 
 pub enum GridEvent {
-    /// 表头排序变化：列名与是否升序，`None` 为取消排序
+    /// Header sort changed: column name and whether ascending; `None` clears the sort
     SortChanged(Option<(SharedString, bool)>),
-    /// 修改集合变化（编辑、新增、删除、粘贴）
+    /// The change set changed (edit, insert, delete, paste)
     Changed,
 }
 
@@ -144,12 +146,13 @@ impl TableDelegate for GridDelegate {
         let name = ix
             .checked_sub(1)
             .and_then(|c| self.model.columns.get(c))
-            .map(|c| c.name.clone());
+            .map(|c| truncated(("grid-th", ix), c.name.clone()));
         div()
             .size_full()
             .px_1()
             .flex()
             .items_center()
+            .overflow_hidden()
             .text_color(palette(cx).label)
             .children(name)
     }
@@ -191,6 +194,8 @@ impl TableDelegate for GridDelegate {
         }
         let selected = self.model.is_selected(r, c);
         let (text, muted): (SharedString, bool) = match self.model.value(r, c) {
+            // A cell shows one line, like Navicat; the cell editor shows the full value
+            Some(Some(s)) if s.contains('\n') => (s.replace(['\r', '\n'], " ").into(), false),
             Some(Some(s)) => (s.clone(), false),
             Some(None) => ("(NULL)".into(), true),
             None => ("".into(), true),
@@ -212,14 +217,16 @@ impl TableDelegate for GridDelegate {
                     cx.notify();
                 }),
             )
-            // 拖拽扩展选区；DataTable 只在按下与抬起是同一格时才发出 SelectCell
+            // Dragging extends the selection; DataTable only emits SelectCell when press and release
+            // land on the same cell
             .on_mouse_move(cx.listener(move |t, e: &MouseMoveEvent, _, cx| {
                 if e.dragging() && t.delegate().model.head() != (r, c) {
                     t.delegate_mut().model.select((r, c), true);
                     cx.notify();
                 }
             }))
-            .child(text)
+            // No hover tooltip per cell: a hitbox per visible cell costs scrolling time
+            .child(div().min_w_0().truncate().child(text))
             .into_any_element()
     }
 
@@ -291,7 +298,7 @@ impl ResultGrid {
         self.target = target;
     }
 
-    /// 换成新的一页数据，丢弃未提交的修改。
+    /// Replaces the data with a new page, discarding uncommitted changes.
     pub fn set_data(
         &mut self,
         columns: Vec<GridColumn>,
@@ -324,7 +331,7 @@ impl ResultGrid {
         self.table.update(cx, |t, cx| t.scroll_to_row(row, cx));
     }
 
-    /// 把当前排序设回表头（例如清空 ORDER BY 文本后）。
+    /// Clears the sort shown in the header (e.g. after the ORDER BY text is cleared).
     pub fn clear_sort(&mut self, cx: &mut Context<Self>) {
         self.table.update(cx, |t, cx| {
             t.delegate_mut().sort = None;
@@ -347,7 +354,7 @@ impl ResultGrid {
                     let m = &mut t.delegate_mut().model;
                     match ix.checked_sub(1) {
                         None => m.select_rows(r, shift),
-                        // 鼠标按下或 Extend* 已经更新过选区
+                        // Mouse down or Extend* has already updated the selection
                         Some(c) if m.head() == (r, c) => {}
                         Some(c) => m.select((r, c), shift),
                     }
@@ -424,7 +431,8 @@ impl ResultGrid {
         });
     }
 
-    /// 结束就地编辑并写回模型；值没变时不算修改（NULL 编辑后仍为空串时保持 NULL）。
+    /// Ends in-place editing and writes back to the model; an unchanged value is not a change (a NULL
+    /// that is still an empty string after editing stays NULL).
     fn commit_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(((r, c), input)) = self
             .table

@@ -1,29 +1,35 @@
-//! 对象选项卡（20-objects.md 第 4 节）：对象工具栏、列表视图、详细信息视图。
+//! Objects tab (20-objects.md §4): object toolbar, list view, and detail view.
 
 use std::cmp::Ordering;
 use std::ops::Range;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::dock::{BasePanel, Panel, PanelEvent, panel_handle, register_panel};
-use gpui_kit::component::{
-    Disableable as _, Selectable as _, Sizable as _, WindowExt as _, h_flex, v_flex,
+use gpui_kit::component::dock::{
+    BasePanel, Panel, PanelEvent, PanelId, TabGroup, panel_handle, register_panel,
 };
+use gpui_kit::component::native_menu::NativeMenu;
+use gpui_kit::component::{Disableable as _, Selectable as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, AppContext as _, ClickEvent, Context, ElementId, Entity, EventEmitter,
-    FocusHandle, Focusable, Global, InteractiveElement as _, IntoElement, ParentElement as _,
-    Render, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription,
-    UniformListScrollHandle, WeakEntity, Window, div, img, uniform_list,
+    FocusHandle, Focusable, Global, InteractiveElement as _, IntoElement, MouseButton,
+    MouseDownEvent, ParentElement as _, Render, SharedString, StatefulInteractiveElement as _,
+    Styled as _, Subscription, UniformListScrollHandle, WeakEntity, Window, div, img, uniform_list,
 };
-use navidog_core::actions::{OpenConnection, OpenObject};
+use navidog_core::actions::{
+    DeleteObjects, EmptyTables, OpenConnection, OpenObject, TruncateTables,
+};
 use navidog_core::object::{ObjectKind, ObjectRef, Scope};
+use navidog_core::settings::Settings;
 use navidog_core::store::ConnectionStore;
+use navidog_core::vgroups::VirtualGroups;
 use navidog_core::workspace::{Selection, Workspace, WorkspaceEvent};
 use navidog_db::ObjectInfo;
 use navidog_db::dialect::Dialect;
 use navidog_db::sessions::{ConnState, Sessions};
 use navidog_ui::assets::{driver_icon, lucide};
-use navidog_ui::{palette, tokens};
+use navidog_ui::skin::truncated;
+use navidog_ui::{palette, tabs, tokens};
 use rust_i18n::t;
 
 use crate::catalog::{Catalog, Load};
@@ -40,6 +46,13 @@ pub(crate) fn init(cx: &mut App) {
 struct SharedObjects(WeakEntity<ObjectsPanel>);
 impl Global for SharedObjects {}
 
+/// Shows or hides a property column of the detail view for the listed kind.
+#[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+#[action(namespace = objects, no_json)]
+struct ToggleObjectColumn {
+    key: SharedString,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ViewMode {
     List,
@@ -49,19 +62,22 @@ enum ViewMode {
 pub struct ObjectsPanel {
     focus_handle: FocusHandle,
     view: ViewMode,
-    /// 详细信息视图的排序：(列键, 是否升序)
+    /// Detail view sort: (column key, ascending)
     sort: Option<(String, bool)>,
     scroll: UniformListScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
 
-/// 列表中的一项。
+/// One item in the list.
 #[derive(Clone)]
 pub(crate) struct Row {
     icon: RowIcon,
     label: SharedString,
+    /// `Selection::None` for virtual group headers, which select nothing
     target: Selection,
     properties: Vec<(String, String)>,
+    /// 1 for objects listed under their virtual group
+    depth: u8,
 }
 
 #[derive(Clone)]
@@ -71,7 +87,7 @@ enum RowIcon {
     Lucide(&'static str),
 }
 
-/// 当前选择对应的列表内容。
+/// List contents for the current selection.
 pub(crate) enum Content {
     Rows(Vec<Row>, Option<(Scope, ObjectKind)>),
     Message(SharedString),
@@ -93,15 +109,29 @@ impl BasePanel for ObjectsPanel {
     fn closable(&self, _: &App) -> bool {
         false
     }
-}
-
-impl Panel for ObjectsPanel {
-    fn title(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        t!("obj.objects_tab").to_string()
+    fn on_added_to(&mut self, group: WeakEntity<TabGroup>, _: &mut Window, cx: &mut Context<Self>) {
+        tabs::added(PanelId::from(cx.entity_id()), group, cx);
+    }
+    fn set_active(&mut self, active: bool, _: &mut Window, cx: &mut Context<Self>) {
+        tabs::set_active(PanelId::from(cx.entity_id()), active, cx);
+    }
+    fn on_removed(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        let _ = tabs::removed(PanelId::from(cx.entity_id()), cx);
     }
 }
 
-/// 选择所在作用域要显示的对象分类：选中分类或对象时用它的分类，否则默认显示表。
+impl Panel for ObjectsPanel {
+    fn title(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        tabs::title(
+            PanelId::from(cx.entity_id()),
+            None,
+            t!("obj.objects_tab").to_string(),
+        )
+    }
+}
+
+/// The object category to show for the selection's scope: the selected category or the selected
+/// object's category, otherwise tables by default.
 fn listed_kind(selection: &Selection) -> Option<(Scope, ObjectKind)> {
     match selection {
         Selection::Category(s, k) => Some((s.clone(), *k)),
@@ -112,7 +142,7 @@ fn listed_kind(selection: &Selection) -> Option<(Scope, ObjectKind)> {
 }
 
 impl ObjectsPanel {
-    /// Dock 恢复布局时复用同一实例。
+    /// Reuses the same instance when the Dock restores its layout.
     pub fn shared(_: &mut Window, cx: &mut App) -> Entity<Self> {
         if let Some(panel) = cx.try_global::<SharedObjects>().and_then(|s| s.0.upgrade()) {
             return panel;
@@ -140,7 +170,8 @@ impl ObjectsPanel {
         panel
     }
 
-    /// 选择变化时加载对象列表（MySQL / SQLite 选中数据库即列出表）。
+    /// Loads the object list when the selection changes (for MySQL / SQLite, selecting a database lists
+    /// its tables).
     fn ensure_loaded(cx: &mut App) {
         let selection = Workspace::global(cx).read(cx).selection().clone();
         let catalog = Catalog::global(cx);
@@ -176,7 +207,10 @@ impl ObjectsPanel {
             label: label.into(),
             target,
             properties: Vec::new(),
+            depth: 0,
         };
+        let vgroups = VirtualGroups::global(cx).read(cx);
+        let grouping = !crate::navigator::view_options(cx).hide_object_groups;
 
         let connections = |group: Option<&str>| {
             if store.connections().is_empty() {
@@ -207,21 +241,40 @@ impl ObjectsPanel {
             Content::Rows(groups.chain(conns).collect(), None)
         };
         let objects = |scope: &Scope, kind: ObjectKind| match catalog.objects(scope, kind) {
-            Some(Load::Ready(list)) => Content::Rows(
-                list.iter()
-                    .map(|o: &ObjectInfo| Row {
-                        icon: RowIcon::Lucide(kind_icon(kind)),
-                        label: o.name.clone().into(),
-                        target: Selection::Object(ObjectRef {
-                            scope: scope.clone(),
-                            kind,
-                            name: o.name.clone(),
-                        }),
-                        properties: o.properties.clone(),
-                    })
-                    .collect(),
-                Some((scope.clone(), kind)),
-            ),
+            Some(Load::Ready(list)) => {
+                let object_row = |o: &ObjectInfo, depth| Row {
+                    icon: RowIcon::Lucide(kind_icon(kind)),
+                    label: o.name.clone().into(),
+                    target: Selection::Object(ObjectRef {
+                        scope: scope.clone(),
+                        kind,
+                        name: o.name.clone(),
+                    }),
+                    properties: o.properties.clone(),
+                    depth,
+                };
+                let mut rows = Vec::new();
+                let mut grouped = std::collections::HashSet::new();
+                if grouping {
+                    for g in vgroups.groups_for(scope, kind) {
+                        rows.push(row(RowIcon::Folder, g.name.clone(), Selection::None));
+                        for o in g
+                            .members
+                            .iter()
+                            .filter_map(|m| list.iter().find(|o| &o.name == m))
+                        {
+                            grouped.insert(o.name.as_str());
+                            rows.push(object_row(o, 1));
+                        }
+                    }
+                }
+                rows.extend(
+                    list.iter()
+                        .filter(|o| !grouped.contains(o.name.as_str()))
+                        .map(|o| object_row(o, 0)),
+                );
+                Content::Rows(rows, Some((scope.clone(), kind)))
+            }
             Some(Load::Failed(e)) => Content::Message(e.clone()),
             _ => Content::Message(t!("obj.loading").to_string().into()),
         };
@@ -293,6 +346,9 @@ impl ObjectsPanel {
     }
 
     fn on_row_click(target: Selection, e: &ClickEvent, window: &mut Window, cx: &mut App) {
+        if target == Selection::None {
+            return;
+        }
         Workspace::global(cx).update(cx, |w, cx| w.select(target.clone(), cx));
         if e.click_count() < 2 {
             return;
@@ -306,30 +362,6 @@ impl ObjectsPanel {
         }
     }
 
-    /// 删除、清空、截断：确认后在元数据会话上执行，成功后刷新对象列表。
-    fn confirm_sql(
-        &self,
-        obj: ObjectRef,
-        message: String,
-        sql: String,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        window.open_alert_dialog(cx, move |alert, _, _| {
-            let (obj, sql) = (obj.clone(), sql.clone());
-            alert
-                .icon(lucide("triangle-alert"))
-                .title(message.clone())
-                .show_cancel(true)
-                .ok_text(t!("obj.ok").to_string())
-                .cancel_text(t!("obj.cancel").to_string())
-                .on_ok(move |_, window, cx| {
-                    run_and_refresh(obj.clone(), sql.clone(), window, cx);
-                    true
-                })
-        });
-    }
-
     fn render_toolbar(
         &self,
         listed: Option<&(Scope, ObjectKind)>,
@@ -341,7 +373,9 @@ impl ObjectsPanel {
             listed.and_then(|(s, _)| Sessions::global(cx).read(cx).dialect(&s.connection));
         let kind = listed.map(|(_, k)| *k);
         let is_table = kind == Some(ObjectKind::Table);
-        let droppable = kind.is_some_and(|k| drop_keyword(k, dialect).is_some());
+        let droppable = kind
+            .zip(dialect)
+            .is_some_and(|(k, d)| d.drop_keyword(k).is_some());
         let button = |id: &'static str, icon: &'static str, label: String| {
             Button::new(id)
                 .ghost()
@@ -370,54 +404,39 @@ impl ObjectsPanel {
             .child(
                 button("obj-delete", "trash", t!("obj.delete").to_string())
                     .disabled(selected.is_none() || !droppable)
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        let Some(obj) = Self::selected_object(cx) else {
-                            return;
-                        };
-                        let Some(keyword) = drop_keyword(obj.kind, dialect) else {
-                            return;
-                        };
-                        let d = dialect.unwrap_or(Dialect::MySql);
-                        let sql = format!("DROP {keyword} {}", d.qualified(&obj.scope, &obj.name));
-                        let kind = t!(format!("kind.{}", obj.kind.key())).to_string();
-                        let msg = t!("obj.confirm_drop", kind = kind, name = obj.name).to_string();
-                        this.confirm_sql(obj, msg, sql, window, cx);
-                    })),
+                    .on_click(|_, window, cx| window.dispatch_action(Box::new(DeleteObjects), cx)),
             )
             .when(is_table, |bar| {
                 bar.child(
                     button("obj-empty", "eraser", t!("obj.empty").to_string())
                         .disabled(selected.is_none())
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            let Some(obj) = Self::selected_object(cx) else {
-                                return;
-                            };
-                            let d = dialect.unwrap_or(Dialect::MySql);
-                            let sql = format!("DELETE FROM {}", d.qualified(&obj.scope, &obj.name));
-                            let msg = t!("obj.confirm_empty", name = obj.name).to_string();
-                            this.confirm_sql(obj, msg, sql, window, cx);
-                        })),
+                        .on_click(|_, window, cx| {
+                            window.dispatch_action(Box::new(EmptyTables), cx)
+                        }),
                 )
                 .when(dialect != Some(Dialect::Sqlite), |bar| {
                     bar.child(
                         button("obj-truncate", "scissors", t!("obj.truncate").to_string())
                             .disabled(selected.is_none())
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                let Some(obj) = Self::selected_object(cx) else {
-                                    return;
-                                };
-                                let d = dialect.unwrap_or(Dialect::MySql);
-                                let sql = format!(
-                                    "TRUNCATE TABLE {}",
-                                    d.qualified(&obj.scope, &obj.name)
-                                );
-                                let msg = t!("obj.confirm_truncate", name = obj.name).to_string();
-                                this.confirm_sql(obj, msg, sql, window, cx);
-                            })),
+                            .on_click(|_, window, cx| {
+                                window.dispatch_action(Box::new(TruncateTables), cx)
+                            }),
                     )
                 })
             })
             .child(div().flex_1())
+            .when_some(kind.filter(|_| view == ViewMode::Detail), |bar, kind| {
+                bar.child(
+                    Button::new("choose-columns")
+                        .ghost()
+                        .small()
+                        .icon(lucide("columns-3"))
+                        .tooltip(t!("obj.choose_columns").to_string())
+                        .on_click(move |e, window, cx| {
+                            Self::columns_menu(kind, cx).show(e.position(), window, cx);
+                        }),
+                )
+            })
             .child(
                 h_flex()
                     .child(
@@ -445,6 +464,33 @@ impl ObjectsPanel {
                             })),
                     ),
             )
+    }
+
+    fn hidden_columns(kind: ObjectKind, cx: &App) -> Vec<String> {
+        Settings::global(cx)
+            .object_hidden_columns
+            .get(kind.key())
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// "Choose Columns": every property column of the listed kind, with a check mark when shown.
+    fn columns_menu(kind: ObjectKind, cx: &App) -> NativeMenu {
+        let hidden = Self::hidden_columns(kind, cx);
+        let rows = match Self::content(cx) {
+            Content::Rows(rows, _) => rows,
+            _ => Vec::new(),
+        };
+        Self::detail_columns(&rows)
+            .into_iter()
+            .fold(NativeMenu::new(), |m, c| {
+                let label = t!(format!("col.{c}")).to_string();
+                m.menu_with_check(
+                    label,
+                    !hidden.contains(&c),
+                    Box::new(ToggleObjectColumn { key: c.into() }),
+                )
+            })
     }
 
     fn detail_columns(rows: &[Row]) -> Vec<String> {
@@ -558,13 +604,18 @@ impl ObjectsPanel {
                                 .into_any_element(),
                         };
                         let target = row.target.clone();
+                        let menu_target = row.target.clone();
                         let name = h_flex()
                             .px_2()
+                            .pl(tokens::navigator::ROW_INSET_X.rems()
+                                + tokens::navigator::ROW_INDENT.rems() * row.depth as f32)
                             .gap_2()
+                            .min_w_0()
                             .overflow_hidden()
                             .child(icon)
-                            .child(row.label.clone());
-                        // 列表视图名称占满整行；详细信息视图名称为固定宽度的第一列
+                            .child(truncated(("obj-name", ix), row.label.clone()));
+                        // In list view the name fills the row; in detail view it is a fixed-width
+                        // first column
                         let name = match detail_cols {
                             Some(_) => name.w(tokens::list::NAME_COLUMN_WIDTH.rems()).flex_none(),
                             None => name.flex_1(),
@@ -577,22 +628,45 @@ impl ObjectsPanel {
                             .child(name)
                             .on_click(move |e, window, cx| {
                                 Self::on_row_click(target.clone(), e, window, cx)
+                            })
+                            .on_mouse_down(MouseButton::Right, move |e, window, cx| {
+                                cx.stop_propagation();
+                                if menu_target == Selection::None {
+                                    return;
+                                }
+                                if !Workspace::global(cx)
+                                    .read(cx)
+                                    .selections()
+                                    .any(|s| *s == menu_target)
+                                {
+                                    Workspace::global(cx)
+                                        .update(cx, |w, cx| w.select(menu_target.clone(), cx));
+                                }
+                                let menu = match &menu_target {
+                                    Selection::Object(o) => {
+                                        crate::navigator::NavigatorPanel::object_menu(o, cx)
+                                    }
+                                    other => crate::navigator::NavigatorPanel::context_menu(
+                                        crate::navigator::Node::from_selection(other).as_ref(),
+                                        cx,
+                                    ),
+                                };
+                                menu.show(e.position, window, cx);
                             });
                         if let Some(cols) = &detail_cols {
-                            for c in cols {
+                            for (ci, c) in cols.iter().enumerate() {
                                 let v = row
                                     .properties
                                     .iter()
                                     .find(|(k, _)| k == c)
                                     .map(|(_, v)| v.clone())
                                     .unwrap_or_default();
+                                let id = SharedString::from(format!("obj-prop-{ix}-{ci}"));
                                 line = line.child(
-                                    div()
+                                    truncated(id, v)
                                         .w(tokens::list::DETAIL_COLUMN_WIDTH.rems())
                                         .flex_none()
-                                        .px_2()
-                                        .overflow_hidden()
-                                        .child(v),
+                                        .px_2(),
                                 );
                             }
                         }
@@ -610,51 +684,6 @@ impl ObjectsPanel {
             .child(list)
             .into_any_element()
     }
-}
-
-/// `DROP` 关键字；不能删除（或需要参数签名才能定位）的分类返回 `None`。
-fn drop_keyword(kind: ObjectKind, dialect: Option<Dialect>) -> Option<&'static str> {
-    Some(match kind {
-        ObjectKind::Table => "TABLE",
-        ObjectKind::View => "VIEW",
-        ObjectKind::MaterializedView => "MATERIALIZED VIEW",
-        ObjectKind::Event => "EVENT",
-        ObjectKind::Trigger if dialect == Some(Dialect::Sqlite) => "TRIGGER",
-        ObjectKind::Index if dialect == Some(Dialect::Sqlite) => "INDEX",
-        ObjectKind::Sequence => "SEQUENCE",
-        _ => return None,
-    })
-}
-
-fn run_and_refresh(obj: ObjectRef, sql: String, window: &mut Window, cx: &mut App) {
-    let Some(job) = Sessions::global(cx).read(cx).run_rel(
-        &obj.scope.connection,
-        Some(&obj.scope.database),
-        move |r| Box::pin(async move { r.execute(&sql).await.map(|_| ()) }),
-    ) else {
-        return;
-    };
-    window
-        .spawn(cx, async move |cx| {
-            let result = job
-                .await
-                .map_err(|e| e.to_string())
-                .and_then(|r| r.map_err(|e| e.to_string()));
-            let _ = cx.update(|window, cx| {
-                Catalog::global(cx).update(cx, |cat, cx| {
-                    cat.ensure_objects(&obj.scope, obj.kind, true, cx)
-                });
-                if let Err(e) = result {
-                    window.open_alert_dialog(cx, move |alert, _, _| {
-                        alert
-                            .icon(lucide("circle-x"))
-                            .title(t!("obj.failed").to_string())
-                            .description(e.clone())
-                    });
-                }
-            });
-        })
-        .detach();
 }
 
 impl Render for ObjectsPanel {
@@ -684,10 +713,21 @@ impl Render for ObjectsPanel {
                     .into_any_element(),
                 None,
             ),
-            Content::Rows(rows, listed) => {
-                let detail = (self.view == ViewMode::Detail && listed.is_some())
-                    .then(|| Self::detail_columns(&rows));
+            Content::Rows(mut rows, listed) => {
+                let detail = listed
+                    .as_ref()
+                    .filter(|_| self.view == ViewMode::Detail)
+                    .map(|(_, kind)| {
+                        let hidden = Self::hidden_columns(*kind, cx);
+                        Self::detail_columns(&rows)
+                            .into_iter()
+                            .filter(|c| !hidden.contains(c))
+                            .collect::<Vec<_>>()
+                    });
                 let rows = if detail.is_some() {
+                    // The detail view is a flat, sortable list without virtual group headers
+                    rows.retain(|r| r.target != Selection::None);
+                    rows.iter_mut().for_each(|r| r.depth = 0);
                     self.sorted(rows)
                 } else {
                     rows
@@ -700,29 +740,35 @@ impl Render for ObjectsPanel {
             .track_focus(&self.focus_handle)
             .size_full()
             .bg(p.control_bg)
+            .on_action({
+                let kind = listed.as_ref().map(|(_, k)| *k);
+                cx.listener(move |_, a: &ToggleObjectColumn, _, cx| {
+                    let Some(kind) = kind else { return };
+                    Settings::update(cx, |s| {
+                        let hidden = s
+                            .object_hidden_columns
+                            .entry(kind.key().to_string())
+                            .or_default();
+                        match hidden.iter().position(|c| c.as_str() == a.key.as_ref()) {
+                            Some(ix) => drop(hidden.remove(ix)),
+                            None => hidden.push(a.key.to_string()),
+                        }
+                    });
+                    cx.notify();
+                })
+            })
             .child(self.render_toolbar(listed.as_ref(), cx))
             .child(body)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn drop_keywords_per_dialect() {
-        assert_eq!(
-            drop_keyword(ObjectKind::Table, Some(Dialect::MySql)),
-            Some("TABLE")
-        );
-        assert_eq!(
-            drop_keyword(ObjectKind::Index, Some(Dialect::Sqlite)),
-            Some("INDEX")
-        );
-        assert_eq!(drop_keyword(ObjectKind::Index, Some(Dialect::MySql)), None);
-        assert_eq!(
-            drop_keyword(ObjectKind::Function, Some(Dialect::Postgres)),
-            None
-        );
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, e: &MouseDownEvent, window, cx| {
+                    // Blank area: the category's menu (rows show their own and stop propagation)
+                    let Some((scope, kind)) = &listed else { return };
+                    window.focus(&this.focus_handle, cx);
+                    let node = crate::navigator::Node::Category(scope.clone(), *kind);
+                    crate::navigator::NavigatorPanel::context_menu(Some(&node), cx)
+                        .show(e.position, window, cx);
+                }),
+            )
     }
 }

@@ -153,9 +153,33 @@ mod macos {
         cx.update(|cx| Theme::change(ThemeMode::Dark, None, cx));
         shot(&mut cx, "ddl-tab-dark.png");
         cx.update(|cx| Theme::change(ThemeMode::Light, None, cx));
-        dispatch(&mut cx, Box::new(OpenObject { object: actor }));
+        dispatch(
+            &mut cx,
+            Box::new(OpenObject {
+                object: actor.clone(),
+            }),
+        );
         wait(&mut cx, |_| false);
         shot(&mut cx, "viewer.png");
+        let wide = ObjectRef {
+            name: "wide".into(),
+            ..actor
+        };
+        dispatch(&mut cx, Box::new(OpenObject { object: wide }));
+        wait(&mut cx, |_| false);
+        shot(&mut cx, "viewer-wide.png");
+        cx.update_window(handle, |_, window, cx| {
+            // raw-px: a horizontal scroll across several columns
+            let dx = gpui_kit::px(-2000.);
+            let delta = gpui_kit::ScrollDelta::Pixels(gpui_kit::point(dx, gpui_kit::Pixels::ZERO));
+            window.scroll(
+                gpui_kit::ElementId::NamedInteger("row".into(), 0),
+                delta,
+                cx,
+            );
+        })
+        .unwrap();
+        shot(&mut cx, "viewer-wide-scrolled.png");
         let _ = std::fs::remove_dir_all(home);
     }
 
@@ -179,9 +203,20 @@ mod macos {
             ..Default::default()
         };
         // Enough tables to overflow the navigator, so the shot shows whether the tree fills the pane
-        let logs: String = (1..=24)
+        let mut logs: String = (1..=24)
             .map(|i| format!("CREATE TABLE log_{i:02}(id INTEGER PRIMARY KEY);"))
             .collect();
+        // A wide table: its columns overflow the viewer, which must scroll horizontally
+        let cols: Vec<String> = (0..30)
+            .map(|i| format!("column_with_a_long_name_{i:02} TEXT"))
+            .collect();
+        logs.push_str(&format!(
+            "CREATE TABLE wide(id INTEGER PRIMARY KEY, {});",
+            cols.join(", ")
+        ));
+        logs.push_str("INSERT INTO wide(id) VALUES (1), (2);");
+        // Names longer than the panes are truncated with an ellipsis, never wrapped
+        logs.push_str("CREATE TABLE film_rental_statistics_by_store_and_category_monthly(id INTEGER PRIMARY KEY);");
         navidog_db::runtime::runtime().block_on(async {
             let mut s = navidog_db::connect(Arc::new(navidog_db::sqlite::SqliteDriver::default()), params).await.unwrap();
             s.relational()

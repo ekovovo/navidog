@@ -1,10 +1,12 @@
-//! 元数据查询（20-objects.md 第 3 节）。各方言的 SQL 集中在这里，统一经 `Relational::execute` 执行，
-//! 驱动只需要声明自己的方言。
+//! Metadata queries (20-objects.md §3). Every dialect's SQL lives here and runs through
+//! `Relational::execute`; drivers only declare their dialect.
 
 use navidog_core::object::{ObjectKind, Scope};
 
 use crate::dialect::Dialect;
-use crate::driver::{ColumnInfo, DbError, DbResult, ObjectInfo, Relational, ResultSet};
+use crate::driver::{
+    ColumnInfo, DbError, DbResult, ObjectInfo, Relational, ResultSet, TableChildren,
+};
 
 async fn query<R: Relational + ?Sized>(r: &mut R, sql: &str) -> DbResult<ResultSet> {
     let mut sets = r.execute(sql).await?;
@@ -21,8 +23,10 @@ pub async fn list_schemas<R: Relational + ?Sized>(r: &mut R) -> DbResult<Vec<Str
     if !r.dialect().has_schemas() {
         return Ok(Vec::new());
     }
+    // System schemas (pg_catalog, information_schema) are listed; the navigator hides them
+    // unless "Show Hidden Items" is on. Toast and temp schemas are internal and never shown.
     let sql = "SELECT nspname FROM pg_namespace \
-               WHERE nspname NOT LIKE 'pg\\_%' AND nspname <> 'information_schema' ORDER BY nspname";
+               WHERE nspname NOT LIKE 'pg\\_toast%' AND nspname NOT LIKE 'pg\\_temp%' ORDER BY nspname";
     Ok(query(r, sql)
         .await?
         .rows
@@ -31,7 +35,8 @@ pub async fn list_schemas<R: Relational + ?Sized>(r: &mut R) -> DbResult<Vec<Str
         .collect())
 }
 
-/// 对象列表。`properties` 的键是稳定的英文名，界面负责翻译成列标题。
+/// Object list. `properties` keys are stable English names; the UI translates them into
+/// column headers.
 pub async fn list_objects<R: Relational + ?Sized>(
     r: &mut R,
     scope: &Scope,
@@ -452,4 +457,77 @@ pub async fn table_columns<R: Relational + ?Sized>(
                 .collect())
         }
     }
+}
+
+/// Indexes, foreign keys and triggers of a table, shown under it in the navigator (F-NAV-002).
+pub async fn table_children<R: Relational + ?Sized>(
+    r: &mut R,
+    scope: &Scope,
+    table: &str,
+) -> DbResult<TableChildren> {
+    let d = r.dialect();
+    let t = d.string_literal(table);
+    let [indexes, foreign_keys, triggers] = match d {
+        Dialect::MySql => {
+            let db = d.string_literal(&scope.database);
+            [
+                format!(
+                    "SELECT DISTINCT INDEX_NAME FROM information_schema.STATISTICS \
+                     WHERE TABLE_SCHEMA = {db} AND TABLE_NAME = {t} ORDER BY INDEX_NAME"
+                ),
+                format!(
+                    "SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS \
+                     WHERE TABLE_SCHEMA = {db} AND TABLE_NAME = {t} AND CONSTRAINT_TYPE = 'FOREIGN KEY' \
+                     ORDER BY CONSTRAINT_NAME"
+                ),
+                format!(
+                    "SELECT TRIGGER_NAME FROM information_schema.TRIGGERS \
+                     WHERE EVENT_OBJECT_SCHEMA = {db} AND EVENT_OBJECT_TABLE = {t} ORDER BY TRIGGER_NAME"
+                ),
+            ]
+        }
+        Dialect::Postgres => {
+            let rel = format!("{}::regclass", d.string_literal(&d.qualified(scope, table)));
+            [
+                format!(
+                    "SELECT c.relname FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid WHERE i.indrelid = {rel} ORDER BY 1"
+                ),
+                format!(
+                    "SELECT conname FROM pg_constraint WHERE conrelid = {rel} AND contype = 'f' ORDER BY 1"
+                ),
+                format!(
+                    "SELECT tgname FROM pg_trigger WHERE tgrelid = {rel} AND NOT tgisinternal ORDER BY 1"
+                ),
+            ]
+        }
+        Dialect::Sqlite => {
+            let schema = format!("{}.sqlite_schema", d.quote_ident(&scope.database));
+            [
+                format!(
+                    "SELECT name FROM {schema} WHERE type = 'index' AND tbl_name = {t} ORDER BY name"
+                ),
+                // SQLite foreign keys have no names; label them by the referenced table
+                format!(
+                    "SELECT DISTINCT '→ ' || \"table\" FROM pragma_foreign_key_list({t}, {}) ORDER BY 1",
+                    d.string_literal(&scope.database)
+                ),
+                format!(
+                    "SELECT name FROM {schema} WHERE type = 'trigger' AND tbl_name = {t} ORDER BY name"
+                ),
+            ]
+        }
+    };
+    let mut names = async |sql: String| -> DbResult<Vec<String>> {
+        Ok(query(r, &sql)
+            .await?
+            .rows
+            .iter()
+            .map(|row| cell(row, 0))
+            .collect())
+    };
+    Ok(TableChildren {
+        indexes: names(indexes).await?,
+        foreign_keys: names(foreign_keys).await?,
+        triggers: names(triggers).await?,
+    })
 }

@@ -1,4 +1,5 @@
-//! SQL 方言：标识符引用、字面量、分页查询与网格修改集合的 SQL 生成（21-table-viewer.md 第 2 节）。
+//! SQL dialects: identifier quoting, literals, paged queries and SQL generation for grid change
+//! sets (21-table-viewer.md §2).
 
 use navidog_core::object::{ObjectKind, Scope};
 
@@ -9,10 +10,11 @@ pub enum Dialect {
     Sqlite,
 }
 
-/// 一行中按列名给出的值，`None` 为 NULL。
+/// Values of a row keyed by column name; `None` is NULL.
 pub type Values = Vec<(String, Option<String>)>;
 
-/// 定位一行：有主键时只含主键列，没有主键时是整行旧值。
+/// Locates a row: only the primary key columns when there is a primary key, otherwise the whole
+/// row's old values.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RowKey(pub Values);
 
@@ -43,7 +45,8 @@ impl Dialect {
         }
     }
 
-    /// 字符串字面量；MySQL 默认 sql_mode 下反斜杠是转义符，需要一并转义。
+    /// String literal; under MySQL's default sql_mode backslash is an escape character, so it is
+    /// escaped too.
     pub fn string_literal(self, value: &str) -> String {
         let escaped = value.replace('\'', "''");
         match self {
@@ -59,7 +62,8 @@ impl Dialect {
         }
     }
 
-    /// 表的限定名。PostgreSQL 会话已连接到具体数据库，只需加模式。
+    /// Qualified table name. A PostgreSQL session is already connected to a specific database,
+    /// so only the schema is prefixed.
     pub fn qualified(self, scope: &Scope, name: &str) -> String {
         let prefix = match self {
             Self::MySql | Self::Sqlite => Some(scope.database.as_str()),
@@ -102,12 +106,97 @@ impl Dialect {
         }
     }
 
-    /// 是否有模式层级（导航树在数据库与对象分类之间多一层）。
+    /// The `DROP` keyword of a kind, or `None` when it cannot be dropped by name alone
+    /// (functions need their signature).
+    pub fn drop_keyword(self, kind: ObjectKind) -> Option<&'static str> {
+        Some(match kind {
+            ObjectKind::Table => "TABLE",
+            ObjectKind::View => "VIEW",
+            ObjectKind::MaterializedView => "MATERIALIZED VIEW",
+            ObjectKind::Event => "EVENT",
+            ObjectKind::Trigger if self == Self::Sqlite => "TRIGGER",
+            ObjectKind::Index if self == Self::Sqlite => "INDEX",
+            ObjectKind::Sequence => "SEQUENCE",
+            _ => return None,
+        })
+    }
+
+    /// `RENAME` statement for an object, or `None` when the dialect cannot rename that kind
+    /// (PostgreSQL functions need their argument signature, SQLite views cannot be renamed).
+    pub fn rename_object(
+        self,
+        scope: &Scope,
+        kind: ObjectKind,
+        old: &str,
+        new: &str,
+    ) -> Option<String> {
+        let (from, to) = (self.qualified(scope, old), self.quote_ident(new));
+        Some(match (self, kind) {
+            (Self::MySql, ObjectKind::Table | ObjectKind::View) => {
+                format!("RENAME TABLE {from} TO {}", self.qualified(scope, new))
+            }
+            (Self::Postgres, ObjectKind::Table) | (Self::Sqlite, ObjectKind::Table) => {
+                format!("ALTER TABLE {from} RENAME TO {to}")
+            }
+            (Self::Postgres, ObjectKind::View) => format!("ALTER VIEW {from} RENAME TO {to}"),
+            (Self::Postgres, ObjectKind::MaterializedView) => {
+                format!("ALTER MATERIALIZED VIEW {from} RENAME TO {to}")
+            }
+            (Self::Postgres, ObjectKind::Sequence) => {
+                format!("ALTER SEQUENCE {from} RENAME TO {to}")
+            }
+            _ => return None,
+        })
+    }
+
+    /// Statements that copy a table's structure (and optionally its data) to `new`.
+    /// SQLite has no `CREATE TABLE … LIKE`, so its original `CREATE TABLE` statement (`ddl`) is
+    /// rewritten instead, which keeps keys and constraints.
+    pub fn duplicate_table(
+        self,
+        scope: &Scope,
+        old: &str,
+        new: &str,
+        with_data: bool,
+        ddl: Option<&str>,
+    ) -> Option<Vec<String>> {
+        let (from, to) = (self.qualified(scope, old), self.qualified(scope, new));
+        let create = match self {
+            Self::MySql => format!("CREATE TABLE {to} LIKE {from}"),
+            Self::Postgres => format!("CREATE TABLE {to} (LIKE {from} INCLUDING ALL)"),
+            Self::Sqlite => rename_create_table(ddl?, old, &to)?,
+        };
+        let mut out = vec![create];
+        if with_data {
+            out.push(format!("INSERT INTO {to} SELECT * FROM {from}"));
+        }
+        Some(out)
+    }
+
+    /// System databases, hidden in the navigator unless "Show Hidden Items" is on.
+    pub fn is_system_database(self, name: &str) -> bool {
+        match self {
+            Self::MySql => matches!(
+                name,
+                "information_schema" | "mysql" | "performance_schema" | "sys"
+            ),
+            Self::Postgres | Self::Sqlite => false,
+        }
+    }
+
+    /// System schemas, hidden in the navigator unless "Show Hidden Items" is on.
+    pub fn is_system_schema(self, name: &str) -> bool {
+        self == Self::Postgres && matches!(name, "pg_catalog" | "information_schema")
+    }
+
+    /// Whether there is a schema level (an extra navigator tree level between database and
+    /// object category).
     pub fn has_schemas(self) -> bool {
         self == Self::Postgres
     }
 
-    /// 表查看器的分页查询。`filter` 与 `order` 是用户输入的 WHERE / ORDER BY 子句（不含关键字）。
+    /// Paged query for the table viewer. `filter` and `order` are the user-entered WHERE /
+    /// ORDER BY clauses (without the keywords).
     pub fn select_page(
         self,
         scope: &Scope,
@@ -149,8 +238,9 @@ impl Dialect {
             .join(sep)
     }
 
-    /// 把网格的修改集合转成 SQL 语句（顺序：删除、更新、插入）。
-    /// `has_primary_key` 为 false 时用整行旧值定位，MySQL 加 `LIMIT 1` 避免影响多行。
+    /// Turn the grid's change set into SQL statements (order: deletes, updates, inserts).
+    /// When `has_primary_key` is false, rows are located by their whole old values, and MySQL
+    /// adds `LIMIT 1` to avoid affecting multiple rows.
     pub fn render_changes(
         self,
         scope: &Scope,
@@ -196,7 +286,7 @@ impl Dialect {
         out
     }
 
-    /// “复制为 INSERT 语句”。
+    /// "Copy As > Insert Statement".
     pub fn insert_statements(
         self,
         scope: &Scope,
@@ -219,7 +309,8 @@ impl Dialect {
             .join("\n")
     }
 
-    /// “复制为 UPDATE 语句”：以 `key_columns` 定位，其余列作为赋值。
+    /// "Copy As > Update Statement": rows are located by `key_columns`; the other columns become
+    /// assignments.
     pub fn update_statements(
         self,
         scope: &Scope,
@@ -248,9 +339,99 @@ impl Dialect {
     }
 }
 
+/// Replaces the table name in a `CREATE TABLE` statement; the name may be bare or quoted with
+/// `"`, `` ` `` or `[]`, and follow `IF NOT EXISTS`.
+fn rename_create_table(ddl: &str, old: &str, new_qualified: &str) -> Option<String> {
+    let head_len = {
+        let upper = ddl.to_ascii_uppercase();
+        let start = upper.find("CREATE TABLE")? + "CREATE TABLE".len();
+        let rest = &upper[start..];
+        let skipped = rest.len() - rest.trim_start().len();
+        let after_if = rest
+            .trim_start()
+            .strip_prefix("IF NOT EXISTS")
+            .map(|r| rest.len() - r.len());
+        let pos = after_if.unwrap_or(skipped);
+        let rest = &upper[start + pos..];
+        start + pos + (rest.len() - rest.trim_start().len())
+    };
+    let tail = &ddl[head_len..];
+    let forms = [
+        format!("\"{old}\""),
+        format!("`{old}`"),
+        format!("[{old}]"),
+        old.to_string(),
+    ];
+    let name = forms.iter().find(|f| tail.starts_with(f.as_str()))?;
+    Some(format!(
+        "{}{new_qualified}{}",
+        &ddl[..head_len],
+        &tail[name.len()..]
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn drop_keywords_per_dialect() {
+        assert_eq!(
+            Dialect::MySql.drop_keyword(ObjectKind::Table),
+            Some("TABLE")
+        );
+        assert_eq!(
+            Dialect::Sqlite.drop_keyword(ObjectKind::Index),
+            Some("INDEX")
+        );
+        assert_eq!(Dialect::MySql.drop_keyword(ObjectKind::Index), None);
+        assert_eq!(Dialect::Postgres.drop_keyword(ObjectKind::Function), None);
+    }
+
+    #[test]
+    fn rename_and_duplicate_statements() {
+        let s = Scope::new("c", "app", None);
+        let my = Dialect::MySql
+            .rename_object(&s, ObjectKind::Table, "a", "b")
+            .unwrap();
+        assert_eq!(my, "RENAME TABLE `app`.`a` TO `app`.`b`");
+        let pg = Scope::new("c", "db", Some("public".into()));
+        let v = Dialect::Postgres
+            .rename_object(&pg, ObjectKind::View, "v", "w")
+            .unwrap();
+        assert_eq!(v, "ALTER VIEW \"public\".\"v\" RENAME TO \"w\"");
+        assert!(
+            Dialect::Postgres
+                .rename_object(&pg, ObjectKind::Function, "f", "g")
+                .is_none()
+        );
+        assert!(
+            Dialect::Sqlite
+                .rename_object(&s, ObjectKind::View, "v", "w")
+                .is_none()
+        );
+
+        let dup = Dialect::Postgres
+            .duplicate_table(&pg, "t", "t_copy1", true, None)
+            .unwrap();
+        assert_eq!(
+            dup,
+            [
+                "CREATE TABLE \"public\".\"t_copy1\" (LIKE \"public\".\"t\" INCLUDING ALL)",
+                "INSERT INTO \"public\".\"t_copy1\" SELECT * FROM \"public\".\"t\"",
+            ]
+        );
+        let ddl = "CREATE TABLE IF NOT EXISTS \"actor\" (id INTEGER PRIMARY KEY)";
+        let lite = Dialect::Sqlite
+            .duplicate_table(&s, "actor", "actor_copy1", false, Some(ddl))
+            .unwrap();
+        assert_eq!(
+            lite,
+            ["CREATE TABLE IF NOT EXISTS \"app\".\"actor_copy1\" (id INTEGER PRIMARY KEY)"]
+        );
+        let bare = rename_create_table("create table actor(id)", "actor", "\"x\"").unwrap();
+        assert_eq!(bare, "create table \"x\"(id)");
+    }
 
     fn scope(schema: Option<&str>) -> Scope {
         Scope::new("c", "app", schema.map(String::from))

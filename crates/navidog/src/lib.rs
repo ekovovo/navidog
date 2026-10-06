@@ -1,4 +1,4 @@
-//! navidog 应用外壳：初始化各层、菜单栏、主窗口（10-shell.md 第 1 节）。
+//! navidog app shell: initializes every layer, the menu bar and the main window (10-shell.md §1).
 
 rust_i18n::i18n!("locales", fallback = "en");
 
@@ -6,6 +6,7 @@ mod actions;
 mod editors;
 pub mod main_window;
 mod menus;
+mod popout;
 mod preferences;
 pub mod state;
 
@@ -60,7 +61,7 @@ pub fn run() {
         });
 }
 
-/// 初始化各层（不涉及菜单栏等平台界面，headless 渲染也使用）。
+/// Initializes every layer (no platform UI such as the menu bar, so headless rendering uses it too).
 pub fn init(cx: &mut App) {
     use gpui_kit::component as gpui_component;
     rust_i18n::extend!(gpui_component);
@@ -68,6 +69,7 @@ pub fn init(cx: &mut App) {
     navidog_core::init(cx);
     gpui_kit::component::set_locale(Settings::global(cx).language.locale());
     navidog_ui::theme::init(cx);
+    navidog_ui::tabs::init(cx);
     navidog_db::init(cx);
     navidog_connection::init(cx);
     navidog_navigator::init(cx);

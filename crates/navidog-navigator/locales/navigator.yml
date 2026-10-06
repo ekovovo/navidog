@@ -30,6 +30,51 @@ nav:
   n_connections:
     en: "%{n} connections"
     zh-CN: "%{n} 个连接"
+  n_objects:
+    en: "%{n} objects"
+    zh-CN: "%{n} 个对象"
+  edit_database:
+    en: Edit Database…
+    zh-CN: 编辑数据库…
+  delete_database:
+    en: Delete Database
+    zh-CN: 删除数据库
+  run_sql_file:
+    en: Execute SQL File…
+    zh-CN: 运行 SQL 文件…
+  dump_sql_file:
+    en: Dump SQL File
+    zh-CN: 转储 SQL 文件
+  filter_type:
+    en: Filter by connection type
+    zh-CN: 按连接类型筛选
+  filter_all_types:
+    en: All Types
+    zh-CN: 全部类型
+  filter_active:
+    en: Show only active objects
+    zh-CN: 仅显示活跃对象
+  filter_starred:
+    en: Show only starred connections
+    zh-CN: 仅显示已标星的连接
+  child_fields:
+    en: Fields
+    zh-CN: 字段
+  child_indexes:
+    en: Indexes
+    zh-CN: 索引
+  child_foreign_keys:
+    en: Foreign Keys
+    zh-CN: 外键
+  child_triggers:
+    en: Triggers
+    zh-CN: 触发器
+  star:
+    en: Star
+    zh-CN: 标星
+  unstar:
+    en: Unstar
+    zh-CN: 取消标星
   rename_group:
     en: Rename Group…
     zh-CN: 重命名…
@@ -170,6 +215,63 @@ obj:
   confirm_truncate:
     en: "Are you sure you want to truncate table “%{name}”?"
     zh-CN: "确定要截断表“%{name}”吗？"
+  confirm_drop_many:
+    en: "Are you sure you want to delete %{n} objects?"
+    zh-CN: "确定要删除这 %{n} 个对象吗？"
+  confirm_empty_many:
+    en: "Are you sure you want to empty %{n} tables? All rows will be deleted."
+    zh-CN: "确定要清空这 %{n} 个表吗？所有记录都会被删除。"
+  confirm_truncate_many:
+    en: "Are you sure you want to truncate %{n} tables?"
+    zh-CN: "确定要截断这 %{n} 个表吗？"
+  duplicate:
+    en: Duplicate Table
+    zh-CN: 复制表
+  duplicate_data:
+    en: Structure and Data
+    zh-CN: 结构和数据
+  duplicate_structure:
+    en: Structure Only
+    zh-CN: 仅结构
+  rename:
+    en: Rename
+    zh-CN: 重命名
+  new_object:
+    en: "New %{kind}"
+    zh-CN: "新建%{kind}"
+  open_kind:
+    en: "Open %{kind}"
+    zh-CN: "打开%{kind}"
+  design_kind:
+    en: "Design %{kind}"
+    zh-CN: "设计%{kind}"
+  delete_kind:
+    en: "Delete %{kind}"
+    zh-CN: "删除%{kind}"
+  empty_table:
+    en: Empty Table
+    zh-CN: 清空表
+  truncate_table:
+    en: Truncate Table
+    zh-CN: 截断表
+  copy_name:
+    en: Copy Name
+    zh-CN: 复制名称
+  choose_columns:
+    en: Choose Columns
+    zh-CN: 选择列
+  manage_groups:
+    en: Manage Group
+    zh-CN: 管理组
+  new_vgroup:
+    en: New Group…
+    zh-CN: 新建组…
+  add_to_vgroup:
+    en: Add to Group
+    zh-CN: 添加到组
+  remove_from_vgroup:
+    en: Exclude from Group
+    zh-CN: 从组中排除
   cancel:
     en: Cancel
     zh-CN: 取消

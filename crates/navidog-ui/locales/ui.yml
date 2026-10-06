@@ -1,0 +1,23 @@
+_version: 2
+tabs:
+  close:
+    en: Close Tab
+    zh-CN: 关闭选项卡
+  close_others:
+    en: Close Other Tabs
+    zh-CN: 关闭其他选项卡
+  close_right:
+    en: Close Tabs to the Right
+    zh-CN: 关闭右侧的选项卡
+  close_all:
+    en: Close All Tabs
+    zh-CN: 关闭全部选项卡
+  pop_out:
+    en: Open in New Window
+    zh-CN: 在新窗口中打开
+  add_favorite:
+    en: Add to Favorites
+    zh-CN: 添加到收藏夹
+  add_startup:
+    en: Add to Startup Screen
+    zh-CN: 添加到启动画面

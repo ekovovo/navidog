@@ -1,13 +1,14 @@
-//! 设计 token。数值与来源一一登记在 docs/design/02-design-tokens.md，
-//! 这里是唯一允许出现 Navicat 实测数值的地方（gpui-kit 规范允许 token 定义本身使用像素值）。
+//! Design tokens. Every value and its source is registered in docs/design/02-design-tokens.md.
+//! This is the only place where measured Navicat values may appear (the gpui-kit guidelines allow
+//! pixel values in the token definitions themselves).
 
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::{App, Hsla, Pixels, Rems, Size, rgba, size};
 
-/// rem 基准，等于 macOS 控件默认字号，与 `theme.font_size` 一致。
+/// rem base: the default macOS control font size, matching `theme.font_size`.
 pub const BASE_PT: f32 = 13.;
 
-/// 以 macOS pt 记录的尺寸；界面中通过 [`Pt::rems`] 使用，随应用缩放等比变化。
+/// A size recorded in macOS pt; the UI uses it via [`Pt::rems`] so it scales with the app zoom.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Pt(pub f32);
 
@@ -16,7 +17,7 @@ impl Pt {
         Rems(self.0 / BASE_PT)
     }
 
-    /// 给只接受 `Pixels` 的 API（窗口尺寸、Dock 尺寸）使用，按当前 rem 换算。
+    /// For APIs that only accept `Pixels` (window size, Dock size); converts with the current rem.
     pub fn to_pixels(self, rem_size: Pixels) -> Pixels {
         self.rems().to_pixels(rem_size)
     }
@@ -38,16 +39,16 @@ pub mod window {
     use super::Pt;
     pub const DEFAULT_WIDTH: Pt = Pt(1240.);
     pub const DEFAULT_HEIGHT: Pt = Pt(800.);
-    // 暂定，待 AX 实测
+    // Provisional until measured with AX
     pub const MIN_WIDTH: Pt = Pt(800.);
     pub const MIN_HEIGHT: Pt = Pt(500.);
-    /// 与 gpui-component `TitleBar` 一致的红绿灯区域高度
+    /// Traffic-light area height, matching gpui-component `TitleBar`
     pub const TITLE_HEIGHT: Pt = Pt(28.);
 }
 
 pub mod toolbar {
     use super::Pt;
-    // 暂定，待 AX 实测
+    // Provisional until measured with AX
     pub const HEIGHT: Pt = Pt(52.);
     pub const ITEM_ICON: Pt = Pt(24.);
     pub const ITEM_MIN_WIDTH: Pt = Pt(52.);
@@ -76,7 +77,7 @@ pub mod navigator {
     pub const FILTER_SEARCH_HEIGHT: Pt = Pt(24.);
     pub const FILTER_ICON: Pt = Pt(16.);
     pub const FILTER_ICON_GAP: Pt = Pt(8.);
-    // 暂定，待 AX 实测
+    // Provisional until measured with AX
     pub const ROW_HEIGHT: Pt = Pt(22.);
     pub const ROW_INDENT: Pt = Pt(16.);
     pub const ROW_ICON: Pt = Pt(16.);
@@ -87,14 +88,14 @@ pub mod tabbar {
     use super::Pt;
     pub const HEIGHT: Pt = Pt(37.);
     pub const SEPARATOR: Pt = Pt(1.);
-    // 暂定，待 AX 实测
+    // Provisional until measured with AX
     pub const TAB_MIN_WIDTH: Pt = Pt(120.);
 }
 
 pub mod list {
     use super::Pt;
     pub const HEADER_HEIGHT: Pt = Pt(23.);
-    // 暂定，待 AX 实测
+    // Provisional until measured with AX
     pub const ROW_HEIGHT: Pt = Pt(22.);
     pub const NAME_COLUMN_WIDTH: Pt = Pt(220.);
     pub const DETAIL_COLUMN_WIDTH: Pt = Pt(130.);
@@ -102,15 +103,21 @@ pub mod list {
 
 pub mod object_toolbar {
     use super::Pt;
-    // 暂定，待 AX 实测
+    // Provisional until measured with AX
     pub const HEIGHT: Pt = Pt(36.);
+}
+
+pub mod editor_tab {
+    use super::Pt;
+    // Provisional until measured with AX
+    pub const TITLE_MAX_WIDTH: Pt = Pt(160.);
 }
 
 pub mod grid {
     use super::Pt;
     pub const HEADER_HEIGHT: Pt = Pt(28.);
     pub const ROW_NUMBER_WIDTH: Pt = Pt(20.);
-    // 暂定，待 AX 实测
+    // Provisional until measured with AX
     pub const ROW_HEIGHT: Pt = Pt(20.);
     pub const COLUMN_WIDTH: Pt = Pt(140.);
 }
@@ -122,7 +129,7 @@ pub mod viewer {
     pub const BOTTOM_BUTTON_HEIGHT: Pt = Pt(16.);
     pub const LIMIT_WIDTH: Pt = Pt(212.);
     pub const PAGER_WIDTH: Pt = Pt(86.);
-    // 暂定，待 AX 实测
+    // Provisional until measured with AX
     pub const FILTER_HEIGHT: Pt = Pt(28.);
     pub const CELL_EDITOR_HEIGHT: Pt = Pt(120.);
 }
@@ -132,7 +139,7 @@ pub mod info {
     pub const HEADER_HEIGHT: Pt = Pt(30.);
     pub const HEADER_BUTTON: Pt = Pt(16.);
     pub const HEADER_BUTTON_INSET: Pt = Pt(8.);
-    // 暂定，待 AX 实测
+    // Provisional until measured with AX
     pub const ROW_GAP: Pt = Pt(6.);
     pub const INSET: Pt = Pt(12.);
 }
@@ -161,13 +168,14 @@ pub mod form {
     pub const LIST_HEIGHT: Pt = Pt(300.);
     pub const LIST_BUTTON_WIDTH: Pt = Pt(24.);
     pub const LIST_BUTTON_HEIGHT: Pt = Pt(22.);
-    /// 标签列宽：nib 中按每页最长标签对齐，这里取三种连接表单中的最大值
+    /// Label column width: the nib aligns it to the longest label on each page; this is the largest
+    /// value across the three connection forms
     pub const LABEL_COLUMN: Pt = Pt(150.);
 }
 
 pub mod button {
     use super::Pt;
-    // 来源 nib 中含边框的按钮框高；macOS 26 上待 AX 实测
+    // Bordered button frame height from the source nib; to be measured with AX on macOS 26
     pub const HEIGHT: Pt = Pt(24.);
     pub const MIN_WIDTH: Pt = Pt(80.);
 }
@@ -181,32 +189,33 @@ pub mod conn_type {
     pub const SEARCH_ROW_HEIGHT: Pt = Pt(36.);
     pub const SEARCH_WIDTH: Pt = Pt(200.);
     pub const FOOTER_HEIGHT: Pt = Pt(45.);
-    // 暂定，待 AX 实测
+    // Provisional until measured with AX
     pub const TILE_SIZE: Pt = Pt(96.);
     pub const TILE_ICON: Pt = Pt(48.);
 }
 
 pub mod conn_form {
     use super::Pt;
-    // 连接表单窗口由代码生成，nib 中没有，暂定，待 AX 实测
+    // The connection form window is built in code, not in a nib; provisional until measured with AX
     pub const WIDTH: Pt = Pt(560.);
     pub const BODY_HEIGHT: Pt = Pt(420.);
 }
 
 pub mod dialog {
     use super::Pt;
-    // 暂定，待 AX 实测（询问密码、解锁主密码等小对话框）
+    // Provisional until measured with AX (small dialogs such as the password prompt and master
+    // password unlock)
     pub const SMALL_WIDTH: Pt = Pt(460.);
 }
 
 pub mod preferences {
     use super::Pt;
-    // 暂定，待 AX 实测
+    // Provisional until measured with AX
     pub const WIDTH: Pt = Pt(680.);
     pub const HEIGHT: Pt = Pt(480.);
 }
 
-/// 偏好设置窗口尺寸（窗口创建时还没有 rem，按 1:1 换算）。
+/// Preferences window size (no rem exists yet when the window is created, so convert 1:1).
 pub fn preferences_window_size() -> Size<Pixels> {
     size(
         gpui_kit::px(preferences::WIDTH.0),
@@ -214,7 +223,7 @@ pub fn preferences_window_size() -> Size<Pixels> {
     )
 }
 
-/// 默认窗口尺寸（窗口创建时还没有 rem，按 1:1 换算）。
+/// Default window size (no rem exists yet when the window is created, so convert 1:1).
 pub fn default_window_size() -> Size<Pixels> {
     size(
         gpui_kit::px(window::DEFAULT_WIDTH.0),
@@ -229,7 +238,7 @@ pub fn min_window_size() -> Size<Pixels> {
     )
 }
 
-/// gpui-component 主题之外的 AppKit 语义色，取值见 token 表第 8 节。
+/// AppKit semantic colors outside the gpui-component theme; values are listed in §8 of the token table.
 #[derive(Clone, Copy, Debug)]
 pub struct Palette {
     pub window_bg: Hsla,
@@ -249,9 +258,9 @@ pub struct Palette {
     pub fill_tertiary: Hsla,
     pub danger: Hsla,
     pub success: Hsla,
-    /// 网格中已修改、未提交的单元格（暂定，待 Navicat 实测）
+    /// Modified, uncommitted cells in the grid (provisional until measured in Navicat)
     pub grid_edited: Hsla,
-    /// 网格中待删除的行（暂定，待 Navicat 实测）
+    /// Rows pending deletion in the grid (provisional until measured in Navicat)
     pub grid_deleted: Hsla,
 }
 
@@ -307,7 +316,7 @@ pub fn dark_palette() -> Palette {
     }
 }
 
-/// 当前外观对应的调色板。
+/// The palette for the current appearance.
 pub fn palette(cx: &App) -> Palette {
     if cx.theme().is_dark() {
         dark_palette()
@@ -316,7 +325,7 @@ pub fn palette(cx: &App) -> Palette {
     }
 }
 
-/// 连接颜色（F-CONN-014），取 AppKit 系统色。
+/// Connection colors (F-CONN-014), taken from the AppKit system colors.
 pub fn connection_color(name: &str, cx: &App) -> Option<Hsla> {
     let dark = cx.theme().is_dark();
     let hex = match (name, dark) {
@@ -351,7 +360,7 @@ mod tests {
         assert_eq!(Pt(13.).rems().0, 1.);
         assert_eq!(Pt(26.).rems().0, 2.);
         assert_eq!(Pt(24.).to_pixels(gpui_kit::px(13.)), gpui_kit::px(24.));
-        // 缩放到 16pt 时等比放大
+        // Scales up proportionally at a 16pt rem
         assert_eq!(Pt(26.).to_pixels(gpui_kit::px(16.)), gpui_kit::px(32.));
     }
 }

@@ -1,4 +1,4 @@
-//! 外壳级命令（10-shell.md 第 9 节）。
+//! Shell-level commands (10-shell.md §9).
 
 gpui_kit::actions!(
     navidog,
@@ -10,7 +10,6 @@ gpui_kit::actions!(
         HideOthers,
         ShowAll,
         Quit,
-        CloseTab,
         CloseWindow,
         ToggleNavigator,
         ToggleInfoPane,

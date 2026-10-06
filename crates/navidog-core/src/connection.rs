@@ -1,5 +1,5 @@
-//! 连接配置模型，对应 docs/design/11-connection.md 第 6 节的 connections.json。
-//! 每个结构都保留未知字段，兼容较新版本写入的文件。
+//! Connection configuration model: connections.json from docs/design/11-connection.md §6.
+//! Every struct keeps unknown fields, so files written by newer versions stay compatible.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -30,7 +30,7 @@ pub struct Group {
 pub struct Connection {
     pub id: ConnectionId,
     pub name: String,
-    /// `DriverRegistry` 的键：mysql、mariadb、postgres、sqlite，插件驱动带插件前缀
+    /// `DriverRegistry` key: mysql, mariadb, postgres, sqlite; plugin drivers carry the plugin prefix
     pub driver: String,
     #[serde(default)]
     pub group: Option<GroupId>,
@@ -48,12 +48,18 @@ pub struct Connection {
     pub ssh: Ssh,
     #[serde(default)]
     pub remark: String,
+    /// Starred in Manage Connections; the navigator's quick filter can show only these
+    #[serde(default)]
+    pub starred: bool,
+    /// Hidden in Manage Connections: kept but not shown in the navigator
+    #[serde(default)]
+    pub hidden: bool,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
 
 impl Connection {
-    /// 按驱动给出 Navicat 的默认值（11-connection.md 第 2 节）。
+    /// Navicat's defaults for the given driver (11-connection.md §2).
     pub fn new(driver: &str) -> Self {
         let (port, user, database) = match driver {
             "postgres" => (Some(5432), "postgres", Some("postgres".to_string())),
@@ -80,13 +86,15 @@ impl Connection {
             ssl: Ssl::default(),
             ssh: Ssh::default(),
             remark: String::new(),
+            starred: false,
+            hidden: false,
             extra: Map::new(),
         };
         conn.name = conn.suggested_name();
         conn
     }
 
-    /// Navicat 的默认连接名：主机_端口；SQLite 取文件名。
+    /// Navicat's default connection name: host_port; SQLite uses the file name.
     pub fn suggested_name(&self) -> String {
         if self.driver == "sqlite" {
             return self
@@ -114,11 +122,11 @@ pub struct General {
     pub host: String,
     pub port: Option<u16>,
     pub user: String,
-    /// PostgreSQL 初始数据库
+    /// PostgreSQL initial database
     pub database: Option<String>,
-    /// SQLite 数据库文件
+    /// SQLite database file
     pub file: Option<String>,
-    /// SQLite：打开时新建文件
+    /// SQLite: create a new file when opening
     pub create_new: bool,
     pub save_password: bool,
     pub password: Option<Secret>,
@@ -130,7 +138,7 @@ pub struct General {
 #[serde(default)]
 pub struct Advanced {
     pub auto_connect: bool,
-    /// None 表示不启用保持连接
+    /// None disables keepalive
     pub keepalive_secs: Option<u32>,
     pub connect_timeout_secs: Option<u32>,
     pub read_timeout_secs: Option<u32>,
@@ -140,9 +148,9 @@ pub struct Advanced {
     pub session_limit: Option<u32>,
     pub charset: String,
     pub encoding: String,
-    /// PostgreSQL 连接参数，`key=value` 以空格分隔
+    /// PostgreSQL connection parameters, space-separated `key=value` pairs
     pub params: String,
-    /// 每个新会话执行，多条以分号分隔
+    /// Run on every new session; multiple statements are separated by semicolons
     pub initial_queries: String,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
@@ -173,7 +181,7 @@ impl Default for Advanced {
 pub struct Databases {
     pub custom_list: bool,
     pub items: Vec<DatabaseItem>,
-    /// SQLite 附加的数据库
+    /// Databases attached to SQLite
     pub attached: Vec<AttachedDatabase>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
@@ -293,7 +301,7 @@ impl Default for Ssh {
     }
 }
 
-/// 秘密字段名，同时用作加密的 associated data。
+/// Secret field name, also used as the associated data for encryption.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SecretField {
     Password,

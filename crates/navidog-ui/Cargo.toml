@@ -9,6 +9,7 @@ publish.workspace = true
 [dependencies]
 gpui-kit.workspace = true
 anyhow.workspace = true
+rust-i18n.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
