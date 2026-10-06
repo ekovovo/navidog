@@ -96,6 +96,35 @@ pub mod list {
     pub const HEADER_HEIGHT: Pt = Pt(23.);
     // 暂定，待 AX 实测
     pub const ROW_HEIGHT: Pt = Pt(22.);
+    pub const NAME_COLUMN_WIDTH: Pt = Pt(220.);
+    pub const DETAIL_COLUMN_WIDTH: Pt = Pt(130.);
+}
+
+pub mod object_toolbar {
+    use super::Pt;
+    // 暂定，待 AX 实测
+    pub const HEIGHT: Pt = Pt(36.);
+}
+
+pub mod grid {
+    use super::Pt;
+    pub const HEADER_HEIGHT: Pt = Pt(28.);
+    pub const ROW_NUMBER_WIDTH: Pt = Pt(20.);
+    // 暂定，待 AX 实测
+    pub const ROW_HEIGHT: Pt = Pt(20.);
+    pub const COLUMN_WIDTH: Pt = Pt(140.);
+}
+
+pub mod viewer {
+    use super::Pt;
+    pub const BOTTOM_BAR_HEIGHT: Pt = Pt(28.);
+    pub const BOTTOM_BUTTON_WIDTH: Pt = Pt(20.);
+    pub const BOTTOM_BUTTON_HEIGHT: Pt = Pt(16.);
+    pub const LIMIT_WIDTH: Pt = Pt(212.);
+    pub const PAGER_WIDTH: Pt = Pt(86.);
+    // 暂定，待 AX 实测
+    pub const FILTER_HEIGHT: Pt = Pt(28.);
+    pub const CELL_EDITOR_HEIGHT: Pt = Pt(120.);
 }
 
 pub mod info {
@@ -220,6 +249,10 @@ pub struct Palette {
     pub fill_tertiary: Hsla,
     pub danger: Hsla,
     pub success: Hsla,
+    /// 网格中已修改、未提交的单元格（暂定，待 Navicat 实测）
+    pub grid_edited: Hsla,
+    /// 网格中待删除的行（暂定，待 Navicat 实测）
+    pub grid_deleted: Hsla,
 }
 
 fn c(hex: u32) -> Hsla {
@@ -245,6 +278,8 @@ pub fn light_palette() -> Palette {
         fill_tertiary: c(0x0000000c),
         danger: c(0xff383cff),
         success: c(0x34c759ff),
+        grid_edited: c(0xfff3c4ff),
+        grid_deleted: c(0xffd9d9ff),
     }
 }
 
@@ -267,6 +302,8 @@ pub fn dark_palette() -> Palette {
         fill_tertiary: c(0xffffff0c),
         danger: c(0xff4245ff),
         success: c(0x30d158ff),
+        grid_edited: c(0x5c4b1aff),
+        grid_deleted: c(0x5c2424ff),
     }
 }
 

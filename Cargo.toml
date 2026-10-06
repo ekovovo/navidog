@@ -16,6 +16,8 @@ navidog-core = { path = "crates/navidog-core" }
 navidog-db = { path = "crates/navidog-db" }
 navidog-plugin = { path = "crates/navidog-plugin" }
 navidog-connection = { path = "crates/navidog-connection" }
+navidog-navigator = { path = "crates/navidog-navigator" }
+navidog-grid = { path = "crates/navidog-grid" }
 
 gpui-kit = "0.7"
 rust-i18n = "4"

@@ -47,3 +47,121 @@ fn sqlite_create_attach_execute_and_error_codes() {
     });
     assert!(main.exists());
 }
+
+#[test]
+fn sqlite_metadata_and_change_sets() {
+    use navidog_core::object::{ObjectKind, Scope};
+    use navidog_db::dialect::{ChangeSet, RowKey, RowUpdate};
+
+    let dir = tempfile::tempdir().unwrap();
+    let params = ConnectParams {
+        file: Some(dir.path().join("m.db")),
+        create_new: true,
+        ..Default::default()
+    };
+    runtime::runtime().block_on(async {
+        let mut session = connect(Arc::new(SqliteDriver::default()), params)
+            .await
+            .unwrap();
+        let rel = session.relational().unwrap();
+        rel.execute(
+            "CREATE TABLE actor(id INTEGER PRIMARY KEY, name TEXT NOT NULL DEFAULT 'x', note TEXT);\
+             CREATE VIEW v_actor AS SELECT name FROM actor;\
+             CREATE INDEX idx_name ON actor(name);\
+             CREATE TRIGGER trg AFTER INSERT ON actor BEGIN SELECT 1; END",
+        )
+        .await
+        .unwrap();
+        let scope = Scope::new("c", "main", None);
+        assert_eq!(rel.list_schemas().await.unwrap(), Vec::<String>::new());
+        assert_eq!(
+            rel.object_kinds(),
+            [
+                ObjectKind::Table,
+                ObjectKind::View,
+                ObjectKind::Index,
+                ObjectKind::Trigger
+            ]
+        );
+        let names =
+            |v: Vec<navidog_db::ObjectInfo>| v.into_iter().map(|o| o.name).collect::<Vec<_>>();
+        assert_eq!(
+            names(rel.list_objects(&scope, ObjectKind::Table).await.unwrap()),
+            ["actor"]
+        );
+        assert_eq!(
+            names(rel.list_objects(&scope, ObjectKind::View).await.unwrap()),
+            ["v_actor"]
+        );
+        assert_eq!(
+            names(rel.list_objects(&scope, ObjectKind::Index).await.unwrap()),
+            ["idx_name"]
+        );
+        assert_eq!(
+            names(rel.list_objects(&scope, ObjectKind::Trigger).await.unwrap()),
+            ["trg"]
+        );
+        let ddl = rel
+            .object_ddl(&scope, ObjectKind::Table, "actor")
+            .await
+            .unwrap();
+        assert!(ddl.starts_with("CREATE TABLE actor"), "{ddl}");
+
+        let cols = rel.table_columns(&scope, "actor").await.unwrap();
+        assert_eq!(
+            cols.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+            ["id", "name", "note"]
+        );
+        assert!(cols[0].primary_key && !cols[1].nullable && cols[2].nullable);
+        assert_eq!(cols[1].default.as_deref(), Some("'x'"));
+
+        // 网格修改集合在真实数据库上执行
+        let d = rel.dialect();
+        let insert = ChangeSet {
+            inserts: vec![
+                vec![
+                    ("id".into(), Some("1".into())),
+                    ("name".into(), Some("O'Brien".into())),
+                ],
+                vec![
+                    ("id".into(), Some("2".into())),
+                    ("name".into(), Some("b".into())),
+                    ("note".into(), None),
+                ],
+            ],
+            ..Default::default()
+        };
+        for sql in d.render_changes(&scope, "actor", &insert, true) {
+            rel.execute(&sql).await.unwrap();
+        }
+        let update = ChangeSet {
+            updates: vec![RowUpdate {
+                key: RowKey(vec![("id".into(), Some("1".into()))]),
+                values: vec![("note".into(), Some("hi".into()))],
+            }],
+            deletes: vec![RowKey(vec![("id".into(), Some("2".into()))])],
+            ..Default::default()
+        };
+        for sql in d.render_changes(&scope, "actor", &update, true) {
+            rel.execute(&sql).await.unwrap();
+        }
+        let page = d.select_page(&scope, "actor", "", "id", Some(10), 0);
+        let rows = rel.execute(&page).await.unwrap().remove(0).rows;
+        assert_eq!(
+            rows,
+            vec![vec![
+                Some("1".into()),
+                Some("O'Brien".into()),
+                Some("hi".into())
+            ]]
+        );
+        let count = rel
+            .execute(&d.count(&scope, "actor", ""))
+            .await
+            .unwrap()
+            .remove(0)
+            .rows;
+        assert_eq!(count, vec![vec![Some("1".into())]]);
+        session.close().await.unwrap();
+    });
+}

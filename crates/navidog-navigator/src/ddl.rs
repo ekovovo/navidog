@@ -1,0 +1,128 @@
+//! 只读 DDL 选项卡：M4 设计器之前，双击表以外的对象在对象窗格中打开它。
+
+use gpui_kit::component::dock::{
+    BasePanel, Panel, PanelEvent, PanelInfo, PanelState, panel_handle, register_panel,
+};
+use gpui_kit::component::input::{Editor, EditorState};
+use gpui_kit::component::v_flex;
+use gpui_kit::{
+    App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable,
+    InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString, Styled as _,
+    Subscription, Window,
+};
+use navidog_core::object::ObjectRef;
+use navidog_db::sessions::{Sessions, SessionsEvent};
+use navidog_ui::palette;
+
+use crate::catalog::{Catalog, Load};
+
+const PANEL: &str = "DdlPanel";
+
+pub(crate) fn init(cx: &mut App) {
+    register_panel(cx, PANEL, |ctx, window, cx| {
+        let object = match ctx.info() {
+            PanelInfo::Panel(v) => serde_json::from_value::<ObjectRef>(v.clone()).ok(),
+            _ => None,
+        };
+        // 布局文件损坏时也要返回一个面板，用空对象占位
+        let object = object.unwrap_or_else(|| ObjectRef {
+            scope: navidog_core::object::Scope::new("", "", None),
+            kind: navidog_core::object::ObjectKind::Table,
+            name: String::new(),
+        });
+        panel_handle(DdlPanel::new(object, window, cx))
+    });
+}
+
+pub struct DdlPanel {
+    focus_handle: FocusHandle,
+    object: ObjectRef,
+    editor: Entity<EditorState>,
+    _subscriptions: Vec<Subscription>,
+}
+
+impl EventEmitter<PanelEvent> for DdlPanel {}
+
+impl Focusable for DdlPanel {
+    fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
+
+impl BasePanel for DdlPanel {
+    fn panel_name(&self) -> &'static str {
+        PANEL
+    }
+    fn dump(&self, _: &App) -> PanelState {
+        PanelState {
+            panel_name: PANEL.into(),
+            children: Vec::new(),
+            info: PanelInfo::panel(serde_json::to_value(&self.object).unwrap_or_default()),
+        }
+    }
+}
+
+impl Panel for DdlPanel {
+    fn tab_name(&self, _: &App) -> Option<SharedString> {
+        Some(self.object.name.clone().into())
+    }
+    fn title(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        self.object.name.clone()
+    }
+}
+
+impl DdlPanel {
+    pub fn new(object: ObjectRef, window: &mut Window, cx: &mut App) -> Entity<Self> {
+        let editor = crate::info::sql_editor(window, cx);
+        cx.new(|cx: &mut Context<Self>| {
+            let subs = vec![
+                cx.observe_in(&Catalog::global(cx), window, |this, _, window, cx| {
+                    this.sync(window, cx)
+                }),
+                // 恢复布局时连接可能尚未打开，打开后再加载
+                cx.subscribe(&Sessions::global(cx), |this, _, e: &SessionsEvent, cx| {
+                    if matches!(e, SessionsEvent::Opened(id) if *id == this.object.scope.connection)
+                    {
+                        this.load(cx);
+                    }
+                }),
+            ];
+            let this = Self {
+                focus_handle: cx.focus_handle(),
+                object,
+                editor,
+                _subscriptions: subs,
+            };
+            this.load(cx);
+            this
+        })
+    }
+
+    fn load(&self, cx: &mut App) {
+        let obj = self.object.clone();
+        Catalog::global(cx).update(cx, |c, cx| c.ensure_ddl(&obj, false, cx));
+    }
+
+    fn sync(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let text = match Catalog::global(cx).read(cx).ddl(&self.object) {
+            Some(Load::Ready(s)) => s.clone(),
+            Some(Load::Failed(e)) => format!("-- {e}"),
+            _ => return,
+        };
+        if self.editor.read(cx).value() != text.as_str() {
+            self.editor
+                .update(cx, |s, cx| s.set_value(text, window, cx));
+        }
+    }
+}
+
+impl Render for DdlPanel {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        v_flex()
+            .id("ddl-panel")
+            .track_focus(&self.focus_handle)
+            .size_full()
+            .bg(palette(cx).control_bg)
+            .child(Editor::new(&self.editor).size_full())
+    }
+}

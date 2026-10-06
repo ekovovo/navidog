@@ -1,6 +1,10 @@
-//! 连接管理的命令。除 `NewConnectionOf` 外都作用于工作区当前选择（导航树右键时先选中节点）。
+//! 跨 feature 共享的命令。feature crate 之间不互相依赖，通过这里的 Action 协作：
+//! 发出方只派发，处理方在窗口根元素或自己的面板上绑定。
+//! 除带参数的命令外，都作用于工作区当前选择。
 
 use gpui_kit::{Action, SharedString};
+
+use crate::object::ObjectRef;
 
 gpui_kit::actions!(
     connection,
@@ -39,4 +43,11 @@ pub struct SetColor {
 #[action(namespace = connection, no_json)]
 pub struct MoveToGroup {
     pub group: Option<SharedString>,
+}
+
+/// 在对象窗格中打开对象：表打开表查看器，其他对象在 M4 之前打开只读 DDL。
+#[derive(Clone, PartialEq, Debug, Action)]
+#[action(namespace = objects, no_json)]
+pub struct OpenObject {
+    pub object: ObjectRef,
 }

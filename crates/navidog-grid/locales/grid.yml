@@ -1,0 +1,120 @@
+_version: 2
+grid:
+  copy:
+    en: Copy
+    zh-CN: 复制
+  copy_as:
+    en: Copy As
+    zh-CN: 复制为
+  copy_insert:
+    en: Insert Statement
+    zh-CN: Insert 语句
+  copy_update:
+    en: Update Statement
+    zh-CN: Update 语句
+  copy_tsv_data:
+    en: Tab Separated Values (Data)
+    zh-CN: 制表符分隔值 (数据)
+  copy_tsv_names:
+    en: Tab Separated Values (Field Names)
+    zh-CN: 制表符分隔值 (字段名称)
+  copy_tsv_both:
+    en: Tab Separated Values (Field Names and Data)
+    zh-CN: 制表符分隔值 (字段名称和数据)
+  paste:
+    en: Paste
+    zh-CN: 粘贴
+  set_empty:
+    en: Set to Empty String
+    zh-CN: 设置为空白字符串
+  set_null:
+    en: Set to NULL
+    zh-CN: 设置为 NULL
+  delete_rows:
+    en: Delete Record
+    zh-CN: 删除记录
+viewer:
+  begin:
+    en: Begin Transaction
+    zh-CN: 开始事务
+  commit:
+    en: Commit
+    zh-CN: 提交
+  rollback:
+    en: Rollback
+    zh-CN: 回滚
+  discard:
+    en: Discard
+    zh-CN: 放弃
+  filter:
+    en: Filter
+    zh-CN: 筛选
+  sort:
+    en: Sort
+    zh-CN: 排序
+  import:
+    en: Import
+    zh-CN: 导入
+  export:
+    en: Export
+    zh-CN: 导出
+  apply:
+    en: Apply
+    zh-CN: 应用
+  where_hint:
+    en: "WHERE condition, e.g. id > 10"
+    zh-CN: "WHERE 条件，例如 id > 10"
+  order_hint:
+    en: "ORDER BY, e.g. name DESC"
+    zh-CN: "ORDER BY，例如 name DESC"
+  add_row:
+    en: Add Record
+    zh-CN: 添加记录
+  delete_row:
+    en: Delete Record
+    zh-CN: 删除记录
+  apply_changes:
+    en: Apply Changes
+    zh-CN: 应用更改
+  discard_changes:
+    en: Discard Changes
+    zh-CN: 放弃更改
+  refresh:
+    en: Refresh
+    zh-CN: 刷新
+  stop:
+    en: Stop
+    zh-CN: 停止
+  first_page:
+    en: First Page
+    zh-CN: 第一页
+  prev_page:
+    en: Previous Page
+    zh-CN: 上一页
+  next_page:
+    en: Next Page
+    zh-CN: 下一页
+  last_page:
+    en: Last Page
+    zh-CN: 最后一页
+  limit:
+    en: Limit
+    zh-CN: 限制
+  per_page:
+    en: records (per page)
+    zh-CN: 条记录 (每页)
+  records:
+    en: "Record %{selected} of %{count} in page %{page}"
+    zh-CN: "第 %{selected} 条记录 (共 %{count} 条) 于第 %{page} 页"
+  total:
+    en: "Total %{total}"
+    zh-CN: "总计 %{total} 条"
+  closed:
+    en: The connection is closed
+    zh-CN: 连接已关闭
+  commit_failed:
+    en: Failed to apply changes
+    zh-CN: 应用更改失败
+  close_pending:
+    en: "\"%{name}\" has uncommitted changes. Commit them?"
+    zh-CN: "“%{name}”有未提交的更改，是否提交？"

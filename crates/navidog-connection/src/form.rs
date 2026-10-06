@@ -22,7 +22,7 @@ use navidog_ui::skin::{FormRow, form_note};
 use navidog_ui::{palette, tokens};
 use rust_i18n::t;
 
-use crate::sessions::Sessions;
+use navidog_db::sessions::Sessions;
 
 pub fn open_new(driver: SharedString, window: &mut Window, cx: &mut App) {
     let mut conn = Connection::new(&driver);

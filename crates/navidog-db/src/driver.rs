@@ -5,8 +5,10 @@ use std::sync::Arc;
 
 use futures::future::BoxFuture;
 use gpui_kit::{App, Global, SharedString};
+use navidog_core::object::{ObjectKind, Scope};
 use navidog_core::registry::Registry;
 
+use crate::dialect::Dialect;
 use crate::params::ConnectParams;
 
 /// 驱动错误。`code` 保留数据库的原始错误码，显示为 Navicat 的“1045 - Access denied …”格式。
@@ -59,6 +61,8 @@ pub struct DriverInfo {
     pub default_port: Option<u16>,
     pub supports_ssl: bool,
     pub supports_ssh: bool,
+    /// 一个会话只能访问一个数据库（PostgreSQL），浏览其他数据库时需要另开会话
+    pub per_database_sessions: bool,
 }
 
 pub trait Driver: Send + Sync + 'static {
@@ -102,10 +106,63 @@ pub struct ResultSet {
     pub affected_rows: Option<u64>,
 }
 
+/// 对象列表中的一项（对象选项卡的列表与详细信息视图）。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ObjectInfo {
+    pub name: String,
+    pub kind: ObjectKind,
+    pub comment: Option<String>,
+    /// 详细信息视图的列，键是稳定的英文名（rows、data_length、engine、created……）
+    pub properties: Vec<(String, String)>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ColumnInfo {
+    pub name: String,
+    pub type_name: String,
+    pub nullable: bool,
+    pub primary_key: bool,
+    pub default: Option<String>,
+    pub comment: Option<String>,
+}
+
 pub trait Relational: Send {
+    fn dialect(&self) -> Dialect;
     fn list_databases(&mut self) -> BoxFuture<'_, DbResult<Vec<String>>>;
     /// 以文本协议执行一条或多条语句，每条返回一个结果集。
     fn execute<'a>(&'a mut self, sql: &'a str) -> BoxFuture<'a, DbResult<Vec<ResultSet>>>;
+
+    // 元数据：默认实现按方言生成 SQL 并经 `execute` 执行（metadata.rs）
+
+    /// 当前会话所连数据库中的模式；没有模式层级的方言返回空列表。
+    fn list_schemas(&mut self) -> BoxFuture<'_, DbResult<Vec<String>>> {
+        Box::pin(crate::metadata::list_schemas(self))
+    }
+    fn object_kinds(&self) -> &'static [ObjectKind] {
+        self.dialect().object_kinds()
+    }
+    fn list_objects<'a>(
+        &'a mut self,
+        scope: &'a Scope,
+        kind: ObjectKind,
+    ) -> BoxFuture<'a, DbResult<Vec<ObjectInfo>>> {
+        Box::pin(crate::metadata::list_objects(self, scope, kind))
+    }
+    fn object_ddl<'a>(
+        &'a mut self,
+        scope: &'a Scope,
+        kind: ObjectKind,
+        name: &'a str,
+    ) -> BoxFuture<'a, DbResult<String>> {
+        Box::pin(crate::metadata::object_ddl(self, scope, kind, name))
+    }
+    fn table_columns<'a>(
+        &'a mut self,
+        scope: &'a Scope,
+        table: &'a str,
+    ) -> BoxFuture<'a, DbResult<Vec<ColumnInfo>>> {
+        Box::pin(crate::metadata::table_columns(self, scope, table))
+    }
 }
 
 pub trait Document: Send {

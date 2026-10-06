@@ -1,40 +1,25 @@
-//! 连接管理：连接对话框、会话、导航窗格、对象选项卡与信息窗格（M1 部分）。
-
-// Action 派生宏输出 `gpui::` 路径
-extern crate gpui_kit as gpui;
+//! 连接管理：类型选择、连接表单、秘密解析、连接组，以及连接命令的处理。
 
 rust_i18n::i18n!("locales", fallback = "en");
 
-pub mod actions;
 mod form;
-mod info;
-mod navigator;
-mod objects;
+mod groups;
 mod picker;
 mod secrets;
-pub mod sessions;
 
 use std::sync::Arc;
 
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::{App, InteractiveElement, SharedString, Window};
+use navidog_core::actions::*;
 use navidog_core::connection::SecretField;
 use navidog_core::registry::{CommandInfo, CommandRegistry, Source};
 use navidog_core::store::ConnectionStore;
 use navidog_core::workspace::{Selection, Workspace};
+use navidog_db::sessions::Sessions;
 use rust_i18n::t;
 
-pub use actions::*;
-pub use info::InfoPanel;
-pub use navigator::{NavigatorPanel, set_view_options};
-pub use objects::ObjectsPanel;
-use sessions::Sessions;
-
 pub fn init(cx: &mut App) {
-    sessions::init(cx);
-    navigator::init(cx);
-    objects::init(cx);
-    info::init(cx);
     let commands = &mut cx.global_mut::<CommandRegistry>().0;
     let _ = commands.register(
         "connection.new",
@@ -44,6 +29,7 @@ pub fn init(cx: &mut App) {
             icon: Some("icons/plug.svg".into()),
             shortcut: None,
             action: || Box::new(NewConnection),
+            enabled: None,
         },
     );
 }
@@ -102,10 +88,8 @@ pub fn bind_actions<E: InteractiveElement>(el: E) -> E {
                 Sessions::global(cx).update(cx, |s, cx| s.refresh(&id, cx));
             }
         })
-        .on_action(|_: &OpenDatabase, window, cx| navigator::expand_selected(window, cx))
-        .on_action(|_: &CloseDatabase, window, cx| navigator::collapse_selected(window, cx))
-        .on_action(|_: &NewGroup, window, cx| navigator::new_group(window, cx))
-        .on_action(|_: &RenameGroup, window, cx| navigator::rename_group(window, cx))
+        .on_action(|_: &NewGroup, window, cx| groups::new_group(window, cx))
+        .on_action(|_: &RenameGroup, window, cx| groups::rename_group(window, cx))
         .on_action(|_: &DeleteGroup, window, cx| confirm_delete_group(window, cx))
         .on_action(|a: &SetColor, _, cx| {
             let Some(id) = selected_connection(cx) else {
@@ -214,33 +198,6 @@ pub(crate) fn show_error(
             .description(message.clone())
             .ok_text(t!("conn.ok").to_string())
     });
-}
-
-/// 状态栏文本（10-shell.md 第 8 节）。
-pub fn status_text(cx: &App) -> SharedString {
-    let store = ConnectionStore::global(cx);
-    let store = store.read(cx);
-    match Workspace::global(cx).read(cx).selection() {
-        Selection::Connection(id) | Selection::Database(id, _) => match store.get(id) {
-            Some(c) if c.supports_network() => format!(
-                "{}  {}:{}",
-                driver_name(&c.driver, cx),
-                c.general.host,
-                c.general.port.unwrap_or_default()
-            )
-            .into(),
-            Some(c) => format!(
-                "{}  {}",
-                driver_name(&c.driver, cx),
-                c.general.file.clone().unwrap_or_default()
-            )
-            .into(),
-            None => SharedString::default(),
-        },
-        Selection::Group(_) | Selection::None => t!("obj.items", count = store.connections().len())
-            .to_string()
-            .into(),
-    }
 }
 
 pub(crate) fn driver_name(driver: &str, cx: &App) -> SharedString {

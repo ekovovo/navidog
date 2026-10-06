@@ -68,6 +68,8 @@
 | `object_toolbar.height` | 36 | 暂定，待 AX |
 | `list.header.height` | 23 | nib:MainObjectViewController/NSTableHeaderView（高 23） |
 | `list.row.height` | 22 | 暂定，待 AX |
+| `list.name_column_width` | 220 | 暂定，待 AX（详细信息视图的名称列） |
+| `list.detail_column_width` | 130 | 暂定，待 AX（详细信息视图的属性列） |
 
 ## 5.1 表查看器与结果网格（M2）
 
@@ -160,6 +162,13 @@ Navicat 的 nib 中几乎所有颜色都是 AppKit 语义色。在 718 个 nib �
 | `color.success` | appkit:systemGreen | `#34c759ff` | `#30d158ff` |
 | `color.info` | appkit:systemBlue | `#0088ffff` | `#0091ffff` |
 | `color.gray` | appkit:systemGray | `#8e8e93ff` | `#98989dff` |
+
+结果网格的修改标记不是 AppKit 语义色，先用暂定值，待与 Navicat 并排实测后替换：
+
+| token | 来源 | 浅色 | 深色 |
+| --- | --- | --- | --- |
+| `color.grid_edited` | 暂定，待实测（已修改、未提交的单元格） | `#fff3c4ff` | `#5c4b1aff` |
+| `color.grid_deleted` | 暂定，待实测（待删除的行） | `#ffd9d9ff` | `#5c2424ff` |
 
 连接颜色（F-CONN-014）的候选色板使用 systemRed、systemOrange、systemYellow、systemGreen、systemBlue、systemPurple、systemGray，取值见 `reference/colors.json`，具体列表在 M1 连接规格中确认。
 

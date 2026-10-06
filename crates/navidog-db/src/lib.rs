@@ -1,10 +1,14 @@
 //! 驱动层：trait、tokio 运行时、内置驱动（MySQL/MariaDB、PostgreSQL、SQLite）与 SSH 隧道。
 
+pub mod dialect;
 pub mod driver;
+mod metadata;
 pub mod mysql;
 pub mod params;
 pub mod postgres;
 pub mod runtime;
+pub mod sessions;
+pub mod sql;
 pub mod sqlite;
 pub mod ssh;
 
@@ -35,6 +39,7 @@ pub fn init(cx: &mut App) {
             .expect("内置驱动不会重复");
     }
     cx.set_global(registry);
+    sessions::init(cx);
 }
 
 /// 建立会话：启用 SSH 时先开隧道，再让驱动连接隧道的本地端口。

@@ -3,6 +3,7 @@
 rust_i18n::i18n!("locales", fallback = "en");
 
 mod actions;
+mod editors;
 pub mod main_window;
 mod menus;
 mod preferences;
@@ -69,6 +70,8 @@ pub fn init(cx: &mut App) {
     navidog_ui::theme::init(cx);
     navidog_db::init(cx);
     navidog_connection::init(cx);
+    navidog_navigator::init(cx);
+    navidog_grid::init(cx);
     navidog_plugin::init(cx);
     cx.set_global(AppState::load());
 }

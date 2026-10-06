@@ -75,6 +75,14 @@ pub struct CommandInfo {
     pub icon: Option<SharedString>,
     pub shortcut: Option<SharedString>,
     pub action: fn() -> Box<dyn Action>,
+    /// 当前是否可用（例如需要先选中数据库）；`None` 表示总是可用
+    pub enabled: Option<fn(&App) -> bool>,
+}
+
+impl CommandInfo {
+    pub fn is_enabled(&self, cx: &App) -> bool {
+        self.enabled.is_none_or(|f| f(cx))
+    }
 }
 
 /// Dock 面板元数据；面板构造由各 feature crate 通过 gpui-base 的 `register_panel` 完成。

@@ -31,6 +31,7 @@ impl Default for PostgresDriver {
                 default_port: Some(5432),
                 supports_ssl: true,
                 supports_ssh: true,
+                per_database_sessions: true,
             },
         }
     }
@@ -150,13 +151,8 @@ impl Driver for PostgresDriver {
             let client = tokio::time::timeout(params.timeout(), connect(&params))
                 .await
                 .map_err(|_| DbError::msg("连接超时"))??;
-            for q in params
-                .initial_queries
-                .split(';')
-                .map(str::trim)
-                .filter(|q| !q.is_empty())
-            {
-                client.batch_execute(q).await.map_err(err)?;
+            for q in crate::sql::split_statements(&params.initial_queries) {
+                client.batch_execute(&q).await.map_err(err)?;
             }
             let version = first_value(&client, "SHOW server_version")
                 .await?
@@ -225,6 +221,10 @@ impl Session for PgSession {
 }
 
 impl Relational for PgSession {
+    fn dialect(&self) -> crate::dialect::Dialect {
+        crate::dialect::Dialect::Postgres
+    }
+
     fn list_databases(&mut self) -> BoxFuture<'_, DbResult<Vec<String>>> {
         async move {
             let msgs = self

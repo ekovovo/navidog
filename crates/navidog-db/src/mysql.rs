@@ -35,6 +35,7 @@ impl MySqlDriver {
                 default_port: Some(3306),
                 supports_ssl: true,
                 supports_ssh: true,
+                per_database_sessions: false,
             },
         }
     }
@@ -47,14 +48,6 @@ fn err(e: mysql_async::Error) -> DbError {
     }
 }
 
-fn split_queries(sql: &str) -> Vec<String> {
-    sql.split(';')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(String::from)
-        .collect()
-}
-
 fn build_opts(p: &ConnectParams) -> Opts {
     let mut b = OptsBuilder::default()
         .ip_or_hostname(p.host.clone())
@@ -62,7 +55,7 @@ fn build_opts(p: &ConnectParams) -> Opts {
         .user(Some(p.user.clone()))
         .pass(p.password.clone())
         .db_name(p.database.clone())
-        .init(split_queries(&p.initial_queries))
+        .init(crate::sql::split_statements(&p.initial_queries))
         .socket(p.socket.clone())
         .prefer_socket(p.socket.is_some());
     if p.compression {
@@ -154,6 +147,10 @@ impl Session for MySqlSession {
 }
 
 impl Relational for MySqlSession {
+    fn dialect(&self) -> crate::dialect::Dialect {
+        crate::dialect::Dialect::MySql
+    }
+
     fn list_databases(&mut self) -> BoxFuture<'_, DbResult<Vec<String>>> {
         async move { self.conn.query("SHOW DATABASES").await.map_err(err) }.boxed()
     }
@@ -200,16 +197,5 @@ fn value_text(v: mysql_async::Value) -> Option<String> {
         Float(f) => Some(f.to_string()),
         Double(d) => Some(d.to_string()),
         other => Some(other.as_sql(true).trim_matches('\'').to_string()),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::split_queries;
-
-    #[test]
-    fn splits_initial_queries() {
-        assert_eq!(split_queries(" SET a=1; ;SET b=2;"), ["SET a=1", "SET b=2"]);
-        assert!(split_queries("  ").is_empty());
     }
 }

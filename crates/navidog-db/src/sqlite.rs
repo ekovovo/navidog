@@ -27,6 +27,7 @@ impl Default for SqliteDriver {
                 default_port: None,
                 supports_ssl: false,
                 supports_ssh: false,
+                per_database_sessions: false,
             },
         }
     }
@@ -143,6 +144,10 @@ impl Session for SqliteSession {
 }
 
 impl Relational for SqliteSession {
+    fn dialect(&self) -> crate::dialect::Dialect {
+        crate::dialect::Dialect::Sqlite
+    }
+
     fn list_databases(&mut self) -> BoxFuture<'_, DbResult<Vec<String>>> {
         async move {
             blocking(&self.conn, |c| {
@@ -166,11 +171,10 @@ impl Relational for SqliteSession {
 }
 
 /// 逐条执行多语句 SQL，每条返回一个结果集。
-// ponytail: 按分号切分，字符串或触发器体内的分号会被误切；M3 引入 SQL 分句器后替换
 fn execute_all(conn: &mut rusqlite::Connection, sql: &str) -> DbResult<Vec<ResultSet>> {
     let mut sets = Vec::new();
-    for piece in sql.split(';').map(str::trim).filter(|s| !s.is_empty()) {
-        let mut stmt = conn.prepare(piece).map_err(err)?;
+    for piece in crate::sql::split_statements(sql) {
+        let mut stmt = conn.prepare(&piece).map_err(err)?;
         let columns: Vec<Column> = stmt
             .columns()
             .iter()

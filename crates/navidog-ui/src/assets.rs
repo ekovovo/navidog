@@ -9,6 +9,9 @@ icon_assets!(pub ExtraIcons, [
     DatabaseBackup, CalendarClock, Workflow, ChartPie, Database, Folder, FolderOpen,
     Server, Star, RefreshCw, Layers, Maximize2, Minimize2, CircleCheck, TriangleAlert,
     Plus, Minus, X, Search, Cable, Unplug, Palette, FolderInput, Copy, Trash, Pencil,
+    Eraser, Scissors, List, TableProperties, Zap, KeyRound, ListOrdered, CircleX, Info, Code,
+    Columns3, Check, RotateCcw, Play, Square, ChevronFirst, ChevronLast, ChevronLeft, ChevronRight,
+    Funnel, ArrowUpDown, Clipboard, Undo2, Save, FileText, GitCommitHorizontal, CircleStop,
 ]);
 
 /// 自绘的彩色图标，按 `img()` 方式渲染（`svg()` 只能单色着色）。

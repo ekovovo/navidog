@@ -4,29 +4,21 @@ use std::time::{Duration, Instant};
 
 use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{
-    AppContext as _, Context, Entity, FocusHandle, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, Styled as _, TestAppContext, Window, WindowBounds, WindowOptions,
-    div, size,
+    AppContext as _, Context, FocusHandle, InteractiveElement as _, IntoElement, Render,
+    Styled as _, TestAppContext, Window, WindowBounds, WindowOptions, div, size,
 };
-use navidog_connection::sessions::{ConnState, Sessions};
-use navidog_connection::{NavigatorPanel, NewConnectionOf, OpenConnection};
+use navidog_core::actions::{NewConnectionOf, OpenConnection};
 use navidog_core::crypto::Key;
 use navidog_core::store::ConnectionStore;
+use navidog_db::sessions::{ConnState, Sessions};
 
 struct Host {
     focus: FocusHandle,
-    navigator: Entity<NavigatorPanel>,
 }
 
 impl Render for Host {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        navidog_connection::bind_actions(
-            div()
-                .id("host")
-                .track_focus(&self.focus)
-                .size_full()
-                .child(self.navigator.clone()),
-        )
+        navidog_connection::bind_actions(div().id("host").track_focus(&self.focus).size_full())
     }
 }
 
@@ -57,11 +49,9 @@ fn creates_and_opens_sqlite_connection(cx: &mut TestAppContext) {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             ..Default::default()
         };
-        gpui_kit::open_window(options, cx, |window, cx| {
-            let navigator = NavigatorPanel::shared(window, cx);
+        gpui_kit::open_window(options, cx, |_, cx| {
             cx.new(|cx| Host {
                 focus: cx.focus_handle(),
-                navigator,
             })
         })
         .unwrap()
@@ -109,7 +99,7 @@ fn creates_and_opens_sqlite_connection(cx: &mut TestAppContext) {
         assert!(c.general.create_new);
         c.id.clone()
     });
-    // 保存后表单已关闭，新连接成为当前选择
+    // 保存后表单已关闭；新连接成为当前选择，打开连接作用于它
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
         assert!(window.try_find("conn-name").is_none());

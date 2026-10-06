@@ -3,7 +3,7 @@
 use std::rc::Rc;
 
 use gpui_kit::component::dock::{
-    DockArea, DockAreaState, DockEvent, DockLayout, DockPlacement, DockSkin, panel_handle,
+    DockArea, DockAreaState, DockEvent, DockLayout, DockPlacement, DockSkin, PanelId, panel_handle,
 };
 use gpui_kit::component::status_bar::StatusBar;
 use gpui_kit::component::{TitleBar, h_flex, v_flex};
@@ -12,10 +12,12 @@ use gpui_kit::{
     App, Context, Entity, FocusHandle, InteractiveElement as _, IntoElement, ParentElement as _,
     Render, Styled as _, Subscription, Window, div,
 };
-use navidog_connection::{InfoPanel, NavigatorPanel, ObjectsPanel};
+use navidog_core::actions::OpenObject;
+use navidog_core::object::ObjectRef;
 use navidog_core::registry::CommandRegistry;
 use navidog_core::store::ConnectionStore;
 use navidog_core::workspace::Workspace;
+use navidog_navigator::{InfoPanel, NavigatorPanel, ObjectsPanel};
 use navidog_ui::assets::lucide;
 use navidog_ui::skin::ToolbarItem;
 use navidog_ui::{palette, tokens};
@@ -33,6 +35,8 @@ pub struct MainWindow {
     _skin: Rc<DockSkin>,
     state: AppState,
     info_restore: Option<gpui_kit::Pixels>,
+    /// 已打开的编辑器选项卡，避免同一对象重复打开
+    open_tabs: std::collections::HashMap<ObjectRef, PanelId>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -117,7 +121,7 @@ impl MainWindow {
                 let _ = weak.update(cx, |this, cx| this.toggle_info_maximized(window, cx));
             })
         });
-        navidog_connection::set_view_options(state.filter_on_top, state.hide_groups, cx);
+        navidog_navigator::set_view_options(state.filter_on_top, state.hide_groups, cx);
 
         let subs = vec![
             cx.subscribe_in(&dock, window, |this, _, e: &DockEvent, window, cx| {
@@ -150,6 +154,7 @@ impl MainWindow {
             _skin: skin,
             state,
             info_restore: None,
+            open_tabs: Default::default(),
             _subscriptions: subs,
         }
     }
@@ -205,7 +210,7 @@ impl MainWindow {
         cx: &mut Context<Self>,
     ) {
         f(&mut self.state);
-        navidog_connection::set_view_options(self.state.filter_on_top, self.state.hide_groups, cx);
+        navidog_navigator::set_view_options(self.state.filter_on_top, self.state.hide_groups, cx);
         cx.set_global(self.state.clone());
         crate::menus::set_menus(cx);
         self.save_state(window, cx);
@@ -246,6 +251,22 @@ impl MainWindow {
         self.save_state(window, cx);
     }
 
+    /// 在对象窗格中打开对象：同一对象的选项卡已经打开时切换过去，否则新建。
+    fn open_object(&mut self, object: &ObjectRef, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(id) = self.open_tabs.get(object).copied()
+            && self.dock.read(cx).panel(id).is_some()
+        {
+            self.dock.update(cx, |a, cx| a.select_panel(id, window, cx));
+            return;
+        }
+        let panel = crate::editors::open(object.clone(), window, cx);
+        let id = panel.panel_id(cx);
+        self.open_tabs.insert(object.clone(), id);
+        self.dock.update(cx, |a, cx| {
+            a.add_panel_view(panel, DockPlacement::Center, None, window, cx)
+        });
+    }
+
     fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
         let registry = cx.global::<CommandRegistry>();
@@ -262,6 +283,7 @@ impl MainWindow {
                 }
                 let action = command
                     .and_then(|c| registry.get(c))
+                    .filter(|info| info.is_enabled(cx))
                     .map(|info| info.action);
                 ToolbarItem::new(*id, lucide(icon), t!(*label).to_string())
                     .disabled(action.is_none())
@@ -291,7 +313,7 @@ impl gpui_kit::Focusable for MainWindow {
 impl Render for MainWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
-        let status = navidog_connection::status_text(cx);
+        let status = navidog_navigator::status_text(cx);
         let root = v_flex()
             .id("main-window")
             .key_context("MainWindow")
@@ -299,6 +321,9 @@ impl Render for MainWindow {
             .size_full()
             .bg(p.window_bg)
             .text_color(p.label)
+            .on_action(cx.listener(|this, a: &OpenObject, window, cx| {
+                this.open_object(&a.object, window, cx)
+            }))
             .on_action(cx.listener(|this, _: &ToggleNavigator, window, cx| {
                 this.toggle_dock(DockPlacement::Left, window, cx)
             }))

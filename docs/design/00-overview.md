@@ -7,6 +7,7 @@ navidog 用 [gpui-kit](https://gpui-kit.com/zh-CN/docs/) 全家桶（GPUI、`gpu
 | 文档 | 内容 |
 | --- | --- |
 | [CONTEXT.md](../../CONTEXT.md) | 术语表 |
+| [progress.md](../progress.md) | 实现进度：里程碑、当前里程碑任务、功能状态、临时偏差 |
 | 本文 | 决策记录、架构、工程规则、里程碑 |
 | [01-feature-inventory.md](01-feature-inventory.md) | 全量功能清单（编号、摘要、验收要点、Navicat 帮助页、里程碑） |
 | [02-design-tokens.md](02-design-tokens.md) | 设计 token 表（每项附来源） |
@@ -181,4 +182,5 @@ gpui-kit 的[编码指南](https://gpui-kit.com/zh-CN/docs/coding-guides)和[设
 - CI 通过：fmt、clippy、单元测试、headless UI 测试、裸值检查。
 - 每段不简单的逻辑至少有一个可运行的检查。
 - 新增 token 都在 [02-design-tokens.md](02-design-tokens.md) 写明来源；与 Navicat 的偏差都写进模块规格。
+- [progress.md](../progress.md) 已同步更新。
 - 并排目测通过评审后，PR 合并到 `master`。

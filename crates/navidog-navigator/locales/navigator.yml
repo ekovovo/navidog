@@ -1,0 +1,309 @@
+_version: 2
+nav:
+  search:
+    en: Search
+    zh-CN: 搜索
+  open_connection:
+    en: Open Connection
+    zh-CN: 打开连接
+  close_connection:
+    en: Close Connection
+    zh-CN: 关闭连接
+  edit_connection:
+    en: Edit Connection…
+    zh-CN: 编辑连接…
+  new_connection:
+    en: New Connection
+    zh-CN: 新建连接
+  duplicate_connection:
+    en: Duplicate Connection
+    zh-CN: 复制连接
+  delete_connection:
+    en: Delete Connection…
+    zh-CN: 删除连接…
+  new_group:
+    en: New Group
+    zh-CN: 新建组
+  rename_group:
+    en: Rename Group…
+    zh-CN: 重命名…
+  delete_group:
+    en: Delete Group…
+    zh-CN: 删除组…
+  color:
+    en: Color
+    zh-CN: 颜色
+  color_none:
+    en: None
+    zh-CN: 无
+  color_red:
+    en: Red
+    zh-CN: 红
+  color_orange:
+    en: Orange
+    zh-CN: 橙
+  color_yellow:
+    en: Yellow
+    zh-CN: 黄
+  color_green:
+    en: Green
+    zh-CN: 绿
+  color_blue:
+    en: Blue
+    zh-CN: 蓝
+  color_purple:
+    en: Purple
+    zh-CN: 紫
+  color_gray:
+    en: Gray
+    zh-CN: 灰
+  move_to_group:
+    en: Move To Group
+    zh-CN: 移动到组
+  top_level:
+    en: Top Level
+    zh-CN: 顶层
+  refresh:
+    en: Refresh
+    zh-CN: 刷新
+  open_database:
+    en: Open Database
+    zh-CN: 打开数据库
+  close_database:
+    en: Close Database
+    zh-CN: 关闭数据库
+  new_query:
+    en: New Query
+    zh-CN: 新建查询
+  console:
+    en: Console
+    zh-CN: 命令列界面
+  new_database:
+    en: New Database…
+    zh-CN: 新建数据库…
+  loading:
+    en: Loading…
+    zh-CN: 正在加载…
+kind:
+  table:
+    en: Tables
+    zh-CN: 表
+  view:
+    en: Views
+    zh-CN: 视图
+  materialized_view:
+    en: Materialized Views
+    zh-CN: 实体化视图
+  function:
+    en: Functions
+    zh-CN: 函数
+  event:
+    en: Events
+    zh-CN: 事件
+  trigger:
+    en: Triggers
+    zh-CN: 触发器
+  index:
+    en: Indexes
+    zh-CN: 索引
+  sequence:
+    en: Sequences
+    zh-CN: 序列
+obj:
+  objects_tab:
+    en: Objects
+    zh-CN: 对象
+  empty_hint:
+    en: "Click “Connection” in the toolbar to get started"
+    zh-CN: "点击工具栏中的“连接”开始"
+  not_connected:
+    en: Not connected
+    zh-CN: 未连接
+  connecting:
+    en: Connecting…
+    zh-CN: 正在连接…
+  loading:
+    en: Loading…
+    zh-CN: 正在加载…
+  items:
+    en: "%{count} items"
+    zh-CN: "%{count} 个项目"
+  items_selected:
+    en: "%{count} items (1 selected)"
+    zh-CN: "%{count} 个项目（已选择 1 个）"
+  open:
+    en: Open
+    zh-CN: 打开
+  design:
+    en: Design
+    zh-CN: 设计
+  new:
+    en: New
+    zh-CN: 新建
+  delete:
+    en: Delete
+    zh-CN: 删除
+  empty:
+    en: Empty
+    zh-CN: 清空
+  truncate:
+    en: Truncate
+    zh-CN: 截断
+  list_view:
+    en: List
+    zh-CN: 列表
+  detail_view:
+    en: Detail
+    zh-CN: 详细信息
+  confirm_drop:
+    en: "Are you sure you want to delete %{kind} “%{name}”?"
+    zh-CN: "确定要删除%{kind}“%{name}”吗？"
+  confirm_empty:
+    en: "Are you sure you want to empty table “%{name}”? All rows will be deleted."
+    zh-CN: "确定要清空表“%{name}”吗？所有记录都会被删除。"
+  confirm_truncate:
+    en: "Are you sure you want to truncate table “%{name}”?"
+    zh-CN: "确定要截断表“%{name}”吗？"
+  cancel:
+    en: Cancel
+    zh-CN: 取消
+  ok:
+    en: OK
+    zh-CN: 确定
+  failed:
+    en: Operation failed
+    zh-CN: 操作失败
+col:
+  name:
+    en: Name
+    zh-CN: 名称
+  rows:
+    en: Rows
+    zh-CN: 行
+  data_length:
+    en: Data Length
+    zh-CN: 数据长度
+  engine:
+    en: Engine
+    zh-CN: 引擎
+  created:
+    en: Created Date
+    zh-CN: 创建日期
+  modified:
+    en: Modified Date
+    zh-CN: 修改日期
+  collation:
+    en: Collation
+    zh-CN: 排序规则
+  comment:
+    en: Comment
+    zh-CN: 注释
+  definer:
+    en: Definer
+    zh-CN: 定义者
+  security:
+    en: Security
+    zh-CN: 安全性
+  check_option:
+    en: Check Option
+    zh-CN: 检查选项
+  updatable:
+    en: Updatable
+    zh-CN: 可更新
+  type:
+    en: Type
+    zh-CN: 类型
+  returns:
+    en: Returns
+    zh-CN: 返回
+  arguments:
+    en: Arguments
+    zh-CN: 参数
+  owner:
+    en: Owner
+    zh-CN: 拥有者
+  status:
+    en: Status
+    zh-CN: 状态
+  execute_at:
+    en: Execute At
+    zh-CN: 执行时间
+  interval:
+    en: Interval
+    zh-CN: 间隔
+  interval_field:
+    en: Interval Field
+    zh-CN: 间隔单位
+  table:
+    en: Table
+    zh-CN: 表
+info:
+  general:
+    en: General
+    zh-CN: 常规
+  ddl:
+    en: DDL
+    zh-CN: DDL
+  fields:
+    en: Fields
+    zh-CN: 字段
+  nothing_selected:
+    en: No object selected
+    zh-CN: 没有选择对象
+  type:
+    en: Type
+    zh-CN: 类型
+  host:
+    en: Host
+    zh-CN: 主机
+  port:
+    en: Port
+    zh-CN: 端口
+  user:
+    en: User Name
+    zh-CN: 用户名
+  file:
+    en: Database File
+    zh-CN: 数据库文件
+  server_version:
+    en: Server Version
+    zh-CN: 服务器版本
+  status:
+    en: Status
+    zh-CN: 状态
+  sessions:
+    en: Sessions
+    zh-CN: 会话
+  group:
+    en: Group
+    zh-CN: 组
+  connections:
+    en: Connections
+    zh-CN: 连接数
+  database:
+    en: Database
+    zh-CN: 数据库
+  schema:
+    en: Schema
+    zh-CN: 模式
+  connection:
+    en: Connection
+    zh-CN: 连接
+  object:
+    en: Name
+    zh-CN: 名称
+  status_open:
+    en: Open
+    zh-CN: 已打开
+  status_closed:
+    en: Closed
+    zh-CN: 已关闭
+  nullable:
+    en: Nullable
+    zh-CN: 允许空
+  primary_key:
+    en: Primary Key
+    zh-CN: 主键
+  default:
+    en: Default
+    zh-CN: 默认值

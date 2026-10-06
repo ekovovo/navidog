@@ -2,7 +2,7 @@
 
 use gpui_kit::base::input::{Copy, Cut, Paste, Redo, SelectAll, Undo};
 use gpui_kit::{App, KeyBinding, Menu, MenuItem, OsAction, SystemMenuType};
-use navidog_connection::{CloseConnection, NewConnection, NewConnectionOf, NewGroup, Refresh};
+use navidog_core::actions::{CloseConnection, NewConnection, NewConnectionOf, NewGroup, Refresh};
 use rust_i18n::t;
 
 use crate::actions::*;

@@ -1,7 +1,12 @@
-//! 领域模型、配置目录、加密存储与注册表。不依赖任何界面组件。
+//! 领域模型、配置目录、加密存储、注册表与跨 feature 命令。不依赖任何界面组件。
 
+// Action 派生宏输出 `gpui::` 路径
+extern crate gpui_kit as gpui;
+
+pub mod actions;
 pub mod connection;
 pub mod crypto;
+pub mod object;
 pub mod paths;
 pub mod registry;
 pub mod settings;

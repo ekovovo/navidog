@@ -1,4 +1,6 @@
 -- Sakila 示例库的精简子集，供开发与测试使用
+-- 初始化脚本默认以 latin1 客户端字符集执行，不声明会把中文注释二次编码
+SET NAMES utf8mb4;
 CREATE DATABASE IF NOT EXISTS sakila DEFAULT CHARACTER SET utf8mb4;
 USE sakila;
 
