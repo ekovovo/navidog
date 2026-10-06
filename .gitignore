@@ -1,1 +1,4 @@
 /target
+# Navicat 参考资料的本地导出，含专有内容，禁止提交
+/reference
+.DS_Store
