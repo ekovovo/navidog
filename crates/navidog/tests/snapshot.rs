@@ -1,6 +1,6 @@
-//! 用 Metal headless 渲染器把主窗口画成 PNG，供并排目测（不做像素断言）。
-//! 运行：`cargo test -p navidog --test snapshot`，输出在 `target/snapshots/`。
-//! AppKit 要求主线程，所以 `harness = false`。
+//! Renders the main window to PNGs with the headless Metal renderer for side-by-side review
+//! (no pixel assertions). Run `cargo test -p navidog --test snapshot`; output goes to `target/snapshots/`.
+//! AppKit requires the main thread, hence `harness = false`.
 
 fn main() {
     #[cfg(target_os = "macos")]
@@ -29,7 +29,7 @@ mod macos {
 
     pub fn run() {
         let home = std::env::temp_dir().join(format!("navidog-snapshot-{}", std::process::id()));
-        // SAFETY: 单线程启动阶段，尚未创建任何读取环境变量的线程
+        // SAFETY: single-threaded startup; no thread reading the environment exists yet
         unsafe {
             std::env::set_var("NAVIDOG_HOME", &home);
             std::env::set_var("LANG", "zh_CN.UTF-8");
@@ -58,7 +58,7 @@ mod macos {
             .unwrap();
 
         let shot = |cx: &mut HeadlessAppContext, name: &str| {
-            // 图标等资源异步加载，先让任务跑完再渲染
+            // Icons and other assets load asynchronously; let the tasks finish before rendering
             for _ in 0..3 {
                 cx.update_window(handle, |_, window, cx| window.render_frame(cx))
                     .unwrap();
@@ -99,7 +99,7 @@ mod macos {
                 .unwrap();
         }
 
-        // M2：打开 SQLite 示例库，展开到对象，显示对象列表与 DDL 选项卡
+        // M2: open the sample SQLite database, expand to objects, show the object list and editor tabs
         let lite = cx.update(|cx| {
             ConnectionStore::global(cx)
                 .read(cx)
@@ -150,13 +150,16 @@ mod macos {
         dispatch(&mut cx, Box::new(OpenObject { object: view }));
         wait(&mut cx, |_| false);
         shot(&mut cx, "ddl-tab.png");
+        cx.update(|cx| Theme::change(ThemeMode::Dark, None, cx));
+        shot(&mut cx, "ddl-tab-dark.png");
+        cx.update(|cx| Theme::change(ThemeMode::Light, None, cx));
         dispatch(&mut cx, Box::new(OpenObject { object: actor }));
         wait(&mut cx, |_| false);
         shot(&mut cx, "viewer.png");
         let _ = std::fs::remove_dir_all(home);
     }
 
-    /// 等待异步加载（驱动在 tokio 运行时中执行）；条件不满足时最多等 3 秒。
+    /// Waits for async loads (drivers run on the tokio runtime), at most 3 seconds.
     fn wait(cx: &mut HeadlessAppContext, done: impl Fn(&gpui_kit::App) -> bool) {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
         while std::time::Instant::now() < deadline {
@@ -168,32 +171,36 @@ mod macos {
         }
     }
 
-    /// SQLite 示例库：几张表、一个视图、一个索引。
+    /// Sample SQLite database: a few tables, a view and an index.
     fn sample_db(path: &std::path::Path) {
         let params = navidog_db::ConnectParams {
             file: Some(path.into()),
             create_new: true,
             ..Default::default()
         };
+        // Enough tables to overflow the navigator, so the shot shows whether the tree fills the pane
+        let logs: String = (1..=24)
+            .map(|i| format!("CREATE TABLE log_{i:02}(id INTEGER PRIMARY KEY);"))
+            .collect();
         navidog_db::runtime::runtime().block_on(async {
             let mut s = navidog_db::connect(Arc::new(navidog_db::sqlite::SqliteDriver::default()), params).await.unwrap();
             s.relational()
                 .unwrap()
-                .execute(
+                .execute(&format!(
                     "CREATE TABLE actor(id INTEGER PRIMARY KEY, first_name TEXT NOT NULL, last_name TEXT NOT NULL);\
                      CREATE TABLE film(id INTEGER PRIMARY KEY, title TEXT, release_year INTEGER, rating TEXT);\
                      CREATE TABLE film_actor(actor_id INTEGER, film_id INTEGER, PRIMARY KEY(actor_id, film_id));\
                      CREATE VIEW actor_names AS SELECT first_name || ' ' || last_name AS name FROM actor;\
                      CREATE INDEX idx_actor_last ON actor(last_name);\
-                     INSERT INTO actor(first_name, last_name) VALUES ('PENELOPE','GUINESS'),('NICK','WAHLBERG');",
-                )
+                     INSERT INTO actor(first_name, last_name) VALUES ('PENELOPE','GUINESS'),('NICK','WAHLBERG');{logs}",
+                ))
                 .await
                 .unwrap();
             s.close().await.unwrap();
         });
     }
 
-    /// 准备几条示例连接与分组，选中其中一条。
+    /// Seeds sample connections and a group, and selects one connection.
     fn seed(cx: &mut gpui_kit::App) {
         let store = ConnectionStore::global(cx);
         store.update(cx, |s, cx| {

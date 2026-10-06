@@ -12,3 +12,5 @@ anyhow.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
+# Without a tree-sitter feature gpui-component uses a highlighter stub that ignores `editor.*` theme keys
+gpui-kit = { workspace = true, features = ["test-support", "tree-sitter-sql"] }

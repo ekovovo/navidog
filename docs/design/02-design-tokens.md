@@ -170,6 +170,8 @@ Navicat 的 nib 中几乎所有颜色都是 AppKit 语义色。在 718 个 nib �
 | `color.grid_edited` | 暂定，待实测（已修改、未提交的单元格） | `#fff3c4ff` | `#5c4b1aff` |
 | `color.grid_deleted` | 暂定，待实测（待删除的行） | `#ffd9d9ff` | `#5c2424ff` |
 
+SQL 编辑器（DDL 页、DDL 选项卡，以及 M3 的查询编辑器）的底色、文字、当前行、行号分别取 `color.control_bg`、`color.label`、`color.fill_tertiary`、`color.label_tertiary`，写在 `themes/navicat.json` 的 `highlight` 中；语法配色暂用 gpui-component 默认主题的值，待与 Navicat 并排实测后替换。
+
 连接颜色（F-CONN-014）的候选色板使用 systemRed、systemOrange、systemYellow、systemGreen、systemBlue、systemPurple、systemGray，取值见 `reference/colors.json`，具体列表在 M1 连接规格中确认。
 
 ## 9. 待 AX 实测的项目

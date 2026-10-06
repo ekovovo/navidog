@@ -1,5 +1,5 @@
-//! 导航窗格（10-shell.md 第 6 节、20-objects.md 第 2 节）：
-//! 组 > 连接 > 数据库 >（模式）> 对象分类 > 对象。
+//! Navigator pane (10-shell.md §6, 20-objects.md §2):
+//! group > connection > database > (schema) > object category > object.
 
 use std::collections::HashSet;
 
@@ -41,7 +41,7 @@ pub(crate) fn init(cx: &mut App) {
     });
 }
 
-/// 树节点。ID 编码为 `前缀:字段␟字段…`，模式为空串表示没有模式层级。
+/// Tree node. IDs are encoded as `prefix:field␟field…`; an empty schema means no schema level.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Node {
     Group(String),
@@ -50,7 +50,7 @@ pub(crate) enum Node {
     Schema(Scope),
     Category(Scope, ObjectKind),
     Object(ObjectRef),
-    /// 尚未加载的占位子项（让父节点显示展开箭头）
+    /// Placeholder child before loading, so the parent shows a disclosure arrow
     Placeholder(String),
 }
 
@@ -133,7 +133,7 @@ impl Node {
         })
     }
 
-    /// 从树根到本节点的祖先（不含自身），用于展开以显示选择。
+    /// Ancestors from the root down to this node (exclusive), expanded to reveal a selection.
     fn ancestors(&self, dialect: Option<Dialect>) -> Vec<Node> {
         let scope_chain = |s: &Scope| {
             let mut v = vec![
@@ -205,7 +205,7 @@ fn kind_label(kind: ObjectKind) -> String {
 }
 
 impl NavigatorPanel {
-    /// 主窗口只有一个导航窗格；Dock 恢复布局时复用同一实例。
+    /// The main window has a single navigator; the dock reuses this instance when restoring a layout.
     pub fn shared(window: &mut Window, cx: &mut App) -> Entity<Self> {
         match cx
             .try_global::<ActiveNavigator>()
@@ -277,7 +277,7 @@ impl NavigatorPanel {
         panel
     }
 
-    /// 展开节点时按需加载子项。
+    /// Loads children on demand when a node expands.
     fn ensure_children(node: &Node, force: bool, cx: &mut App) {
         let catalog = Catalog::global(cx);
         match node {
@@ -338,7 +338,8 @@ impl NavigatorPanel {
         });
     }
 
-    /// 选择来自其他面板（对象选项卡、工具栏）时，展开祖先节点并加载数据，使选择在树中可见。
+    /// When the selection comes from another panel (objects tab, toolbar), expands and loads the
+    /// ancestors so the selection is visible in the tree.
     fn reveal_selection(&mut self, cx: &mut Context<Self>) {
         let Some(node) = Node::from_selection(Workspace::global(cx).read(cx).selection()) else {
             self.sync_selection(cx);
@@ -639,6 +640,7 @@ impl NavigatorPanel {
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |this, e: &MouseDownEvent, window, cx| {
+                    cx.stop_propagation();
                     if let Some(n) = &right_node {
                         Self::select(n, cx);
                     }
@@ -670,7 +672,7 @@ impl NavigatorPanel {
                     .flex_1(),
             )
             .children(["database", "circle-check", "star"].map(|i| {
-                // 快速筛选尚未实现，显示为禁用
+                // Quick filters are not implemented yet; shown disabled
                 lucide(i)
                     .size(tokens::navigator::FILTER_ICON.rems())
                     .text_color(p.disabled_text)
@@ -678,7 +680,7 @@ impl NavigatorPanel {
             .into_any_element()
     }
 
-    /// 刷新：重新加载所选作用域的元数据；连接级别的刷新由连接命令处理。
+    /// Refresh reloads metadata of the selected scope; connection-level refresh is handled by the connection commands.
     fn on_refresh(&mut self, _: &Refresh, _: &mut Window, cx: &mut Context<Self>) {
         let selection = Workspace::global(cx).read(cx).selection().clone();
         if let Some(scope) = selection.scope() {
@@ -718,7 +720,7 @@ pub(crate) fn kind_icon(kind: ObjectKind) -> &'static str {
     }
 }
 
-/// 构建树数据（只读访问各全局状态）。
+/// Builds the tree items (read-only access to the globals).
 struct TreeBuilder<'a> {
     panel: &'a NavigatorPanel,
     store: &'a ConnectionStore,
@@ -879,19 +881,20 @@ impl Render for NavigatorPanel {
                 .unwrap_or_else(|| ListItem::new(ix))
         });
         let filter = self.render_filter(cx);
-        let empty_area = div().flex_1().on_mouse_down(
-            MouseButton::Right,
-            cx.listener(|this, e: &MouseDownEvent, window, cx| {
-                Workspace::global(cx).update(cx, |w, cx| w.select(Selection::None, cx));
-                window.focus(&this.focus_handle, cx);
-                Self::context_menu(None, cx).show(e.position, window, cx);
-            }),
-        );
-        let body = v_flex()
+        // Rows stop propagation of their right-click, so this only fires on the blank area below them
+        let body = div()
+            .id("nav-tree")
             .flex_1()
             .min_h_0()
-            .child(div().flex_1().min_h_0().child(tree_view))
-            .child(empty_area);
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|this, e: &MouseDownEvent, window, cx| {
+                    Workspace::global(cx).update(cx, |w, cx| w.select(Selection::None, cx));
+                    window.focus(&this.focus_handle, cx);
+                    Self::context_menu(None, cx).show(e.position, window, cx);
+                }),
+            )
+            .child(tree_view);
         let filter = if self.filter_on_top {
             div().border_b_1().border_color(p.separator).child(filter)
         } else {
@@ -926,7 +929,7 @@ fn with_navigator(cx: &mut App, f: impl FnOnce(&mut NavigatorPanel, &mut Context
     panel.update(cx, f);
 }
 
-/// 切换“在顶部显示筛选”与“隐藏连接组”（查看 > 导航窗格）。
+/// Toggles "Show filter at top" and "Hide connection groups" (View > Navigation Pane).
 pub fn set_view_options(filter_on_top: bool, hide_groups: bool, cx: &mut App) {
     with_navigator(cx, |this, cx| {
         this.filter_on_top = filter_on_top;

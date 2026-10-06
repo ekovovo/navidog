@@ -7,6 +7,7 @@ navidog 用 [gpui-kit](https://gpui-kit.com/zh-CN/docs/) 全家桶（GPUI、`gpu
 | 文档 | 内容 |
 | --- | --- |
 | [CONTEXT.md](../../CONTEXT.md) | 术语表 |
+| [AGENTS.md](../../AGENTS.md) | 给 Agent 的开发流程、已知的坑和验证步骤 |
 | [progress.md](../progress.md) | 实现进度：里程碑、当前里程碑任务、功能状态、临时偏差 |
 | 本文 | 决策记录、架构、工程规则、里程碑 |
 | [01-feature-inventory.md](01-feature-inventory.md) | 全量功能清单（编号、摘要、验收要点、Navicat 帮助页、里程碑） |

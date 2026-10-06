@@ -1,4 +1,4 @@
-//! 只读 DDL 选项卡：M4 设计器之前，双击表以外的对象在对象窗格中打开它。
+//! Read-only DDL tab: until the M4 designers, double-clicking a non-table object opens this.
 
 use gpui_kit::component::dock::{
     BasePanel, Panel, PanelEvent, PanelInfo, PanelState, panel_handle, register_panel,
@@ -24,7 +24,7 @@ pub(crate) fn init(cx: &mut App) {
             PanelInfo::Panel(v) => serde_json::from_value::<ObjectRef>(v.clone()).ok(),
             _ => None,
         };
-        // 布局文件损坏时也要返回一个面板，用空对象占位
+        // A corrupt layout file must still yield a panel; use an empty object as placeholder
         let object = object.unwrap_or_else(|| ObjectRef {
             scope: navidog_core::object::Scope::new("", "", None),
             kind: navidog_core::object::ObjectKind::Table,
@@ -79,7 +79,7 @@ impl DdlPanel {
                 cx.observe_in(&Catalog::global(cx), window, |this, _, window, cx| {
                     this.sync(window, cx)
                 }),
-                // 恢复布局时连接可能尚未打开，打开后再加载
+                // The connection may still be closed when the layout is restored; load once it opens
                 cx.subscribe(&Sessions::global(cx), |this, _, e: &SessionsEvent, cx| {
                     if matches!(e, SessionsEvent::Opened(id) if *id == this.object.scope.connection)
                     {
@@ -123,6 +123,6 @@ impl Render for DdlPanel {
             .track_focus(&self.focus_handle)
             .size_full()
             .bg(palette(cx).control_bg)
-            .child(Editor::new(&self.editor).size_full())
+            .child(Editor::new(&self.editor).bordered(false).size_full())
     }
 }

@@ -1,4 +1,4 @@
-//! 信息窗格（10-shell.md 第 7 节、20-objects.md 第 6 节）：常规、DDL、字段。
+//! Info pane (10-shell.md §7, 20-objects.md §6): general, DDL and fields pages.
 
 use std::rc::Rc;
 
@@ -49,7 +49,7 @@ pub struct InfoPanel {
     maximized: bool,
     on_toggle_maximize: Option<ToggleMaximize>,
     ddl: Entity<EditorState>,
-    /// DDL 编辑器当前显示的对象
+    /// Object currently shown in the DDL editor
     shown_ddl: Option<ObjectRef>,
     _subscriptions: Vec<Subscription>,
 }
@@ -101,7 +101,7 @@ pub(crate) fn sql_editor(window: &mut Window, cx: &mut App) -> Entity<EditorStat
 }
 
 impl InfoPanel {
-    /// Dock 恢复布局时复用同一实例。
+    /// Reuses the same instance when the dock restores its layout.
     pub fn shared(window: &mut Window, cx: &mut App) -> Entity<Self> {
         if let Some(panel) = cx.try_global::<SharedInfo>().and_then(|s| s.0.upgrade()) {
             return panel;
@@ -133,7 +133,7 @@ impl InfoPanel {
         panel
     }
 
-    /// 由外壳提供“最大化/还原”的实现（调整右侧 dock 宽度）。
+    /// The shell implements maximize/restore (resizing the right dock).
     pub fn set_on_toggle_maximize(&mut self, f: impl Fn(&mut Window, &mut App) + 'static) {
         self.on_toggle_maximize = Some(Rc::new(f));
     }
@@ -152,7 +152,7 @@ impl InfoPanel {
         }
     }
 
-    /// DDL 加载完成或选择变化后写入编辑器（编辑器更新需要 window，不能放在 render 中）。
+    /// Writes the DDL into the editor after loading or a selection change (needs `window`, so not in render).
     fn sync_ddl(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let obj = selected_object(cx);
         let text = obj
@@ -397,7 +397,7 @@ impl Render for InfoPanel {
             Page::Ddl => div()
                 .flex_1()
                 .min_h_0()
-                .child(Editor::new(&self.ddl).size_full())
+                .child(Editor::new(&self.ddl).bordered(false).size_full())
                 .into_any_element(),
             Page::Fields => self.render_fields(cx),
         };
