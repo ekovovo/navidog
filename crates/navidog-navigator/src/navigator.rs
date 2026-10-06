@@ -893,6 +893,12 @@ impl NavigatorPanel {
                     t!("nav.edit_connection").to_string(),
                     Box::new(EditConnection),
                 );
+                let mysql = Sessions::global(cx).read(cx).dialect(id) == Some(Dialect::MySql);
+                let menu = if open && mysql {
+                    menu.menu(t!("nav.reload").to_string(), Box::new(ReloadConnection))
+                } else {
+                    menu
+                };
                 let menu = if open {
                     menu.menu_with_disabled(
                         t!("nav.new_database").to_string(),
@@ -916,19 +922,43 @@ impl NavigatorPanel {
                             Box::new(DeleteConnection),
                         )
                 };
-                let starred = ConnectionStore::global(cx)
-                    .read(cx)
-                    .get(id)
-                    .is_some_and(|c| c.starred);
+                let conn = ConnectionStore::global(cx).read(cx).get(id);
+                let starred = conn.is_some_and(|c| c.starred);
                 let star = if starred {
                     t!("nav.unstar")
                 } else {
                     t!("nav.star")
                 };
+                // F-CONN-021
+                let profiles = conn.map_or(NativeMenu::new(), |c| {
+                    c.profile_names()
+                        .fold(NativeMenu::new(), |m, n| {
+                            let label = if n.is_empty() {
+                                t!("nav.profile_default").to_string()
+                            } else {
+                                n.to_string()
+                            };
+                            m.menu_with_check(
+                                label,
+                                n == c.profile,
+                                Box::new(SwitchProfile {
+                                    name: n.to_string().into(),
+                                }),
+                            )
+                        })
+                        .separator()
+                        .menu(t!("nav.new_profile").to_string(), Box::new(NewProfile))
+                        .menu_with_disabled(
+                            t!("nav.delete_profile").to_string(),
+                            c.profiles.is_empty(),
+                            Box::new(DeleteProfile),
+                        )
+                });
                 let mut menu = menu
                     .separator()
                     .submenu(t!("nav.color").to_string(), colors)
-                    .menu(star.to_string(), Box::new(ToggleStar));
+                    .menu(star.to_string(), Box::new(ToggleStar))
+                    .submenu(t!("nav.switch_profile").to_string(), profiles);
                 if !open {
                     menu = menu.submenu(t!("nav.move_to_group").to_string(), move_menu);
                 }

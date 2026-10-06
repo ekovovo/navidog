@@ -1,13 +1,17 @@
 //! Headless test of the editor tabs in the main window: the close button, ⌘W, and the tab
-//! context menu's "close others"; the objects tab can never be closed.
+//! context menu's "close others"; the objects tab can never be closed. Then the recent list,
+//! favorites with an ID and startup tabs, which all work on tabs.
 
 use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{AppContext as _, Focusable as _, TestAppContext};
+use navidog::actions::AddFavoriteWithId;
 use navidog::main_window::MainWindow;
 use navidog::state::AppState;
 use navidog_core::actions::OpenObject;
+use navidog_core::favorites::Favorites;
 use navidog_core::object::{ObjectKind, ObjectRef, Scope};
-use navidog_ui::tabs::{self, Close, CloseTab, CloseTabs, PopOutTab};
+use navidog_core::settings::Settings;
+use navidog_ui::tabs::{self, AddToStartup, Close, CloseTab, CloseTabs, PopOutTab};
 
 fn view(name: &str) -> ObjectRef {
     ObjectRef {
@@ -93,5 +97,28 @@ fn close_tabs(cx: &mut TestAppContext) {
         }),
     );
     assert_eq!(tab_count(cx), 1, "the objects tab is not closable");
+
+    // Opened objects go to the recent list, newest first
+    let recent = cx.update(|cx| Favorites::global(cx).read(cx).recent().to_vec());
+    assert_eq!(recent[..2], [view("e"), view("d")]);
+
+    // Opening an object that already has a tab focuses that tab instead of adding one
+    dispatch(cx, Box::new(OpenObject { object: view("x") }));
+    dispatch(cx, Box::new(OpenObject { object: view("x") }));
+    assert_eq!(tab_count(cx), 2);
+
+    // ⌥⇧1 adds the active tab to favorites with ID 1; "add to startup" remembers it in settings
+    dispatch(cx, Box::new(AddFavoriteWithId { id: 1 }));
+    let fav = cx.update(|cx| {
+        Favorites::global(cx)
+            .read(cx)
+            .with_id(1)
+            .map(|f| f.object.clone())
+    });
+    assert_eq!(fav, Some(view("x")));
+    let active = cx.update(|cx| tabs::active(cx).unwrap());
+    dispatch(cx, Box::new(AddToStartup { panel: active }));
+    let startup = cx.update(|cx| Settings::global(cx).startup_tabs.clone());
+    assert_eq!(startup, [serde_json::to_value(view("x")).unwrap()]);
     let _ = std::fs::remove_dir_all(home);
 }

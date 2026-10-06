@@ -14,6 +14,9 @@ const RECENT_LIMIT: usize = 10;
 pub struct Favorite {
     pub name: String,
     pub object: ObjectRef,
+    /// Favorite ID 1–9: ⌃⇧<id> opens it
+    #[serde(default)]
+    pub id: Option<u8>,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -67,13 +70,23 @@ impl Favorites {
         &self.lists.recent
     }
 
-    /// Adds an object (once); its menu label defaults to the object name.
-    pub fn add(&mut self, object: ObjectRef, cx: &mut Context<Self>) {
-        if !self.lists.favorites.iter().any(|f| f.object == object) {
-            let name = object.name.clone();
-            self.lists.favorites.push(Favorite { name, object });
-            self.commit(cx);
+    /// Adds an object (replacing an earlier favorite of it); a favorite ID moves from any other
+    /// favorite to this one.
+    pub fn add(&mut self, object: ObjectRef, name: String, id: Option<u8>, cx: &mut Context<Self>) {
+        self.lists.favorites.retain(|f| f.object != object);
+        if id.is_some() {
+            self.lists
+                .favorites
+                .iter_mut()
+                .filter(|f| f.id == id)
+                .for_each(|f| f.id = None);
         }
+        self.lists.favorites.push(Favorite { name, object, id });
+        self.commit(cx);
+    }
+
+    pub fn with_id(&self, id: u8) -> Option<&Favorite> {
+        self.lists.favorites.iter().find(|f| f.id == Some(id))
     }
 
     pub fn remove(&mut self, ix: usize, cx: &mut Context<Self>) {
@@ -81,6 +94,11 @@ impl Favorites {
             self.lists.favorites.remove(ix);
             self.commit(cx);
         }
+    }
+
+    pub fn clear(&mut self, cx: &mut Context<Self>) {
+        self.lists.favorites.clear();
+        self.commit(cx);
     }
 
     /// Records an opened object, most recent first.
@@ -123,9 +141,13 @@ mod tests {
             assert_eq!(f.recent().len(), RECENT_LIMIT);
             assert_eq!(f.recent()[0], obj(5));
             assert_eq!(f.recent().iter().filter(|o| **o == obj(5)).count(), 1);
-            f.add(obj(1), cx);
-            f.add(obj(1), cx);
-            assert_eq!(f.favorites().len(), 1);
+            f.add(obj(1), "a".into(), Some(3), cx);
+            f.add(obj(1), "b".into(), Some(3), cx);
+            assert_eq!(f.favorites().len(), 1, "one favorite per object");
+            // An ID belongs to one favorite at a time
+            f.add(obj(2), "c".into(), Some(3), cx);
+            assert_eq!(f.with_id(3).map(|f| f.name.as_str()), Some("c"));
+            assert_eq!(f.favorites().iter().filter(|f| f.id.is_some()).count(), 1);
         });
     }
 }

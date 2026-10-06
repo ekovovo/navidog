@@ -57,18 +57,22 @@ mod macos {
             })
             .unwrap();
 
-        let shot = |cx: &mut HeadlessAppContext, name: &str| {
-            // Icons and other assets load asynchronously; let the tasks finish before rendering
-            for _ in 0..3 {
-                cx.update_window(handle, |_, window, cx| window.render_frame(cx))
-                    .unwrap();
-                cx.run_until_parked();
-                std::thread::sleep(std::time::Duration::from_millis(50));
-            }
-            let image = cx.capture_screenshot(handle).expect("需要 Metal 渲染器");
-            image.save(out.join(name)).unwrap();
-            println!("已保存 {}", out.join(name).display());
-        };
+        let shot_of =
+            |cx: &mut HeadlessAppContext, handle: gpui_kit::AnyWindowHandle, name: &str| {
+                // Icons and other assets load asynchronously; let the tasks finish before rendering
+                for _ in 0..3 {
+                    cx.update_window(handle, |_, window, cx| window.render_frame(cx))
+                        .unwrap();
+                    cx.run_until_parked();
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+                let image = cx
+                    .capture_screenshot(handle)
+                    .expect("needs the Metal renderer");
+                image.save(out.join(name)).unwrap();
+                println!("saved {}", out.join(name).display());
+            };
+        let shot = |cx: &mut HeadlessAppContext, name: &str| shot_of(cx, handle, name);
         for (mode, name) in [
             (ThemeMode::Dark, "main-dark.png"),
             (ThemeMode::Light, "main-light.png"),
@@ -161,6 +165,7 @@ mod macos {
         );
         wait(&mut cx, |_| false);
         shot(&mut cx, "viewer.png");
+        let actor_ref = actor.clone();
         let wide = ObjectRef {
             name: "wide".into(),
             ..actor
@@ -180,6 +185,39 @@ mod macos {
         })
         .unwrap();
         shot(&mut cx, "viewer-wide-scrolled.png");
+
+        // Share from the info pane's general page
+        cx.update(|cx| {
+            Workspace::global(cx).update(cx, |w, cx| {
+                w.select(Selection::Object(actor_ref.clone()), cx)
+            })
+        });
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            window.click("info-share", cx);
+        })
+        .unwrap();
+        shot(&mut cx, "share.png");
+        cx.update_window(handle, |_, window, cx| window.close_all_dialogs(cx))
+            .unwrap();
+
+        // Manage Connections, searching highlights the matches
+        dispatch(&mut cx, Box::new(navidog_core::actions::ManageConnections));
+        cx.run_until_parked();
+        let manage = cx
+            .update(|cx| {
+                cx.windows()
+                    .into_iter()
+                    .find(|w| w.window_id() != handle.window_id())
+            })
+            .unwrap();
+        cx.update_window(manage, |_, window, cx| {
+            window.render_frame(cx);
+            window.click("manage-search", cx);
+            window.input("sql", cx);
+        })
+        .unwrap();
+        shot_of(&mut cx, manage, "manage.png");
         let _ = std::fs::remove_dir_all(home);
     }
 

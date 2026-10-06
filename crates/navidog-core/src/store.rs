@@ -1,4 +1,4 @@
-//! connections.json 的读写与秘密字段管理。
+//! Reading and writing connections.json, and managing the secret fields.
 
 use std::path::PathBuf;
 
@@ -35,7 +35,7 @@ impl Default for ConnectionsFile {
     }
 }
 
-fn aad(conn: &ConnectionId, field: SecretField) -> String {
+fn aad(conn: &str, field: SecretField) -> String {
     format!("{conn}/{}", field.key())
 }
 
@@ -44,7 +44,7 @@ impl ConnectionsFile {
         self.connections.iter().find(|c| c.id == id)
     }
 
-    /// 写入或清除一个秘密字段。
+    /// Writes or clears one secret field.
     pub fn set_secret(conn: &mut Connection, field: SecretField, value: Option<&str>, key: &Key) {
         let aad = aad(&conn.id, field);
         *field.slot_mut(conn) = value
@@ -64,18 +64,46 @@ impl ConnectionsFile {
             .transpose()
     }
 
-    /// 用新密钥重新加密全部秘密字段（设置、修改、清除主密码时）。
+    /// Re-encrypts every secret field with a new key (setting, changing or clearing the master password).
     pub fn rekey(&mut self, old: &Key, new: &Key) -> Result<(), CryptoError> {
         for conn in &mut self.connections {
-            for field in SecretField::ALL {
-                let plain = Self::reveal(conn, field, old)?;
-                Self::set_secret(conn, field, plain.as_deref(), new);
-            }
+            let id = conn.id.clone();
+            Self::reencrypt(conn, &id, old, new)?;
         }
         Ok(())
     }
 
-    /// 复制连接：新 ID、名称追加“副本”，秘密字段按新 ID 重新加密。
+    /// Re-encrypts the secrets of every profile of `conn`, read as `old_id` with `old`, for its
+    /// own id with `new`.
+    fn reencrypt(
+        conn: &mut Connection,
+        old_id: &str,
+        old: &Key,
+        new: &Key,
+    ) -> Result<(), CryptoError> {
+        for ix in 0..=conn.profiles.len() {
+            // Inactive profiles are swapped into the active slots so the field helpers reach them
+            if ix > 0 {
+                conn.swap_profile(ix - 1);
+            }
+            let result = SecretField::ALL.into_iter().try_for_each(|field| {
+                let plain = field
+                    .slot(conn)
+                    .as_ref()
+                    .map(|s| old.decrypt(&aad(old_id, field), s))
+                    .transpose()?;
+                Self::set_secret(conn, field, plain.as_deref(), new);
+                Ok(())
+            });
+            if ix > 0 {
+                conn.swap_profile(ix - 1);
+            }
+            result?;
+        }
+        Ok(())
+    }
+
+    /// Duplicates a connection: new id, the name gets the "copy" suffix, secrets are re-encrypted for the new id.
     pub fn duplicate(
         &mut self,
         id: &str,
@@ -88,17 +116,14 @@ impl ConnectionsFile {
         let mut copy = src.clone();
         copy.id = crate::connection::new_connection_id();
         copy.name = format!("{} {suffix}", src.name);
-        for field in SecretField::ALL {
-            let plain = Self::reveal(&src, field, key)?;
-            Self::set_secret(&mut copy, field, plain.as_deref(), key);
-        }
+        Self::reencrypt(&mut copy, &src.id, key, key)?;
         let new_id = copy.id.clone();
         let ix = self.connections.iter().position(|c| c.id == id).unwrap();
         self.connections.insert(ix + 1, copy);
         Ok(Some(new_id))
     }
 
-    /// 删除组：组内的连接和子组移到上一级。
+    /// Deletes a group; its connections and subgroups move up one level.
     pub fn remove_group(&mut self, id: &str) {
         let Some(group) = self.groups.iter().find(|g| g.id == id).cloned() else {
             return;
@@ -116,7 +141,7 @@ impl ConnectionsFile {
         self.groups.retain(|g| g.id != id);
     }
 
-    /// 是否会形成环：把 `group` 移到 `parent` 下。
+    /// Whether moving `group` under `parent` would form a cycle.
     pub fn is_descendant(&self, group: &str, parent: &str) -> bool {
         let mut cur = Some(parent.to_string());
         while let Some(id) = cur {
@@ -145,7 +170,7 @@ pub enum StoreEvent {
     Changed,
 }
 
-/// 连接存储实体。所有修改立即保存并发出 `StoreEvent::Changed`。
+/// The connection store entity. Every change is saved at once and emits `StoreEvent::Changed`.
 pub struct ConnectionStore {
     path: PathBuf,
     file: ConnectionsFile,
@@ -162,7 +187,7 @@ impl ConnectionStore {
     pub fn load(path: PathBuf) -> Self {
         let file = match std::fs::read(&path) {
             Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|err| {
-                // 不覆盖无法解析的文件：备份后用空配置启动
+                // Never overwrite a file that fails to parse: back it up and start empty
                 tracing::error!("connections.json 无法解析，已备份: {err}");
                 let _ = std::fs::copy(&path, path.with_extension("json.bak"));
                 ConnectionsFile::default()
@@ -205,7 +230,7 @@ impl ConnectionStore {
         self.key.is_none() && self.is_master()
     }
 
-    /// 取得当前密钥：本机模式按需从钥匙串读取；主密码模式需要先 `unlock`。
+    /// The current key: read from the keychain on demand in local mode; master password mode needs `unlock` first.
     pub fn key(&mut self) -> Result<Key, StoreError> {
         if let Some(key) = &self.key {
             return Ok(key.clone());
@@ -220,7 +245,7 @@ impl ConnectionStore {
         }
     }
 
-    /// 测试或嵌入时直接注入密钥，跳过钥匙串。
+    /// Injects the key directly (tests, embedding), skipping the keychain.
     pub fn set_key(&mut self, key: Key) {
         self.key = Some(key);
     }
@@ -247,7 +272,8 @@ impl ConnectionStore {
         Ok(ConnectionsFile::reveal(conn, field, &key)?)
     }
 
-    /// 保存连接配置；`secrets` 中的明文按字段加密，`None` 表示保留原值，`Some("")` 表示清除。
+    /// Saves a connection; plaintext in `secrets` is encrypted per field, `None` keeps the old value
+    /// and `Some("")` clears it.
     pub fn upsert(
         &mut self,
         mut conn: Connection,
@@ -349,7 +375,7 @@ impl ConnectionStore {
         self.update(conn_id, |c| c.group = group, cx);
     }
 
-    /// 设置、修改或清除（`None`）主密码，并用新密钥重新加密全部秘密字段。
+    /// Sets, changes or clears (`None`) the master password and re-encrypts every secret with the new key.
     pub fn set_master_password(
         &mut self,
         password: Option<&str>,
@@ -399,32 +425,36 @@ mod tests {
         let k1 = Key::random();
         let mut conn = Connection::new("mysql");
         ConnectionsFile::set_secret(&mut conn, SecretField::Password, Some("pw"), &k1);
+        // An inactive profile with its own password must survive both operations too
+        conn.add_profile("other".into());
+        ConnectionsFile::set_secret(&mut conn, SecretField::Password, Some("pw2"), &k1);
+        conn.switch_profile("");
         let id = conn.id.clone();
         let mut file = file_with(conn);
+        let reveal = |c: &Connection, k: &Key| {
+            let mut c = c.clone();
+            let active = ConnectionsFile::reveal(&c, SecretField::Password, k)
+                .map(|p| p.unwrap_or_default());
+            c.switch_profile("other");
+            let other = ConnectionsFile::reveal(&c, SecretField::Password, k)
+                .map(|p| p.unwrap_or_default());
+            active.and_then(|a| other.map(|o| (a, o)))
+        };
 
         let new_id = file.duplicate(&id, "副本", &k1).unwrap().unwrap();
         let copy = file.get(&new_id).unwrap();
         assert!(copy.name.ends_with(" 副本"));
-        assert_eq!(
-            ConnectionsFile::reveal(copy, SecretField::Password, &k1)
-                .unwrap()
-                .as_deref(),
-            Some("pw")
-        );
+        assert_eq!(reveal(copy, &k1).unwrap(), ("pw".into(), "pw2".into()));
 
         let k2 = Key::random();
         file.rekey(&k1, &k2).unwrap();
         for c in &file.connections {
-            assert_eq!(
-                ConnectionsFile::reveal(c, SecretField::Password, &k2)
-                    .unwrap()
-                    .as_deref(),
-                Some("pw")
-            );
-            assert!(ConnectionsFile::reveal(c, SecretField::Password, &k1).is_err());
+            assert_eq!(reveal(c, &k2).unwrap(), ("pw".into(), "pw2".into()));
+            assert!(reveal(c, &k1).is_err());
         }
-        // 序列化后没有明文
-        assert!(!serde_json::to_string(&file).unwrap().contains("\"pw\""));
+        // No plaintext after serialization
+        let json = serde_json::to_string(&file).unwrap();
+        assert!(!json.contains("\"pw\"") && !json.contains("\"pw2\""));
     }
 
     #[test]

@@ -3,7 +3,10 @@
 rust_i18n::i18n!("locales", fallback = "en");
 
 mod form;
+mod manage;
 mod picker;
+pub mod profile;
+mod reload;
 mod secrets;
 
 use std::sync::Arc;
@@ -107,6 +110,39 @@ pub fn bind_actions<E: InteractiveElement>(el: E) -> E {
                     s.update(id, |c| c.starred = star, cx);
                 }
             });
+        })
+        .on_action(|_: &ToggleHidden, _, cx| {
+            let ids = selected_connections(cx);
+            let store = ConnectionStore::global(cx);
+            let hide = ids
+                .iter()
+                .any(|id| store.read(cx).get(id).is_some_and(|c| !c.hidden));
+            store.update(cx, |s, cx| {
+                for id in &ids {
+                    s.update(id, |c| c.hidden = hide, cx);
+                }
+            });
+        })
+        .on_action(|_: &ManageConnections, _, cx| manage::open(cx))
+        .on_action(|a: &SwitchProfile, window, cx| {
+            if let Some(id) = selected_connection(cx) {
+                profile::switch(&id, &a.name, window, cx);
+            }
+        })
+        .on_action(|_: &NewProfile, window, cx| {
+            if let Some(id) = selected_connection(cx) {
+                profile::new(id, window, cx);
+            }
+        })
+        .on_action(|_: &DeleteProfile, window, cx| {
+            if let Some(id) = selected_connection(cx) {
+                profile::delete(id, window, cx);
+            }
+        })
+        .on_action(|_: &ReloadConnection, window, cx| {
+            if let Some(id) = selected_connection(cx) {
+                reload::open(id, window, cx);
+            }
         })
         .on_action(|a: &MoveToGroup, _, cx| {
             let ids = selected_connections(cx);

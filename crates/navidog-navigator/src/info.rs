@@ -3,9 +3,10 @@
 use std::rc::Rc;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dock::{BasePanel, Panel, PanelEvent, panel_handle, register_panel};
 use gpui_kit::component::input::{Editor, EditorState};
-use gpui_kit::component::{Selectable as _, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{Selectable as _, Sizable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable,
@@ -189,6 +190,14 @@ impl InfoPanel {
                     crate::driver_name(&c.driver, cx),
                 ),
             ];
+            if !c.profiles.is_empty() {
+                let name = if c.profile.is_empty() {
+                    t!("nav.profile_default").to_string()
+                } else {
+                    c.profile.clone()
+                };
+                f.push((t!("info.profile").to_string(), name.into()));
+            }
             if c.supports_network() {
                 f.push((t!("info.host").to_string(), c.general.host.clone().into()));
                 f.push((
@@ -308,6 +317,14 @@ impl InfoPanel {
                     )
                     .child(truncated(("info-value", ix), v).text_color(p.label))
             }))
+            .child(
+                h_flex().child(
+                    Button::new("info-share")
+                        .small()
+                        .label(t!("info.share").to_string())
+                        .on_click(|_, window, cx| Share::open(window, cx)),
+                ),
+            )
             .into_any_element()
     }
 
@@ -467,5 +484,88 @@ impl Render for InfoPanel {
                     ),
             )
             .child(body)
+    }
+}
+
+/// "Share" dialog (F-APP-015): the navidog URI of the selection, optionally without host and port.
+struct Share {
+    sel: Selection,
+    hide_host: bool,
+}
+
+impl Share {
+    fn open(window: &mut Window, cx: &mut App) {
+        let sel = Workspace::global(cx).read(cx).selection().clone();
+        if sel.connection_id().is_none() {
+            return;
+        }
+        let view = cx.new(|_| Share {
+            sel,
+            hide_host: false,
+        });
+        window.open_dialog(cx, move |dialog, window, _| {
+            dialog
+                .w(tokens::dialog::SMALL_WIDTH.to_pixels(window.rem_size()))
+                .close_button(false)
+                .child(view.clone())
+        });
+    }
+
+    fn uri(&self, cx: &App) -> String {
+        let conn = self
+            .sel
+            .connection_id()
+            .and_then(|id| ConnectionStore::global(cx).read(cx).get(id));
+        conn.map(|c| navidog_core::uri::of_selection(&self.sel, c, self.hide_host))
+            .unwrap_or_default()
+    }
+}
+
+impl Render for Share {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let p = palette(cx);
+        let uri = self.uri(cx);
+        v_flex()
+            .gap(tokens::form::ROW_GAP.rems())
+            .child(heading(t!("info.share").to_string()))
+            .child(
+                div()
+                    .id("share-uri")
+                    .p_2()
+                    .rounded_md()
+                    .bg(p.fill_tertiary)
+                    .text_color(p.label)
+                    .child(uri.clone()),
+            )
+            .child(
+                Checkbox::new("share-hide-host")
+                    .label(t!("info.hide_host").to_string())
+                    .checked(self.hide_host)
+                    .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                        this.hide_host = *checked;
+                        cx.notify();
+                    })),
+            )
+            .child(
+                h_flex()
+                    .justify_end()
+                    .gap_2()
+                    .child(
+                        Button::new("share-copy")
+                            .label(t!("info.copy").to_string())
+                            .on_click(move |_, window, cx| {
+                                cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(
+                                    uri.clone(),
+                                ));
+                                window.close_dialog(cx);
+                            }),
+                    )
+                    .child(
+                        Button::new("share-ok")
+                            .primary()
+                            .label(t!("info.ok").to_string())
+                            .on_click(|_, window, cx| window.close_dialog(cx)),
+                    ),
+            )
     }
 }

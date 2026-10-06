@@ -3,9 +3,10 @@
 use gpui_kit::base::input::{Copy, Cut, Paste, Redo, SelectAll, Undo};
 use gpui_kit::{App, KeyBinding, Menu, MenuItem, OsAction, SystemMenuType};
 use navidog_core::actions::{
-    CloseConnection, NewConnection, NewConnectionOf, NewGroup, Refresh, ToggleHideObjectGroups,
-    ToggleOnlyActive, ToggleShowHidden,
+    CloseConnection, ManageConnections, NewConnection, NewConnectionOf, NewGroup, Refresh,
+    ToggleFocusMode, ToggleHideObjectGroups, ToggleOnlyActive, ToggleShowHidden,
 };
+use navidog_core::favorites::Favorites;
 use navidog_ui::tabs::{CloseTab, NextTab, PrevTab};
 use rust_i18n::t;
 
@@ -28,7 +29,74 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-m", Minimize, None),
         KeyBinding::new("cmd-r", Refresh, None),
         KeyBinding::new("shift-cmd-.", CloseConnection, None),
+        KeyBinding::new("cmd-u", OpenUri, None),
     ]);
+    for id in 1..=9u8 {
+        cx.bind_keys([
+            KeyBinding::new(&format!("alt-shift-{id}"), AddFavoriteWithId { id }, None),
+            KeyBinding::new(&format!("ctrl-shift-{id}"), OpenFavoriteId { id }, None),
+        ]);
+    }
+}
+
+/// Favorites menu (F-APP-011): add, the favorites (⌃⇧<id> shown for those with an ID), clear.
+fn favorites_menu(cx: &App) -> Menu {
+    let favorites = Favorites::global(cx).read(cx).favorites().to_vec();
+    let mut items = vec![MenuItem::action(
+        t!("menu.add_favorite").to_string(),
+        AddActiveToFavorites,
+    )];
+    if !favorites.is_empty() {
+        items.push(MenuItem::separator());
+    }
+    items.extend(favorites.iter().enumerate().map(|(ix, f)| match f.id {
+        Some(id) => MenuItem::action(f.name.clone(), OpenFavoriteId { id }),
+        None => MenuItem::action(f.name.clone(), OpenFavorite { ix }),
+    }));
+    let mut clear: Vec<MenuItem> = favorites
+        .iter()
+        .enumerate()
+        .map(|(ix, f)| MenuItem::action(f.name.clone(), RemoveFavorite { ix }))
+        .collect();
+    if !clear.is_empty() {
+        clear.push(MenuItem::separator());
+    }
+    clear.push(MenuItem::action(
+        t!("menu.clear_all").to_string(),
+        ClearFavorites,
+    ));
+    items.push(MenuItem::separator());
+    items.push(MenuItem::submenu(
+        Menu::new(t!("menu.clear_favorites").to_string()).items(clear),
+    ));
+    Menu::new(t!("menu.favorites").to_string()).items(items)
+}
+
+/// File > Open Recent (F-APP-013).
+fn recent_menu(cx: &App) -> Menu {
+    let recent = Favorites::global(cx).read(cx).recent().to_vec();
+    let mut items: Vec<MenuItem> = recent
+        .iter()
+        .enumerate()
+        .map(|(ix, o)| {
+            MenuItem::action(
+                format!(
+                    "{}.{}",
+                    o.scope.schema.as_ref().unwrap_or(&o.scope.database),
+                    o.name
+                ),
+                OpenRecent { ix },
+            )
+        })
+        .collect();
+    if !items.is_empty() {
+        items.push(MenuItem::separator());
+    }
+    items.push(MenuItem::action(
+        t!("menu.clear_recent").to_string(),
+        ClearRecent,
+    ));
+    Menu::new(t!("menu.open_recent").to_string()).items(items)
 }
 
 pub fn set_menus(cx: &mut App) {
@@ -78,6 +146,10 @@ pub fn set_menus(cx: &mut App) {
                 MenuItem::separator(),
                 MenuItem::action(t!("menu.group").to_string(), NewGroup),
             ])),
+            MenuItem::submenu(recent_menu(cx)),
+            MenuItem::action(t!("menu.open_uri").to_string(), OpenUri),
+            MenuItem::separator(),
+            MenuItem::action(t!("menu.manage_connections").to_string(), ManageConnections),
             MenuItem::separator(),
             MenuItem::action(t!("menu.close_tab").to_string(), CloseTab),
             MenuItem::action(t!("menu.close_window").to_string(), CloseWindow),
@@ -139,8 +211,10 @@ pub fn set_menus(cx: &mut App) {
                 state.show_toolbar,
             ),
             MenuItem::separator(),
+            MenuItem::action(t!("menu.focus_mode").to_string(), ToggleFocusMode),
             MenuItem::action(t!("menu.full_screen").to_string(), ToggleFullScreen),
         ]),
+        favorites_menu(cx),
         Menu::new(t!("menu.window").to_string()).items([
             MenuItem::action(t!("menu.minimize").to_string(), Minimize),
             MenuItem::action(t!("menu.zoom").to_string(), Zoom),

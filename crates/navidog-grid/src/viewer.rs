@@ -18,6 +18,7 @@ use gpui_kit::{
     Styled as _, Subscription, Task, WeakEntity, Window, actions, div,
 };
 use navidog_core::object::{ObjectKind, ObjectRef, Scope};
+use navidog_core::settings::Settings;
 use navidog_db::dialect::Dialect;
 use navidog_db::sessions::{ConnState, Sessions, SessionsEvent, SharedSession, run_on};
 use navidog_db::{CancelHandle, ColumnInfo, DbResult, ResultSet};
@@ -30,8 +31,6 @@ use crate::model::GridColumn;
 
 const PANEL: &str = "TableViewer";
 const CONTEXT: &str = "TableViewer";
-const DEFAULT_LIMIT: u64 = 1000;
-
 actions!(viewer, [ApplyChanges]);
 
 pub(crate) fn init(cx: &mut App) {
@@ -160,10 +159,16 @@ impl BasePanel for TableViewer {
 
 impl Panel for TableViewer {
     fn title(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let store = navidog_core::store::ConnectionStore::global(cx);
+        let color = store
+            .read(cx)
+            .get(&self.object.scope.connection)
+            .and_then(|c| c.color.clone());
         tabs::title(
             PanelId::from(cx.entity_id()),
             Some(lucide("table")),
             self.object.name.clone(),
+            color.and_then(|c| tokens::connection_color(&c, cx)),
         )
     }
 }
@@ -229,8 +234,10 @@ impl TableViewer {
             let order = cx.new(|cx| {
                 InputState::new(window, cx).placeholder(t!("viewer.order_hint").to_string())
             });
-            let limit_input =
-                cx.new(|cx| InputState::new(window, cx).default_value(DEFAULT_LIMIT.to_string()));
+            let limit_input = cx.new(|cx| {
+                InputState::new(window, cx)
+                    .default_value(Settings::global(cx).records_per_page.to_string())
+            });
             let apply_on_enter = |this: &mut Self,
                                   _: &Entity<InputState>,
                                   e: &InputEvent,
@@ -313,7 +320,10 @@ impl TableViewer {
                 order,
                 limit_input,
                 show_filter: false,
-                limit: Some(DEFAULT_LIMIT),
+                limit: {
+                    let s = Settings::global(cx);
+                    s.limit_records.then_some(s.records_per_page.max(1))
+                },
                 page: 0,
                 total: None,
                 session: None,
@@ -390,6 +400,9 @@ impl TableViewer {
                 this.session = Some(shared);
                 this.cancel = cancel;
                 this.reload(true, cx);
+                if Settings::global(cx).auto_begin_transaction {
+                    this.begin_transaction(cx);
+                }
             });
         }));
     }
@@ -673,6 +686,17 @@ impl TableViewer {
             )
             .child(button("import", "file-text", t!("viewer.import").to_string()).disabled(true))
             .child(button("export", "file-text", t!("viewer.export").to_string()).disabled(true))
+            .child(div().flex_1())
+            .child(
+                Button::new("focus-mode")
+                    .ghost()
+                    .small()
+                    .icon(lucide("scan"))
+                    .tooltip(t!("viewer.focus_mode").to_string())
+                    .on_click(|_, window, cx| {
+                        window.dispatch_action(Box::new(navidog_core::actions::ToggleFocusMode), cx)
+                    }),
+            )
     }
 
     fn render_filter(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -849,7 +873,8 @@ impl TableViewer {
                                 this.limit = checked
                                     .then(|| this.limit_input.read(cx).value().trim().parse().ok())
                                     .flatten()
-                                    .or(checked.then_some(DEFAULT_LIMIT));
+                                    .or(checked
+                                        .then_some(Settings::global(cx).records_per_page.max(1)));
                                 this.page = 0;
                                 this.reload(false, cx);
                             })),

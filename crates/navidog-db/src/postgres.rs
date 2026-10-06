@@ -1,11 +1,11 @@
-//! PostgreSQL 驱动（tokio-postgres，native-tls）。
+//! PostgreSQL driver (tokio-postgres, native-tls).
 
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
 use native_tls::{Certificate, Identity, TlsConnector};
-use navidog_core::connection::SslMode;
+use navidog_core::connection::{HostPreference, SslMode};
 use postgres_native_tls::MakeTlsConnector;
-use tokio_postgres::config::SslMode as PgSslMode;
+use tokio_postgres::config::{SslMode as PgSslMode, TargetSessionAttrs};
 use tokio_postgres::tls::{MakeTlsConnect, TlsConnect};
 use tokio_postgres::{CancelToken, Client, Config, NoTls, SimpleQueryMessage, Socket};
 
@@ -61,6 +61,17 @@ fn base_config(p: &ConnectParams) -> DbResult<Config> {
         .user(&p.user)
         .dbname(p.database.as_deref().unwrap_or("postgres"))
         .connect_timeout(p.timeout());
+    // ponytail: the SSH tunnel forwards only `host`, so members are skipped when tunneled
+    if p.tls_host.is_none() {
+        for (host, port) in &p.members {
+            cfg.host(host).port(*port);
+        }
+    }
+    cfg.target_session_attrs(match p.host_preference {
+        HostPreference::Any => TargetSessionAttrs::Any,
+        HostPreference::ReadWrite => TargetSessionAttrs::ReadWrite,
+        HostPreference::ReadOnly => TargetSessionAttrs::ReadOnly,
+    });
     if let Some(pw) = &p.password {
         cfg.password(pw);
     }
@@ -102,14 +113,14 @@ where
     Ok(client)
 }
 
-/// 按 libpq 的 sslmode 语义建立连接。
+/// Connects following libpq's sslmode semantics.
 async fn connect(p: &ConnectParams) -> DbResult<Client> {
     let mut cfg = base_config(p)?;
     let Some(ssl) = &p.ssl else {
         cfg.ssl_mode(PgSslMode::Disable);
         return connect_with(&cfg, NoTls).await;
     };
-    // ponytail: 经 SSH 隧道时主机名是 127.0.0.1，verify-full 退化为只校验证书链
+    // ponytail: through an SSH tunnel the host is 127.0.0.1, so verify-full only checks the chain
     let tunneled = p.tls_host.is_some();
     match ssl.mode {
         SslMode::Allow => {
@@ -202,7 +213,7 @@ impl Session for PgSession {
         let token = self.cancel.clone();
         Some(Arc::new(move || {
             let token = token.clone();
-            // ponytail: 取消请求走明文连接；服务器强制 SSL 时需要改为 TLS 连接器
+            // ponytail: cancel requests go over plain TCP; servers that force SSL need the TLS connector
             async move { token.cancel_query(NoTls).await.map_err(err) }.boxed()
         }))
     }

@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 use gpui_kit::component::dock::{PanelId, TabGroup};
 use gpui_kit::component::native_menu::NativeMenu;
 use gpui_kit::component::{Icon, h_flex};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     Action, App, Entity, Global, InteractiveElement as _, IntoElement, MouseButton,
     ParentElement as _, SharedString, Styled as _, WeakEntity,
@@ -201,12 +202,15 @@ pub fn title(
     panel: PanelId,
     icon: Option<Icon>,
     label: impl Into<SharedString>,
+    // The connection color (F-CONN-014), drawn as a strip under the title
+    color: Option<gpui_kit::Hsla>,
 ) -> impl IntoElement {
     h_flex()
         .id(SharedString::from(format!("tab-title-{panel:?}")))
         .gap_1()
         .min_w_0()
         .max_w(tokens::editor_tab::TITLE_MAX_WIDTH.rems())
+        .when_some(color, |d, c| d.border_b_2().border_color(c))
         .children(icon.map(|i| i.size(tokens::navigator::ROW_ICON.rems())))
         .child(crate::skin::truncated(
             SharedString::from(format!("tab-label-{panel:?}")),

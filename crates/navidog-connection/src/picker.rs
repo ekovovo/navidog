@@ -1,4 +1,4 @@
-//! 新建连接的类型选择窗口（11-connection.md 第 1.1 节）。
+//! Connection type picker for a new connection (11-connection.md §1.1).
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputState};
@@ -39,6 +39,8 @@ struct Picker {
     category: Category,
     search: Entity<InputState>,
     selected: Option<SharedString>,
+    /// New connection from a URI (F-CONN-016)
+    uri: Entity<InputState>,
 }
 
 impl Picker {
@@ -46,11 +48,25 @@ impl Picker {
         let search =
             cx.new(|cx| InputState::new(window, cx).placeholder(t!("conn.search").to_string()));
         cx.observe(&search, |_, _, cx| cx.notify()).detach();
+        let uri =
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("conn.uri_hint").to_string()));
+        cx.observe(&uri, |_, _, cx| cx.notify()).detach();
         Self {
             category: Category::All,
             search,
             selected: Some("mysql".into()),
+            uri,
         }
+    }
+
+    fn next_from_uri(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let text = self.uri.read(cx).value().to_string();
+        let Some(uri) = navidog_core::uri::DatabaseUri::parse_any(&text) else {
+            window.push_notification(t!("conn.uri_invalid").to_string(), cx);
+            return;
+        };
+        window.close_dialog(cx);
+        crate::form::open_from_uri(uri, window, cx);
     }
 
     fn next(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -178,9 +194,17 @@ impl Render for Picker {
                     .border_t_1()
                     .border_color(p.separator)
                     .child(
-                        Button::new("uri")
-                            .label(t!("conn.new_from_uri").to_string())
-                            .disabled(true),
+                        h_flex()
+                            .gap_2()
+                            .child(Input::new(&self.uri).w(tokens::conn_type::SEARCH_WIDTH.rems()))
+                            .child(
+                                Button::new("uri")
+                                    .label(t!("conn.new_from_uri").to_string())
+                                    .disabled(self.uri.read(cx).value().trim().is_empty())
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.next_from_uri(window, cx)
+                                    })),
+                            ),
                     )
                     .child(
                         h_flex()

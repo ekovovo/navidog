@@ -3,8 +3,9 @@ use std::borrow::Cow;
 use gpui_kit::assets::{Assets, icon_assets};
 use gpui_kit::{AssetSource, Result, SharedString};
 
-// 主工具栏、导航树等用到、但不在 gpui-kit 默认 101 个图标里的 Lucide 图标
+// Lucide icons used by the toolbar, navigator and so on that are not among gpui-kit's default 101
 icon_assets!(pub ExtraIcons, [
+    EyeOff, Scan,
     Plug, SquareTerminal, Table, Eye, SquareFunction, User, Shapes, FileCode,
     DatabaseBackup, CalendarClock, Workflow, ChartPie, Database, Folder, FolderOpen,
     Server, Star, RefreshCw, Layers, Maximize2, Minimize2, CircleCheck, TriangleAlert,
@@ -14,7 +15,7 @@ icon_assets!(pub ExtraIcons, [
     Funnel, ArrowUpDown, Clipboard, Undo2, Save, FileText, GitCommitHorizontal, CircleStop,
 ]);
 
-/// 自绘的彩色图标，按 `img()` 方式渲染（`svg()` 只能单色着色）。
+/// Our own color icons, drawn with `img()` (`svg()` can only tint in one color).
 const OWN: &[(&str, &[u8])] = &[
     (
         "icons/db/mysql.svg",
@@ -34,8 +35,8 @@ const OWN: &[(&str, &[u8])] = &[
     ),
 ];
 
-/// 应用资源：自绘图标 → 挑选的 Lucide 图标 → gpui-kit 默认资源。
-/// `Assets` 遇到未知路径会报错，所以必须放在最后。
+/// App assets: our own icons, then the picked Lucide icons, then gpui-kit's defaults.
+/// `Assets` errors on unknown paths, so it must come last.
 #[derive(Clone, Copy, Default)]
 pub struct NavidogAssets;
 
@@ -64,12 +65,12 @@ impl AssetSource for NavidogAssets {
     }
 }
 
-/// 按 Lucide 名称取图标（`IconName` 只覆盖默认的 101 个图标，其余走 `ExtraIcons`）。
+/// An icon by Lucide name (`IconName` only covers the default 101; the rest come from `ExtraIcons`).
 pub fn lucide(name: &str) -> gpui_kit::component::Icon {
     gpui_kit::component::Icon::default().path(format!("icons/{name}.svg"))
 }
 
-/// 数据库类型图标路径。
+/// Icon path of a database type.
 pub fn driver_icon(driver: &str) -> &'static str {
     match driver {
         "mariadb" => "icons/db/mariadb.svg",
@@ -90,5 +91,52 @@ mod tests {
         assert!(a.load("icons/plug.svg").unwrap().is_some());
         assert!(a.load("icons/check.svg").unwrap().is_some());
         assert!(a.list("icons/db/").unwrap().len() == 4);
+    }
+
+    /// A missing icon only logs an error and draws nothing, so check every name the sources use.
+    // ponytail: finds `lucide("x")` and toolbar `button(id, "x", …)` literals; names built at
+    // runtime (kind_icon and the like) are not covered
+    #[test]
+    fn every_icon_used_in_the_sources_loads() {
+        let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let mut names = Vec::new();
+        let mut dirs = vec![crates];
+        while let Some(dir) = dirs.pop() {
+            for entry in std::fs::read_dir(dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() && !path.ends_with("target") {
+                    dirs.push(path);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    let src = std::fs::read_to_string(&path).unwrap();
+                    for part in src.split("lucide(\"").skip(1) {
+                        names.push(part.split('"').next().unwrap().to_string());
+                    }
+                    for part in src.split("button(\"").skip(1) {
+                        // The second string argument of button(id, icon, label)
+                        let mut fields = part.split('"');
+                        if let (Some(_), Some(sep), Some(icon)) =
+                            (fields.next(), fields.next(), fields.next())
+                            && sep.trim() == ","
+                        {
+                            names.push(icon.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        names.sort();
+        names.dedup();
+        assert!(names.len() > 20, "the scan found too few icons: {names:?}");
+        let missing: Vec<_> = names
+            .iter()
+            .filter(|n| {
+                NavidogAssets
+                    .load(&format!("icons/{n}.svg"))
+                    .ok()
+                    .flatten()
+                    .is_none()
+            })
+            .collect();
+        assert!(missing.is_empty(), "add these to ExtraIcons: {missing:?}");
     }
 }

@@ -1,26 +1,28 @@
-//! 偏好设置窗口（10-shell.md 第 10 节）：常规、高级。
+//! Preferences window (10-shell.md §10): general, tabs, records and advanced pages.
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
-use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::radio::{Radio, RadioGroup};
-use gpui_kit::component::{TitleBar, WindowExt as _, h_flex, v_flex};
+use gpui_kit::component::{Sizable as _, TitleBar, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyWindowHandle, App, AppContext as _, Context, Entity, Global, InteractiveElement as _,
     IntoElement, ParentElement as _, Render, SharedString, StatefulInteractiveElement as _,
     Styled as _, Window, WindowBounds, WindowOptions, div,
 };
+use navidog_core::object::ObjectRef;
 use navidog_core::settings::{Appearance, Language, Settings};
 use navidog_core::store::ConnectionStore;
-use navidog_ui::skin::{FormRow, heading};
+use navidog_ui::assets::lucide;
+use navidog_ui::skin::{FormRow, form_note, heading, truncated};
 use navidog_ui::{palette, tokens};
 use rust_i18n::t;
 
 struct PreferencesWindow(AnyWindowHandle);
 impl Global for PreferencesWindow {}
 
-/// 打开偏好设置（单例窗口）。
+/// Opens the preferences (a single window).
 pub fn open(cx: &mut App) {
     if let Some(handle) = cx.try_global::<PreferencesWindow>().map(|w| w.0)
         && handle
@@ -48,20 +50,114 @@ pub fn open(cx: &mut App) {
 #[derive(Clone, Copy, PartialEq)]
 enum Page {
     General,
+    Tabs,
+    Records,
     Advanced,
 }
 
 struct Preferences {
     page: Page,
+    records_per_page: Entity<InputState>,
 }
 
 impl Preferences {
-    fn new(_: &mut Window, cx: &mut Context<Self>) -> Self {
+    fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         cx.observe(&ConnectionStore::global(cx), |_, _, cx| cx.notify())
             .detach();
+        let per_page = Settings::global(cx).records_per_page.to_string();
+        let records_per_page = cx.new(|cx| InputState::new(window, cx).default_value(per_page));
+        cx.subscribe(&records_per_page, |_, input, e: &InputEvent, cx| {
+            if matches!(e, InputEvent::Change)
+                && let Ok(n) = input.read(cx).value().trim().parse::<u64>()
+                && n > 0
+            {
+                Settings::update(cx, |s| s.records_per_page = n);
+            }
+        })
+        .detach();
         Self {
             page: Page::General,
+            records_per_page,
         }
+    }
+
+    /// Tabs (F-PREF-003): where editors open, and the startup screen.
+    fn render_tabs(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let s = Settings::global(cx).clone();
+        let p = palette(cx);
+        let startup: Vec<ObjectRef> = s
+            .startup_tabs
+            .iter()
+            .filter_map(|v| serde_json::from_value(v.clone()).ok())
+            .collect();
+        v_flex()
+            .gap(tokens::form::ROW_GAP.rems())
+            .child(FormRow::bare(
+                Checkbox::new("open-in-new-window")
+                    .label(t!("prefs.open_in_new_window").to_string())
+                    .checked(s.open_in_new_window)
+                    .on_click(|v: &bool, _, cx| {
+                        let v = *v;
+                        Settings::update(cx, |s| s.open_in_new_window = v);
+                        cx.refresh_windows();
+                    }),
+            ))
+            .child(heading(t!("prefs.startup_screen").to_string()))
+            .child(form_note(t!("prefs.startup_hint").to_string(), cx))
+            .children(startup.into_iter().enumerate().map(|(ix, o)| {
+                h_flex()
+                    .gap_2()
+                    .child(
+                        truncated(("startup-tab", ix), o.name.clone())
+                            .flex_1()
+                            .text_color(p.label),
+                    )
+                    .child(
+                        Button::new(("startup-remove", ix))
+                            .ghost()
+                            .xsmall()
+                            .icon(lucide("minus"))
+                            .on_click(move |_, _, cx| {
+                                Settings::update(cx, |s| {
+                                    if ix < s.startup_tabs.len() {
+                                        s.startup_tabs.remove(ix);
+                                    }
+                                });
+                                cx.refresh_windows();
+                            }),
+                    )
+            }))
+    }
+
+    /// Records (F-PREF-005): page size and transactions of table viewers.
+    fn render_records(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let s = Settings::global(cx).clone();
+        v_flex()
+            .gap(tokens::form::ROW_GAP.rems())
+            .child(FormRow::bare(
+                Checkbox::new("limit-records")
+                    .label(t!("prefs.limit_records").to_string())
+                    .checked(s.limit_records)
+                    .on_click(|v: &bool, _, cx| {
+                        let v = *v;
+                        Settings::update(cx, |s| s.limit_records = v);
+                        cx.refresh_windows();
+                    }),
+            ))
+            .child(FormRow::new(
+                t!("prefs.records_per_page").to_string(),
+                Input::new(&self.records_per_page).w(tokens::form::FIELD_WIDTH_SHORT.rems()),
+            ))
+            .child(FormRow::bare(
+                Checkbox::new("auto-begin-transaction")
+                    .label(t!("prefs.auto_begin_transaction").to_string())
+                    .checked(s.auto_begin_transaction)
+                    .on_click(|v: &bool, _, cx| {
+                        let v = *v;
+                        Settings::update(cx, |s| s.auto_begin_transaction = v);
+                        cx.refresh_windows();
+                    }),
+            ))
     }
 
     fn render_general(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -105,6 +201,16 @@ impl Preferences {
                     .on_click(|v: &bool, _, cx| {
                         let v = *v;
                         Settings::update(cx, |s| s.auto_connect_on_startup = v);
+                        cx.refresh_windows();
+                    }),
+            ))
+            .child(FormRow::bare(
+                Checkbox::new("show-table-children")
+                    .label(t!("prefs.show_table_children").to_string())
+                    .checked(s.show_table_children)
+                    .on_click(|v: &bool, _, cx| {
+                        let v = *v;
+                        Settings::update(cx, |s| s.show_table_children = v);
                         cx.refresh_windows();
                     }),
             ))
@@ -181,11 +287,15 @@ impl Render for Preferences {
         let p = palette(cx);
         let pages = [
             (Page::General, t!("prefs.general")),
+            (Page::Tabs, t!("prefs.tabs")),
+            (Page::Records, t!("prefs.records")),
             (Page::Advanced, t!("prefs.advanced")),
         ];
         let page = self.page;
         let content = match page {
             Page::General => self.render_general(cx).into_any_element(),
+            Page::Tabs => self.render_tabs(cx).into_any_element(),
+            Page::Records => self.render_records(cx).into_any_element(),
             Page::Advanced => self.render_advanced(cx).into_any_element(),
         };
         v_flex()
@@ -240,7 +350,7 @@ impl Render for Preferences {
     }
 }
 
-/// 设置或修改主密码：两次输入新密码。
+/// Sets or changes the master password: the new password is entered twice.
 fn open_master_dialog(window: &mut Window, cx: &mut App) {
     let view = cx.new(|cx| MasterDialog {
         first: cx.new(|cx| InputState::new(window, cx).masked(true)),

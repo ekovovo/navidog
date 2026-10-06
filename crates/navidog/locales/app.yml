@@ -39,6 +39,33 @@ menu:
   close_tab:
     en: Close Tab
     zh-CN: 关闭选项卡
+  open_recent:
+    en: Open Recent
+    zh-CN: 打开最近使用过的
+  clear_recent:
+    en: Clear Menu
+    zh-CN: 清除菜单
+  open_uri:
+    en: Open navidog URI…
+    zh-CN: 使用 navidog URI 打开…
+  manage_connections:
+    en: Manage Connections…
+    zh-CN: 管理连接…
+  favorites:
+    en: Favorites
+    zh-CN: 收藏夹
+  add_favorite:
+    en: Add to Favorites…
+    zh-CN: 添加到收藏夹…
+  clear_favorites:
+    en: Clear Favorites
+    zh-CN: 清除收藏夹
+  clear_all:
+    en: Clear All
+    zh-CN: 全部清除
+  focus_mode:
+    en: Focus Mode
+    zh-CN: 专注模式
   close_window:
     en: Close Window
     zh-CN: 关闭窗口
@@ -197,6 +224,33 @@ prefs:
   auto_connect:
     en: Open connections marked “Auto connect” on startup
     zh-CN: 启动时打开勾选了“自动连接”的连接
+  show_table_children:
+    en: Show objects under tables
+    zh-CN: 显示表下的对象
+  tabs:
+    en: Tabs
+    zh-CN: 选项卡
+  records:
+    en: Records
+    zh-CN: 记录
+  open_in_new_window:
+    en: Open new editors in a new window
+    zh-CN: 在新窗口中打开新的编辑器
+  startup_screen:
+    en: Startup Screen
+    zh-CN: 启动画面
+  startup_hint:
+    en: These tabs open when navidog starts. Right-click a tab and choose “Add to Startup Screen” to add one.
+    zh-CN: 启动 navidog 时打开这些选项卡。右键点按选项卡并选择“添加到启动画面”即可加入。
+  limit_records:
+    en: Limit records per page
+    zh-CN: 限制每页记录数
+  records_per_page:
+    en: Records per page
+    zh-CN: 每页记录数
+  auto_begin_transaction:
+    en: Begin a transaction automatically when opening a table
+    zh-CN: 打开表时自动开始事务
   settings_location:
     en: Settings Location
     zh-CN: 设置位置
@@ -243,3 +297,30 @@ about:
   description:
     en: A database client built with GPUI Kit, modeled after Navicat.
     zh-CN: 基于 GPUI Kit 构建、复刻 Navicat 的数据库客户端。
+dialog:
+  ok:
+    en: OK
+    zh-CN: 好
+  cancel:
+    en: Cancel
+    zh-CN: 取消
+fav:
+  add_title:
+    en: Add to Favorites
+    zh-CN: 添加到收藏夹
+  name:
+    en: Favorite name
+    zh-CN: 收藏夹名称
+  id:
+    en: Favorite ID (1–9)
+    zh-CN: 收藏夹 ID（1–9）
+uri:
+  open_title:
+    en: Open navidog URI
+    zh-CN: 使用 navidog URI 打开
+  invalid:
+    en: Not a navidog URI
+    zh-CN: 不是有效的 navidog URI
+  no_connection:
+    en: "No saved connection matches “%{name}”"
+    zh-CN: "没有与“%{name}”匹配的连接"

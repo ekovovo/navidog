@@ -72,6 +72,21 @@ nav:
   star:
     en: Star
     zh-CN: 标星
+  reload:
+    en: Reload…
+    zh-CN: 重载…
+  switch_profile:
+    en: Switch Connection Profile
+    zh-CN: 切换连接配置文件
+  profile_default:
+    en: Default
+    zh-CN: 默认
+  new_profile:
+    en: New Profile…
+    zh-CN: 新建配置文件…
+  delete_profile:
+    en: Delete Current Profile
+    zh-CN: 删除当前配置文件
   unstar:
     en: Unstar
     zh-CN: 取消标星
@@ -349,6 +364,21 @@ info:
   general:
     en: General
     zh-CN: 常规
+  share:
+    en: Share
+    zh-CN: 共享
+  profile:
+    en: Profile
+    zh-CN: 配置文件
+  hide_host:
+    en: Hide host information
+    zh-CN: 隐藏主机信息
+  copy:
+    en: Copy
+    zh-CN: 复制
+  ok:
+    en: OK
+    zh-CN: 好
   ddl:
     en: DDL
     zh-CN: DDL

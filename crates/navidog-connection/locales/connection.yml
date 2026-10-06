@@ -25,8 +25,86 @@ conn:
     en: Cloud
     zh-CN: 云
   new_from_uri:
-    en: New Connection from URI…
-    zh-CN: 通过 URI 新建连接…
+    en: New Connection from URI
+    zh-CN: 通过 URI 新建连接
+  uri_hint:
+    en: "mysql://, postgres:// or navidog:// URI"
+    zh-CN: "mysql://、postgres:// 或 navidog:// URI"
+  uri_invalid:
+    en: Not a database URI navidog understands
+    zh-CN: 无法识别的数据库 URI
+  manage_title:
+    en: Manage Connections
+    zh-CN: 管理连接
+  manage_search:
+    en: Search Connection Information
+    zh-CN: 搜索连接信息
+  manage_type:
+    en: Type
+    zh-CN: 类型
+  manage_group:
+    en: Group
+    zh-CN: 分组
+  manage_edit:
+    en: Edit Connection
+    zh-CN: 编辑连接
+  manage_star:
+    en: Star / Unstar
+    zh-CN: 标星 / 取消标星
+  manage_hide:
+    en: Hide / Unhide
+    zh-CN: 隐藏 / 取消隐藏
+  node_type:
+    en: Node Type
+    zh-CN: 节点类型
+  node_single:
+    en: Single
+    zh-CN: 单个
+  node_multiple:
+    en: Multiple
+    zh-CN: 多个
+  members:
+    en: Member
+    zh-CN: 成员
+  members_required:
+    en: "Add at least one member (host:port, one per line)"
+    zh-CN: 至少添加一个成员（每行一个 主机:端口）
+  host_preference:
+    en: Host Type Preference
+    zh-CN: 主机类型偏好
+  pref_any:
+    en: Any
+    zh-CN: 任何
+  pref_read_write:
+    en: Read-Write
+    zh-CN: 读写
+  pref_read_only:
+    en: Read-Only
+    zh-CN: 只读
+  profile_default:
+    en: Default
+    zh-CN: 默认
+  new_profile:
+    en: New Profile
+    zh-CN: 新建配置文件
+  profile_name:
+    en: Profile Name
+    zh-CN: 配置文件名
+  confirm_delete_profile:
+    en: Delete profile "%{name}"?
+    zh-CN: 确定要删除配置文件“%{name}”吗？
+  reload:
+    en: Reload
+    zh-CN: 重载
+  reload_title:
+    en: Reload (FLUSH) Options
+    zh-CN: 重载（FLUSH）选项
+  reload_done:
+    en: Reloaded
+    zh-CN: 已重载
+  reload_failed:
+    en: Reload failed
+    zh-CN: 重载失败
   search:
     en: Search
     zh-CN: 搜索

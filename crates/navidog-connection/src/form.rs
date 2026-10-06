@@ -1,4 +1,4 @@
-//! 连接表单（11-connection.md 第 1.2、2、3 节）。
+//! Connection form (11-connection.md §1.2, §2, §3).
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
@@ -13,7 +13,8 @@ use gpui_kit::{
     PathPromptOptions, Render, SharedString, Styled as _, Task, Window, div,
 };
 use navidog_core::connection::{
-    AttachedDatabase, Connection, DatabaseItem, SecretField, SshAuth, SslMode,
+    AttachedDatabase, Connection, DatabaseItem, HostPreference, Member, SecretField, SshAuth,
+    SslMode,
 };
 use navidog_core::store::ConnectionStore;
 use navidog_core::workspace::{Selection, Workspace};
@@ -32,12 +33,35 @@ pub fn open_new(driver: SharedString, window: &mut Window, cx: &mut App) {
     open(conn, None, window, cx);
 }
 
+/// New connection prefilled from a URI (F-CONN-016).
+pub fn open_from_uri(uri: navidog_core::uri::DatabaseUri, window: &mut Window, cx: &mut App) {
+    let mut conn = Connection::new(&uri.driver);
+    conn.name = match &uri.database {
+        Some(db) if !uri.host.is_empty() => format!("{}/{db}", uri.host),
+        _ => uri.host.clone(),
+    };
+    if !uri.host.is_empty() {
+        conn.general.host = uri.host;
+    }
+    if uri.port.is_some() {
+        conn.general.port = uri.port;
+    }
+    if !uri.user.is_empty() {
+        conn.general.user = uri.user;
+    }
+    if uri.database.is_some() {
+        conn.general.database = uri.database;
+    }
+    conn.general.save_password |= uri.password.is_some();
+    open(conn, Some([uri.password, None, None]), window, cx);
+}
+
 pub fn open_edit(id: String, window: &mut Window, cx: &mut App) {
     let store = ConnectionStore::global(cx);
     let Some(conn) = store.read(cx).get(&id).cloned() else {
         return;
     };
-    // 编辑时回填已保存的秘密；已加锁时留空，保存时保留原值
+    // Editing fills in the saved secrets; when locked they stay empty and saving keeps the old values
     let secrets =
         SecretField::ALL.map(|f| store.update(cx, |s, _| s.reveal(&id, f)).ok().flatten());
     open(conn, Some(secrets), window, cx);
@@ -83,10 +107,16 @@ type Choice = Entity<SelectState<Vec<SharedString>>>;
 struct ConnectionForm {
     draft: Connection,
     is_new: bool,
-    /// 编辑时秘密已回填（未加锁），保存时整体写回
+    /// The secrets were filled in for editing (not locked), so saving writes them all back
     secrets_loaded: bool,
     tab: Tab_,
     name: Text,
+    /// PostgreSQL node type: single or multiple
+    node_type: Choice,
+    was_multi: bool,
+    /// PostgreSQL multiple nodes, one `host:port` per line, the first one is `host`
+    members: Entity<TextareaState>,
+    host_preference: Choice,
     host: Text,
     port: Text,
     database: Text,
@@ -202,11 +232,56 @@ impl ConnectionForm {
         ];
         let name = text(conn.name.clone(), window, cx);
         name.update(cx, |s, cx| s.focus(window, cx));
+        let g = &conn.general;
+        let node_type = choice(
+            vec![
+                t!("conn.node_single").to_string().into(),
+                t!("conn.node_multiple").to_string().into(),
+            ],
+            usize::from(!g.members.is_empty()),
+            window,
+            cx,
+        );
+        cx.observe_in(&node_type, window, |this: &mut Self, _, window, cx| {
+            let multi = this.multi_node(cx);
+            if multi != this.was_multi {
+                this.was_multi = multi;
+                this.sync_members(multi, window, cx);
+            }
+            cx.notify();
+        })
+        .detach();
+        let members = std::iter::once(Member {
+            host: g.host.clone(),
+            port: g.port,
+        })
+        .chain(g.members.iter().cloned())
+        .map(|m| m.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+        let pref_ix = HostPreference::ALL
+            .iter()
+            .position(|p| *p == g.host_preference)
+            .unwrap_or(0);
+        let host_preference = choice(
+            vec![
+                t!("conn.pref_any").to_string().into(),
+                t!("conn.pref_read_write").to_string().into(),
+                t!("conn.pref_read_only").to_string().into(),
+            ],
+            pref_ix,
+            window,
+            cx,
+        );
         Self {
             is_new,
             secrets_loaded,
             tab: Tab_::General,
             name,
+            was_multi: !g.members.is_empty(),
+            node_type,
+            members: cx.new(|cx| TextareaState::new(window, cx).default_value(members)),
+            host_preference,
             host: text(conn.general.host.clone(), window, cx),
             port: text(
                 conn.general.port.map(|p| p.to_string()).unwrap_or_default(),
@@ -301,6 +376,42 @@ impl ConnectionForm {
         Some(Self::value(input, cx)).filter(|v| !v.is_empty())
     }
 
+    fn selected(choice: &Choice, cx: &App) -> usize {
+        choice
+            .read(cx)
+            .selected_index(cx)
+            .map(|ix| ix.row)
+            .unwrap_or(0)
+    }
+
+    fn multi_node(&self, cx: &App) -> bool {
+        self.draft.driver == "postgres" && Self::selected(&self.node_type, cx) == 1
+    }
+
+    /// Carries the host between the host/port fields and the first member line on a node type switch.
+    fn sync_members(&mut self, to_multi: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let text = self.members.read(cx).value().to_string();
+        let mut lines: Vec<String> = text.lines().map(String::from).collect();
+        if to_multi {
+            let first = Member {
+                host: Self::value(&self.host, cx),
+                port: Self::value(&self.port, cx).parse().ok(),
+            };
+            match lines.first_mut() {
+                Some(l) => *l = first.to_string(),
+                None => lines.push(first.to_string()),
+            }
+            let text = lines.join("\n");
+            self.members
+                .update(cx, |s, cx| s.set_value(text, window, cx));
+        } else if let Some(first) = lines.first().and_then(|l| Member::parse(l)) {
+            let port = first.port.map(|p| p.to_string()).unwrap_or_default();
+            self.host
+                .update(cx, |s, cx| s.set_value(first.host, window, cx));
+            self.port.update(cx, |s, cx| s.set_value(port, window, cx));
+        }
+    }
+
     fn num(input: &Text, on: bool, cx: &App) -> Option<u32> {
         if !on {
             return None;
@@ -308,7 +419,7 @@ impl ConnectionForm {
         Self::value(input, cx).parse().ok()
     }
 
-    /// 由表单控件收集出完整的连接配置。
+    /// Collects the full connection settings from the form controls.
     fn collect(&self, cx: &App) -> Result<Connection, SharedString> {
         let mut c = self.draft.clone();
         c.name = Self::value(&self.name, cx);
@@ -328,6 +439,20 @@ impl ConnectionForm {
         g.database = Self::opt(&self.database, cx);
         g.file = Self::opt(&self.file, cx);
         g.user = Self::value(&self.user, cx);
+        if self.multi_node(cx) {
+            let text = self.members.read(cx).value().to_string();
+            let mut members: Vec<Member> = text.lines().filter_map(Member::parse).collect();
+            if members.is_empty() {
+                return Err(t!("conn.members_required").to_string().into());
+            }
+            let first = members.remove(0);
+            (g.host, g.port, g.members) = (first.host, first.port, members);
+            let ix = Self::selected(&self.host_preference, cx);
+            g.host_preference = HostPreference::ALL[ix.min(2)];
+        } else {
+            g.members.clear();
+            g.host_preference = HostPreference::Any;
+        }
         let a = &mut c.advanced;
         a.keepalive_secs = Self::num(&self.keepalive, self.keepalive_on, cx);
         a.connect_timeout_secs = Self::value(&self.connect_timeout, cx).parse().ok();
@@ -426,7 +551,7 @@ impl ConnectionForm {
                 return;
             }
         };
-        // 编辑且秘密未回填（主密码已加锁）时，空输入表示保留原值
+        // When editing without the secrets filled in (master password locked), empty means keep
         let keep_if_empty = !self.is_new && !self.secrets_loaded;
         let pick = |input: &Text, cx: &App| {
             let v = input.read(cx).value().to_string();
@@ -553,18 +678,48 @@ impl ConnectionForm {
             .into_any_element(),
         ];
         if self.draft.supports_network() {
-            rows.push(
-                FormRow::new(t!("conn.host").to_string(), Input::new(&self.host).w(w))
+            let postgres = self.draft.driver == "postgres";
+            if postgres {
+                rows.push(
+                    FormRow::new(
+                        t!("conn.node_type").to_string(),
+                        Select::new(&self.node_type).w(tokens::form::POPUP_WIDTH_SHORT.rems()),
+                    )
                     .into_any_element(),
-            );
-            rows.push(
-                FormRow::new(
-                    t!("conn.port").to_string(),
-                    Input::new(&self.port).w(tokens::form::FIELD_WIDTH_SHORT.rems()),
-                )
-                .into_any_element(),
-            );
-            if self.draft.driver == "postgres" {
+                );
+            }
+            if self.multi_node(cx) {
+                rows.push(
+                    FormRow::new(
+                        t!("conn.members").to_string(),
+                        Textarea::new(&self.members)
+                            .w(w)
+                            .h(tokens::form::LIST_HEIGHT.rems()),
+                    )
+                    .into_any_element(),
+                );
+                rows.push(
+                    FormRow::new(
+                        t!("conn.host_preference").to_string(),
+                        Select::new(&self.host_preference)
+                            .w(tokens::form::POPUP_WIDTH_MEDIUM.rems()),
+                    )
+                    .into_any_element(),
+                );
+            } else {
+                rows.push(
+                    FormRow::new(t!("conn.host").to_string(), Input::new(&self.host).w(w))
+                        .into_any_element(),
+                );
+                rows.push(
+                    FormRow::new(
+                        t!("conn.port").to_string(),
+                        Input::new(&self.port).w(tokens::form::FIELD_WIDTH_SHORT.rems()),
+                    )
+                    .into_any_element(),
+                );
+            }
+            if postgres {
                 rows.push(
                     FormRow::new(
                         t!("conn.initial_database").to_string(),

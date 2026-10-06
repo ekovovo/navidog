@@ -106,6 +106,27 @@ fn postgres_ssl_modes() {
 }
 
 #[test]
+fn postgres_multiple_nodes() {
+    use navidog_core::connection::HostPreference;
+    if !live() {
+        return;
+    }
+    runtime::runtime().block_on(async {
+        let driver: Arc<dyn Driver> = Arc::new(PostgresDriver::default());
+        // The first node is down, so the member is used
+        let mut p = pg_params();
+        p.port = 1;
+        p.members = vec![("127.0.0.1".into(), 15432)];
+        test_connection(driver.clone(), p.clone()).await.unwrap();
+        p.host_preference = HostPreference::ReadWrite;
+        test_connection(driver.clone(), p.clone()).await.unwrap();
+        // The only reachable node is a primary, so asking for a read-only one fails
+        p.host_preference = HostPreference::ReadOnly;
+        assert!(test_connection(driver, p).await.is_err());
+    });
+}
+
+#[test]
 fn mysql_and_postgres_metadata() {
     use navidog_core::object::{ObjectKind, Scope};
     if !live() {

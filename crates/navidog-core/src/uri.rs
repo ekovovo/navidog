@@ -8,6 +8,8 @@ use crate::object::ObjectKind;
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ObjectUri {
     pub conn: String,
+    /// Driver id (`type=`), so a URI can also prefill a new connection
+    pub driver: Option<String>,
     /// Left out when sharing with "hide host information"
     pub host: Option<String>,
     pub port: Option<u16>,
@@ -21,6 +23,7 @@ impl ObjectUri {
     pub fn build(&self) -> String {
         let mut q = vec![("conn", self.conn.clone())];
         let opt = |k, v: &Option<String>| v.clone().map(|v| (k, v));
+        q.extend(opt("type", &self.driver));
         q.extend(opt("host", &self.host));
         q.extend(self.port.map(|p| ("port", p.to_string())));
         q.extend(opt("db", &self.database));
@@ -42,6 +45,7 @@ impl ObjectUri {
             let v = decode(v)?;
             match k {
                 "conn" => uri.conn = v,
+                "type" => uri.driver = Some(v),
                 "host" => uri.host = Some(v),
                 "port" => uri.port = v.parse().ok(),
                 "db" => uri.database = Some(v),
@@ -53,6 +57,37 @@ impl ObjectUri {
         }
         (!uri.conn.is_empty()).then_some(uri)
     }
+}
+
+/// The navidog URI of a selection (`hide_host` leaves out host and port).
+pub fn of_selection(
+    sel: &crate::workspace::Selection,
+    conn: &crate::connection::Connection,
+    hide_host: bool,
+) -> String {
+    use crate::workspace::Selection;
+    let mut uri = ObjectUri {
+        conn: conn.name.clone(),
+        driver: Some(conn.driver.clone()),
+        host: (!hide_host && !conn.general.host.is_empty()).then(|| conn.general.host.clone()),
+        port: conn.general.port.filter(|_| !hide_host),
+        ..Default::default()
+    };
+    match sel {
+        Selection::Database(_, db) => uri.database = Some(db.clone()),
+        Selection::Schema(s) | Selection::Category(s, _) => {
+            uri.database = Some(s.database.clone());
+            uri.schema = s.schema.clone();
+        }
+        Selection::Object(o) => {
+            uri.database = Some(o.scope.database.clone());
+            uri.schema = o.scope.schema.clone();
+            uri.kind = Some(o.kind);
+            uri.name = Some(o.name.clone());
+        }
+        _ => {}
+    }
+    uri.build()
 }
 
 /// A standard database URI.
@@ -68,6 +103,21 @@ pub struct DatabaseUri {
 }
 
 impl DatabaseUri {
+    /// A standard URI, or a navidog URI that names its connection type.
+    pub fn parse_any(s: &str) -> Option<Self> {
+        Self::parse(s).or_else(|| {
+            let u = ObjectUri::parse(s)?;
+            Some(Self {
+                driver: u.driver?,
+                user: String::new(),
+                password: None,
+                host: u.host.unwrap_or_default(),
+                port: u.port,
+                database: u.database,
+            })
+        })
+    }
+
     pub fn parse(s: &str) -> Option<Self> {
         let (scheme, rest) = s.trim().split_once("://")?;
         let driver = match scheme {
@@ -158,6 +208,7 @@ mod tests {
     fn object_uris_round_trip() {
         let uri = ObjectUri {
             conn: "本地 MySQL".into(),
+            driver: Some("mysql".into()),
             host: Some("db.example.com".into()),
             port: Some(3306),
             database: Some("sakila".into()),
@@ -194,5 +245,47 @@ mod tests {
         let m = DatabaseUri::parse("mysql://root@[::1]/").unwrap();
         assert_eq!((m.host.as_str(), m.port, m.database), ("::1", None, None));
         assert!(DatabaseUri::parse("redis://x").is_none());
+    }
+
+    #[test]
+    fn shared_uris_prefill_new_connections() {
+        use crate::connection::Connection;
+        use crate::object::{ObjectRef, Scope};
+        use crate::workspace::Selection;
+        let mut conn = Connection::new("postgres");
+        conn.name = "prod".into();
+        let sel = Selection::Object(ObjectRef {
+            scope: Scope::new(&conn.id, "shop", Some("public".into())),
+            kind: ObjectKind::Table,
+            name: "orders".into(),
+        });
+        let shared = ObjectUri::parse(&of_selection(&sel, &conn, false)).unwrap();
+        assert_eq!(
+            (
+                shared.host.as_deref(),
+                shared.port,
+                shared.schema.as_deref()
+            ),
+            (Some("localhost"), Some(5432), Some("public"))
+        );
+        let hidden = ObjectUri::parse(&of_selection(&sel, &conn, true)).unwrap();
+        assert_eq!(
+            (hidden.host, hidden.port, hidden.name.as_deref()),
+            (None, None, Some("orders"))
+        );
+
+        let new = DatabaseUri::parse_any(&of_selection(&sel, &conn, false)).unwrap();
+        assert_eq!(
+            (
+                new.driver.as_str(),
+                new.host.as_str(),
+                new.database.as_deref()
+            ),
+            ("postgres", "localhost", Some("shop"))
+        );
+        assert!(
+            DatabaseUri::parse_any("navidog://open?conn=x").is_none(),
+            "no type, no driver to pick"
+        );
     }
 }

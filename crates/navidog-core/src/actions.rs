@@ -22,8 +22,16 @@ gpui_kit::actions!(
         OpenDatabase,
         CloseDatabase,
         ToggleStar,
+        ToggleHidden,
+        ManageConnections,
+        ReloadConnection,
+        NewProfile,
+        DeleteProfile,
     ]
 );
+
+// Hides everything but the active editor and enters full screen (F-APP-008); editors show the toggle
+gpui_kit::actions!(navidog, [ToggleFocusMode]);
 
 // View > Navigation Pane options; the shell persists them and passes them to the navigator
 gpui_kit::actions!(
@@ -77,6 +85,13 @@ pub struct SetColor {
 #[action(namespace = connection, no_json)]
 pub struct MoveToGroup {
     pub group: Option<SharedString>,
+}
+
+/// Switch the selected connection to another profile (F-CONN-021); "" is the default profile.
+#[derive(Clone, PartialEq, Debug, Action)]
+#[action(namespace = connection, no_json)]
+pub struct SwitchProfile {
+    pub name: SharedString,
 }
 
 /// Open an object in the object pane: tables open in the table viewer; other objects open as

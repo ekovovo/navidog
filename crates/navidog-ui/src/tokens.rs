@@ -215,12 +215,24 @@ pub mod preferences {
     pub const HEIGHT: Pt = Pt(480.);
 }
 
+/// Manage connections window (ManageConnectionViewController.nib).
+pub mod manage_conn {
+    use super::Pt;
+    pub const WIDTH: Pt = Pt(800.);
+    pub const HEIGHT: Pt = Pt(600.);
+    pub const BAR_HEIGHT: Pt = Pt(28.);
+    pub const COLUMN_WIDTH: Pt = Pt(150.);
+    pub const SEARCH_WIDTH: Pt = Pt(200.);
+}
+
 /// Preferences window size (no rem exists yet when the window is created, so convert 1:1).
 pub fn preferences_window_size() -> Size<Pixels> {
-    size(
-        gpui_kit::px(preferences::WIDTH.0),
-        gpui_kit::px(preferences::HEIGHT.0),
-    )
+    window_size(preferences::WIDTH, preferences::HEIGHT)
+}
+
+/// Size of a window opened before any rem exists (converted 1:1).
+pub fn window_size(w: Pt, h: Pt) -> Size<Pixels> {
+    size(gpui_kit::px(w.0), gpui_kit::px(h.0))
 }
 
 /// Default window size (no rem exists yet when the window is created, so convert 1:1).
@@ -262,6 +274,8 @@ pub struct Palette {
     pub grid_edited: Hsla,
     /// Rows pending deletion in the grid (provisional until measured in Navicat)
     pub grid_deleted: Hsla,
+    /// Search matches (NSColor.findHighlightColor = systemYellow), drawn under black text
+    pub find_highlight: Hsla,
 }
 
 fn c(hex: u32) -> Hsla {
@@ -289,6 +303,7 @@ pub fn light_palette() -> Palette {
         success: c(0x34c759ff),
         grid_edited: c(0xfff3c4ff),
         grid_deleted: c(0xffd9d9ff),
+        find_highlight: c(0xffcc00ff),
     }
 }
 
@@ -313,6 +328,7 @@ pub fn dark_palette() -> Palette {
         success: c(0x30d158ff),
         grid_edited: c(0x5c4b1aff),
         grid_deleted: c(0x5c2424ff),
+        find_highlight: c(0xffd60aff),
     }
 }
 

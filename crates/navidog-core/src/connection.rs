@@ -54,11 +54,74 @@ pub struct Connection {
     /// Hidden in Manage Connections: kept but not shown in the navigator
     #[serde(default)]
     pub hidden: bool,
+    /// Name of the active profile ("" is the default one); its settings are the fields above
+    #[serde(default)]
+    pub profile: String,
+    /// The inactive profiles (F-CONN-021)
+    #[serde(default)]
+    pub profiles: Vec<Profile>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
 
+/// A named set of connection settings, e.g. for another database user. Secrets stay encrypted for
+/// the connection's id, so they stay valid when a profile trades places with the active settings.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Profile {
+    pub name: String,
+    pub general: General,
+    pub advanced: Advanced,
+    pub ssl: Ssl,
+    pub ssh: Ssh,
+}
+
 impl Connection {
+    /// Trades the active settings with `profiles[ix]`; swapping twice restores them.
+    pub fn swap_profile(&mut self, ix: usize) {
+        let p = &mut self.profiles[ix];
+        std::mem::swap(&mut self.profile, &mut p.name);
+        std::mem::swap(&mut self.general, &mut p.general);
+        std::mem::swap(&mut self.advanced, &mut p.advanced);
+        std::mem::swap(&mut self.ssl, &mut p.ssl);
+        std::mem::swap(&mut self.ssh, &mut p.ssh);
+    }
+
+    pub fn switch_profile(&mut self, name: &str) -> bool {
+        let Some(ix) = self.profiles.iter().position(|p| p.name == name) else {
+            return false;
+        };
+        self.swap_profile(ix);
+        true
+    }
+
+    /// Adds a profile that starts as a copy of the active settings, and makes it active.
+    pub fn add_profile(&mut self, name: String) {
+        let old = Profile {
+            name: std::mem::replace(&mut self.profile, name),
+            general: self.general.clone(),
+            advanced: self.advanced.clone(),
+            ssl: self.ssl.clone(),
+            ssh: self.ssh.clone(),
+        };
+        self.profiles.push(old);
+    }
+
+    /// Drops the active profile and activates the first remaining one.
+    pub fn remove_active_profile(&mut self) -> bool {
+        if self.profiles.is_empty() {
+            return false;
+        }
+        self.swap_profile(0);
+        self.profiles.remove(0);
+        true
+    }
+
+    /// All profile names, the active one first.
+    pub fn profile_names(&self) -> impl Iterator<Item = &str> {
+        std::iter::once(self.profile.as_str()).chain(self.profiles.iter().map(|p| p.name.as_str()))
+    }
+
     /// Navicat's defaults for the given driver (11-connection.md §2).
     pub fn new(driver: &str) -> Self {
         let (port, user, database) = match driver {
@@ -88,6 +151,8 @@ impl Connection {
             remark: String::new(),
             starred: false,
             hidden: false,
+            profile: String::new(),
+            profiles: Vec::new(),
             extra: Map::new(),
         };
         conn.name = conn.suggested_name();
@@ -130,8 +195,71 @@ pub struct General {
     pub create_new: bool,
     pub save_password: bool,
     pub password: Option<Secret>,
+    /// PostgreSQL multiple nodes: servers tried in order after `host`; empty for a single node
+    pub members: Vec<Member>,
+    /// PostgreSQL multiple nodes: which kind of server to settle on
+    pub host_preference: HostPreference,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Member {
+    pub host: String,
+    pub port: Option<u16>,
+}
+
+impl Member {
+    /// `host`, `host:port`, `[v6]` or `[v6]:port`.
+    pub fn parse(line: &str) -> Option<Self> {
+        let line = line.trim();
+        let (host, port) = match line.strip_prefix('[') {
+            Some(rest) => {
+                let (host, after) = rest.split_once(']')?;
+                (host, after.strip_prefix(':'))
+            }
+            None => match line.rsplit_once(':') {
+                Some((h, p)) if !h.contains(':') => (h, Some(p)),
+                _ => (line, None),
+            },
+        };
+        let port = match port {
+            Some(p) => Some(p.parse().ok()?),
+            None => None,
+        };
+        (!host.is_empty()).then(|| Self {
+            host: host.into(),
+            port,
+        })
+    }
+}
+
+impl std::fmt::Display for Member {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let host = if self.host.contains(':') {
+            format!("[{}]", self.host)
+        } else {
+            self.host.clone()
+        };
+        match self.port {
+            Some(p) => write!(f, "{host}:{p}"),
+            None => f.write_str(&host),
+        }
+    }
+}
+
+/// libpq `target_session_attrs`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HostPreference {
+    #[default]
+    Any,
+    ReadWrite,
+    ReadOnly,
+}
+
+impl HostPreference {
+    pub const ALL: [Self; 3] = [Self::Any, Self::ReadWrite, Self::ReadOnly];
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -356,6 +484,49 @@ mod tests {
         lite.general.file = Some("/tmp/app.db".into());
         assert_eq!(lite.suggested_name(), "app");
         assert!(!lite.supports_network());
+    }
+
+    #[test]
+    fn members_parse_and_print() {
+        let m = |s| Member::parse(s).map(|m| (m.host, m.port));
+        assert_eq!(m(" db1:6543 "), Some(("db1".into(), Some(6543))));
+        assert_eq!(m("db2"), Some(("db2".into(), None)));
+        assert_eq!(m("[::1]:5433"), Some(("::1".into(), Some(5433))));
+        assert_eq!(
+            m("fe80::1"),
+            Some(("fe80::1".into(), None)),
+            "a bare IPv6 address has no port"
+        );
+        assert_eq!(m("db:x"), None);
+        assert_eq!(m(""), None);
+        let v6 = Member {
+            host: "::1".into(),
+            port: Some(5433),
+        };
+        assert_eq!(Member::parse(&v6.to_string()), Some(v6));
+    }
+
+    #[test]
+    fn profiles_trade_places_with_active_settings() {
+        let mut c = Connection::new("mysql");
+        c.add_profile("readonly".into());
+        c.general.user = "reader".into();
+        assert_eq!(c.profile_names().collect::<Vec<_>>(), ["readonly", ""]);
+        assert!(c.switch_profile(""));
+        assert_eq!((c.profile.as_str(), c.general.user.as_str()), ("", "root"));
+        assert!(!c.switch_profile("missing"));
+        assert!(c.switch_profile("readonly"));
+        assert_eq!(c.general.user, "reader");
+        assert!(c.remove_active_profile());
+        assert_eq!(
+            (
+                c.profile.as_str(),
+                c.general.user.as_str(),
+                c.profiles.len()
+            ),
+            ("", "root", 0)
+        );
+        assert!(!c.remove_active_profile());
     }
 
     #[test]

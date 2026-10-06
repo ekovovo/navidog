@@ -1,11 +1,15 @@
 //! navidog app shell: initializes every layer, the menu bar and the main window (10-shell.md §1).
 
+// The Action derive macro emits `gpui::` paths
+extern crate gpui_kit as gpui;
+
 rust_i18n::i18n!("locales", fallback = "en");
 
-mod actions;
+pub mod actions;
 mod editors;
 pub mod main_window;
 mod menus;
+mod opening;
 mod popout;
 mod preferences;
 pub mod state;
@@ -101,6 +105,7 @@ fn open_main_window(
         if Settings::global(cx).auto_connect_on_startup {
             navidog_connection::auto_connect(window, cx);
         }
+        view.update(cx, |v, cx| v.open_startup_tabs(window, cx));
         view
     })
     .expect("无法打开主窗口")

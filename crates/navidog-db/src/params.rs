@@ -1,4 +1,4 @@
-//! 把保存的连接配置与解密后的秘密换算成驱动连接参数。
+//! Turns saved connection settings and decrypted secrets into driver connect parameters.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -18,13 +18,16 @@ pub struct ConnectParams {
     pub connect_timeout: Option<Duration>,
     pub compression: bool,
     pub socket: Option<String>,
-    /// PostgreSQL 连接参数（libpq `key=value` 形式）
+    /// PostgreSQL connection parameters (libpq `key=value` form)
     pub params: String,
     pub initial_queries: String,
     pub ssl: Option<SslParams>,
     pub ssh: Option<SshParams>,
-    /// 经 SSH 隧道连接时，TLS 证书校验使用的原始主机名
+    /// Through an SSH tunnel: the original host name used to verify the TLS certificate
     pub tls_host: Option<String>,
+    /// PostgreSQL multiple nodes: servers tried after `host`, and which kind to settle on
+    pub members: Vec<(String, u16)>,
+    pub host_preference: navidog_core::connection::HostPreference,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -48,7 +51,7 @@ pub struct SshParams {
     pub passphrase: Option<String>,
 }
 
-/// 解密后的秘密字段。
+/// Decrypted secret fields.
 #[derive(Clone, Debug, Default)]
 pub struct Secrets {
     pub password: Option<String>,
@@ -149,6 +152,12 @@ impl ConnectParams {
             ssl,
             ssh,
             tls_host: None,
+            members: g
+                .members
+                .iter()
+                .map(|m| (m.host.clone(), m.port.unwrap_or(default_port)))
+                .collect(),
+            host_preference: g.host_preference,
         }
     }
 

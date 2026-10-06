@@ -31,6 +31,34 @@ pub fn truncated(
         .child(text)
 }
 
+/// Byte ranges of `query` in `text`, ignoring ASCII case (folding ASCII keeps byte offsets valid).
+pub fn find_matches(text: &str, query: &str) -> Vec<std::ops::Range<usize>> {
+    let (t, q) = (text.as_bytes(), query.as_bytes());
+    let mut out = Vec::new();
+    let mut i = 0;
+    while !q.is_empty() && i + q.len() <= t.len() {
+        if t[i..i + q.len()].eq_ignore_ascii_case(q) {
+            out.push(i..i + q.len());
+            i += q.len();
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
+/// `text` with every match of `query` drawn on the find highlight.
+pub fn highlighted(text: impl Into<SharedString>, query: &str, cx: &App) -> gpui_kit::StyledText {
+    let text = text.into();
+    let style = gpui_kit::HighlightStyle {
+        background_color: Some(palette(cx).find_highlight),
+        color: Some(gpui_kit::black()),
+        ..Default::default()
+    };
+    let ranges = find_matches(&text, query);
+    gpui_kit::StyledText::new(text).with_highlights(ranges.into_iter().map(|r| (r, style)))
+}
+
 /// Main toolbar item: icon on top, label below (Navicat's Expanded toolbar style).
 #[derive(IntoElement)]
 pub struct ToolbarItem {
@@ -169,4 +197,21 @@ pub fn form_note(text: impl Into<SharedString>, cx: &App) -> impl IntoElement {
 /// Dialog heading (Semibold 13pt).
 pub fn heading(text: impl Into<SharedString>) -> impl IntoElement {
     div().font_weight(FontWeight::SEMIBOLD).child(text.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::find_matches;
+
+    #[test]
+    fn matches_ignore_ascii_case_and_keep_utf8_offsets() {
+        assert_eq!(
+            find_matches("本地 MySQL mysql", "mysql"),
+            vec![7..12, 13..18]
+        );
+        assert_eq!(find_matches("数据库", "据"), vec![3..6]);
+        assert_eq!(find_matches("aaaa", "aa"), vec![0..2, 2..4]);
+        assert!(find_matches("abc", "").is_empty());
+        assert!(find_matches("ab", "abc").is_empty());
+    }
 }

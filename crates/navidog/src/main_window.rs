@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use gpui_kit::component::dock::{
     BasePanelView, DockArea, DockAreaState, DockEvent, DockLayout, DockPlacement, DockSkin,
-    PanelId, panel_handle,
+    PanelId, PanelInfo, panel_handle,
 };
 use gpui_kit::component::status_bar::StatusBar;
 use gpui_kit::component::{TitleBar, h_flex, v_flex};
@@ -15,13 +15,16 @@ use gpui_kit::{
     Render, Styled as _, Subscription, Window, div,
 };
 use navidog_core::actions::{
-    OpenObject, ToggleHideObjectGroups, ToggleOnlyActive, ToggleShowHidden,
+    OpenConnection, OpenObject, ToggleFocusMode, ToggleHideObjectGroups, ToggleOnlyActive,
+    ToggleShowHidden,
 };
+use navidog_core::favorites::Favorites;
 use navidog_core::object::ObjectRef;
 use navidog_core::registry::CommandRegistry;
 use navidog_core::settings::Settings;
 use navidog_core::store::ConnectionStore;
-use navidog_core::workspace::Workspace;
+use navidog_core::workspace::{Selection, Workspace};
+use navidog_db::sessions::{Sessions, SessionsEvent};
 use navidog_navigator::{InfoPanel, NavigatorPanel, ObjectsPanel};
 use navidog_ui::assets::lucide;
 use navidog_ui::skin::ToolbarItem;
@@ -40,11 +43,21 @@ pub struct MainWindow {
     _skin: Rc<DockSkin>,
     state: AppState,
     info_restore: Option<gpui_kit::Pixels>,
-    /// Open editor tabs, so an object is not opened twice
-    open_tabs: std::collections::HashMap<ObjectRef, PanelId>,
-    /// Editors popped out into their own windows
-    popped: std::collections::HashMap<PanelId, gpui_kit::AnyWindowHandle>,
+    /// The fixed objects tab; editors open in its tab group
+    objects_tab: PanelId,
+    /// Editors popped out into their own windows, with the object each shows
+    popped: std::collections::HashMap<PanelId, (gpui_kit::AnyWindowHandle, Option<ObjectRef>)>,
+    /// Objects to open once their connection is open (favorites, recent, URIs, startup screen)
+    pending: Vec<ObjectRef>,
+    /// What focus mode hid, restored when it ends
+    focus_mode: Option<FocusRestore>,
     _subscriptions: Vec<Subscription>,
+}
+
+struct FocusRestore {
+    navigator: bool,
+    info: bool,
+    fullscreen: bool,
 }
 
 /// Main toolbar entries: (id, Lucide icon, i18n key, command id in the command registry).
@@ -111,7 +124,7 @@ impl MainWindow {
         skin.set_close_button_visible(true, cx);
         let info = InfoPanel::shared(window, cx);
         NavigatorPanel::shared(window, cx);
-        ObjectsPanel::shared(window, cx);
+        let objects_tab = PanelId::from(ObjectsPanel::shared(window, cx).entity_id());
 
         let restored = state
             .dock
@@ -139,6 +152,25 @@ impl MainWindow {
             }),
             cx.observe(&Workspace::global(cx), |_, _, cx| cx.notify()),
             cx.observe(&ConnectionStore::global(cx), |_, _, cx| cx.notify()),
+            // The Favorites and Open Recent menus list these
+            cx.observe(&Favorites::global(cx), |_, _, cx| {
+                crate::menus::set_menus(cx)
+            }),
+            cx.subscribe_in(
+                &Sessions::global(cx),
+                window,
+                |this, _, e: &SessionsEvent, window, cx| {
+                    if let SessionsEvent::Opened(id) = e {
+                        let (ready, rest) = std::mem::take(&mut this.pending)
+                            .into_iter()
+                            .partition(|o| &o.scope.connection == id);
+                        this.pending = rest;
+                        for o in ready {
+                            this.open_selection(Selection::Object(o), window, cx);
+                        }
+                    }
+                },
+            ),
             cx.observe_window_appearance(window, |_, window, cx| {
                 if navidog_core::settings::Settings::global(cx)
                     .appearance
@@ -162,10 +194,114 @@ impl MainWindow {
             _skin: skin,
             state,
             info_restore: None,
-            open_tabs: Default::default(),
+            objects_tab,
             popped: Default::default(),
+            pending: Vec::new(),
+            focus_mode: None,
             _subscriptions: subs,
         }
+    }
+
+    /// Startup screen (F-APP-012): reopens the configured tabs, connecting as needed.
+    pub fn open_startup_tabs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let objects: Vec<ObjectRef> = Settings::global(cx)
+            .startup_tabs
+            .iter()
+            .filter_map(|v| serde_json::from_value(v.clone()).ok())
+            .collect();
+        for o in objects {
+            self.open_selection(Selection::Object(o), window, cx);
+        }
+    }
+
+    /// The object an editor panel shows (its persisted panel state).
+    fn panel_object(view: &Arc<dyn BasePanelView>, cx: &App) -> Option<ObjectRef> {
+        match view.dump(cx).info {
+            PanelInfo::Panel(v) => serde_json::from_value(v).ok(),
+            _ => None,
+        }
+    }
+
+    fn tab_object(&self, panel: PanelId, cx: &App) -> Option<ObjectRef> {
+        self.dock
+            .read(cx)
+            .panel(panel)
+            .and_then(|v| Self::panel_object(v, cx))
+    }
+
+    /// The tab already showing `object` in the objects tab's group.
+    // ponytail: editors dragged into another tab group are not found and open again
+    fn find_tab(&self, object: &ObjectRef, cx: &App) -> Option<PanelId> {
+        let group = navidog_ui::tabs::group_of(self.objects_tab, cx)?;
+        let group = group.read(cx);
+        group
+            .panels()
+            .iter()
+            .find(|p| Self::panel_object(p, cx).as_ref() == Some(object))
+            .map(|p| p.panel_id(cx))
+    }
+
+    /// Selects `sel` and, for an object, opens it; when its connection is closed, opens the
+    /// connection first and the object once it is open.
+    pub(crate) fn open_selection(
+        &mut self,
+        sel: Selection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(conn) = sel.connection_id().cloned() else {
+            return;
+        };
+        Workspace::global(cx).update(cx, |w, cx| w.select(sel.clone(), cx));
+        let open = Sessions::global(cx).read(cx).state(&conn).is_open();
+        match sel {
+            Selection::Object(o) if open => self.open_object(&o, window, cx),
+            Selection::Object(o) => {
+                self.pending.push(o);
+                window.dispatch_action(Box::new(OpenConnection), cx);
+            }
+            _ if !open => window.dispatch_action(Box::new(OpenConnection), cx),
+            _ => {}
+        }
+    }
+
+    fn active_tab_object(&self, cx: &App) -> Option<ObjectRef> {
+        navidog_ui::tabs::active(cx).and_then(|p| self.tab_object(p, cx))
+    }
+
+    /// Focus mode (F-APP-008): only the editors stay, in full screen.
+    fn toggle_focus_mode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let docks = [DockPlacement::Left, DockPlacement::Right];
+        match self.focus_mode.take() {
+            Some(r) => {
+                for (placement, open) in docks.into_iter().zip([r.navigator, r.info]) {
+                    if open && !self.dock.read(cx).is_dock_open(placement) {
+                        self.toggle_dock(placement, window, cx);
+                    }
+                }
+                if !r.fullscreen && window.is_fullscreen() {
+                    window.toggle_fullscreen();
+                }
+            }
+            None => {
+                let dock = self.dock.read(cx);
+                let r = FocusRestore {
+                    navigator: dock.is_dock_open(DockPlacement::Left),
+                    info: dock.is_dock_open(DockPlacement::Right),
+                    fullscreen: window.is_fullscreen(),
+                };
+                for placement in docks {
+                    if self.dock.read(cx).is_dock_open(placement) {
+                        self.toggle_dock(placement, window, cx);
+                    }
+                }
+                if !r.fullscreen {
+                    window.toggle_fullscreen();
+                }
+                self.focus_mode = Some(r);
+            }
+        }
+        cx.notify();
     }
 
     fn default_layout(dock: &Entity<DockArea>, window: &mut Window, cx: &mut App) {
@@ -262,19 +398,20 @@ impl MainWindow {
 
     /// Opens an object in the object pane, switching to its tab (or its own window) if it is already open.
     fn open_object(&mut self, object: &ObjectRef, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(id) = self.open_tabs.get(object).copied() {
-            if self.dock.read(cx).panel(id).is_some() {
-                self.dock.update(cx, |a, cx| a.select_panel(id, window, cx));
-                return;
-            }
-            if let Some(w) = self.popped.get(&id) {
-                let _ = w.update(cx, |_, window, _| window.activate_window());
-                return;
-            }
+        Favorites::global(cx).update(cx, |f, cx| f.opened(object.clone(), cx));
+        if let Some(id) = self.find_tab(object, cx) {
+            self.dock.update(cx, |a, cx| a.select_panel(id, window, cx));
+            return;
+        }
+        if let Some((w, _)) = self
+            .popped
+            .values()
+            .find(|(_, o)| o.as_ref() == Some(object))
+        {
+            let _ = w.update(cx, |_, window, _| window.activate_window());
+            return;
         }
         let panel = crate::editors::open(object.clone(), window, cx);
-        let id = panel.panel_id(cx);
-        self.open_tabs.insert(object.clone(), id);
         if Settings::global(cx).open_in_new_window {
             self.popped_out(panel, window, cx);
             return;
@@ -302,9 +439,10 @@ impl MainWindow {
         cx: &mut Context<Self>,
     ) {
         let id = view.panel_id(cx);
+        let object = Self::panel_object(&view, cx);
         let main = cx.entity().downgrade();
         if let Some(w) = crate::popout::open(view, main, window.window_handle(), cx) {
-            self.popped.insert(id, w);
+            self.popped.insert(id, (w, object));
         }
     }
 
@@ -423,7 +561,87 @@ impl Render for MainWindow {
                 cx.listener(|this, a: &navidog_ui::tabs::PopOutTab, window, cx| {
                     this.pop_out(a.panel, window, cx)
                 }),
-            );
+            )
+            .on_action(cx.listener(|this, _: &ToggleFocusMode, window, cx| {
+                this.toggle_focus_mode(window, cx)
+            }))
+            // Favorites (F-APP-011)
+            .on_action(
+                cx.listener(|this, a: &navidog_ui::tabs::AddToFavorites, window, cx| {
+                    if let Some(o) = this.tab_object(a.panel, cx) {
+                        crate::opening::add_favorite(o, window, cx);
+                    }
+                }),
+            )
+            .on_action(cx.listener(|this, _: &AddActiveToFavorites, window, cx| {
+                if let Some(o) = this.active_tab_object(cx) {
+                    crate::opening::add_favorite(o, window, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, a: &AddFavoriteWithId, _, cx| {
+                if let Some(o) = this.active_tab_object(cx) {
+                    let name = o.name.clone();
+                    Favorites::global(cx).update(cx, |f, cx| f.add(o, name, Some(a.id), cx));
+                }
+            }))
+            .on_action(cx.listener(|this, a: &OpenFavoriteId, window, cx| {
+                let o = Favorites::global(cx)
+                    .read(cx)
+                    .with_id(a.id)
+                    .map(|f| f.object.clone());
+                if let Some(o) = o {
+                    this.open_selection(Selection::Object(o), window, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, a: &OpenFavorite, window, cx| {
+                let o = Favorites::global(cx)
+                    .read(cx)
+                    .favorites()
+                    .get(a.ix)
+                    .map(|f| f.object.clone());
+                if let Some(o) = o {
+                    this.open_selection(Selection::Object(o), window, cx);
+                }
+            }))
+            .on_action(|a: &RemoveFavorite, _, cx| {
+                Favorites::global(cx).update(cx, |f, cx| f.remove(a.ix, cx))
+            })
+            .on_action(|_: &ClearFavorites, _, cx| {
+                Favorites::global(cx).update(cx, |f, cx| f.clear(cx))
+            })
+            // Recent objects (F-APP-013)
+            .on_action(cx.listener(|this, a: &OpenRecent, window, cx| {
+                let o = Favorites::global(cx).read(cx).recent().get(a.ix).cloned();
+                if let Some(o) = o {
+                    this.open_selection(Selection::Object(o), window, cx);
+                }
+            }))
+            .on_action(|_: &ClearRecent, _, cx| {
+                Favorites::global(cx).update(cx, |f, cx| f.clear_recent(cx))
+            })
+            // Startup screen (F-APP-012)
+            .on_action(
+                cx.listener(|this, a: &navidog_ui::tabs::AddToStartup, _, cx| {
+                    let Some(o) = this
+                        .tab_object(a.panel, cx)
+                        .and_then(|o| serde_json::to_value(o).ok())
+                    else {
+                        return;
+                    };
+                    Settings::update(cx, |s| {
+                        if !s.startup_tabs.contains(&o) {
+                            s.startup_tabs.push(o);
+                        }
+                    });
+                }),
+            )
+            // navidog URIs (F-APP-014)
+            .on_action(cx.listener(|_, _: &OpenUri, window, cx| {
+                let main = cx.entity().downgrade();
+                crate::opening::open_uri(window, cx, move |sel, window, cx| {
+                    let _ = main.update(cx, |this, cx| this.open_selection(sel, window, cx));
+                });
+            }));
         let root = navidog_navigator::bind_actions(navidog_connection::bind_actions(root));
         let _ = window;
         root.child(

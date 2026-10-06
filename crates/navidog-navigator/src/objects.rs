@@ -126,6 +126,7 @@ impl Panel for ObjectsPanel {
             PanelId::from(cx.entity_id()),
             None,
             t!("obj.objects_tab").to_string(),
+            None,
         )
     }
 }

@@ -58,6 +58,9 @@ viewer:
   export:
     en: Export
     zh-CN: 导出
+  focus_mode:
+    en: Focus Mode
+    zh-CN: 专注模式
   apply:
     en: Apply
     zh-CN: 应用
