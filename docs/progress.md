@@ -35,7 +35,7 @@
 | --- | --- | --- |
 | 会话管理下沉到 `navidog-db`，跨 feature 命令移到 `navidog-core` | 完成 | 命令在 `navidog_core::actions`，会话在 `navidog_db::sessions` |
 | 结果网格技术验证（21-table-viewer 第 1 节） | 完成 | 采用 `DataTable` 加外层补充，数据见规格第 1 节 |
-| 导航树技术验证（20-objects 第 1 节） | 未开始 | 下一步；决定多选、拖放、原地重命名的实现方式 |
+| 导航树技术验证（20-objects 第 1 节） | 完成 | 继续用 `Tree`，数据见规格第 1 节 |
 | 驱动接口扩展：模式、对象、DDL、字段，以及方言 | 完成 | 另加 SQL 分句器 `navidog_db::sql` |
 | `navidog-navigator`：迁移面板，导航树展开到对象 | 完成 | |
 | 对象选项卡：列表视图、详细信息视图、对象工具栏 | 部分 | 缺“选择列”、空白处右键菜单；设计、新建按钮在 M4 启用 |
@@ -46,7 +46,7 @@
 | 表查看器：编辑、提交、事务 | 部分 | 缺“离开已修改的行时自动提交”和偏好设置中的自动开始事务 |
 | 表查看器：复制、复制为、粘贴 | 完成 | |
 | 表查看器：表单视图、查找替换、格式设置、原始数据、单元格编辑器、外键数据选择 | 未开始 | F-DATA-002、007、009 ~ 012 |
-| 导航树：多选、拖放、原地重命名、表下元素 | 未开始 | 依赖导航树技术验证 |
+| 导航树：多选、拖放、原地重命名、表下元素 | 部分 | ⌘ / ⇧ 点按多选、把连接拖进组或拖回顶层、组的原地新建和重命名已完成；缺表下元素（F-NAV-002）、⇧ + 方向键扩选、拖动时自动滚动 |
 | 虚拟组、收藏夹、URI、管理连接窗口、重载、专注模式 | 未开始 | |
 
 ## 3. 功能状态
@@ -84,7 +84,7 @@
 | F-CONN-010 测试连接 | 完成 | live 测试 | |
 | F-CONN-011 编辑、复制、删除连接 | 完成 | store 单元测试 | |
 | F-CONN-012 打开、关闭连接 | 完成 | ui 测试、live 测试 | |
-| F-CONN-013 连接组 | 部分 | store 单元测试 | 移动用右键菜单，拖放在 M2 |
+| F-CONN-013 连接组 | 完成 | store 单元测试、navigator UI 测试 | M2 加入拖放和原地新建、重命名 |
 | F-CONN-014 连接颜色 | 完成 | snapshot | |
 | F-CONN-020 密码存储 | 完成 | crypto、store 单元测试 | |
 | F-NAV-001 连接树 | 完成 | ui 测试 | M1 到数据库层级，M2 到对象层级（见下表） |
@@ -120,7 +120,6 @@
 | 项目 | 引入于 | 计划处理 |
 | --- | --- | --- |
 | 类型选择和连接表单是窗口内的模态对话框，而不是独立窗口 | M1 | AX 实测后决定 |
-| 组的新建和重命名用对话框，不是原地编辑 | M1 | M2 |
 | 暂定 token：工具栏、导航树行、按钮高度、连接表单尺寸、偏好设置窗口尺寸 | M1 | 运行 `tools/ax-dump.swift` 后替换 |
 | SQLite 加密数据库、新建 SQLite 2 不支持 | M1 | M4 评估 SQLCipher |
 | PostgreSQL 的取消请求走明文连接 | M1 | M3 |
@@ -140,3 +139,4 @@
 | 实库测试 | `docker compose up -d --wait && NAVIDOG_LIVE=1 cargo test -p navidog-db --test live` | 本地执行 |
 | 截图 | `cargo test -p navidog --test snapshot` | 本地执行，输出 `target/snapshots/` |
 | 结果网格性能 | `cargo run --release -p navidog-grid --example spike` | 本地执行，需要 Metal |
+| 导航树性能 | `cargo run --release -p navidog-navigator --example tree_spike` | 本地执行，需要 Metal |

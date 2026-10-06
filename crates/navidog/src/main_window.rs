@@ -1,4 +1,4 @@
-//! 主窗口：标题栏、主工具栏、Dock、状态栏（10-shell.md 第 2 ~ 4、8 节）。
+//! Main window: title bar, main toolbar, dock and status bar (10-shell.md §2–4, §8).
 
 use std::rc::Rc;
 
@@ -26,7 +26,7 @@ use rust_i18n::t;
 use crate::actions::*;
 use crate::state::{AppState, Frame};
 
-/// Dock 布局版本；默认布局结构变化时递增，旧布局将被丢弃。
+/// Dock layout version; bump it when the default layout structure changes so old layouts are discarded.
 const DOCK_VERSION: usize = 1;
 
 pub struct MainWindow {
@@ -35,13 +35,13 @@ pub struct MainWindow {
     _skin: Rc<DockSkin>,
     state: AppState,
     info_restore: Option<gpui_kit::Pixels>,
-    /// 已打开的编辑器选项卡，避免同一对象重复打开
+    /// Open editor tabs, so an object is not opened twice
     open_tabs: std::collections::HashMap<ObjectRef, PanelId>,
     _subscriptions: Vec<Subscription>,
 }
 
-/// 主工具栏条目：(id, Lucide 图标, i18n 键, 命令注册表中的命令 ID)。
-/// 命令未注册的条目显示为禁用（对应功能在后续里程碑实现）。
+/// Main toolbar entries: (id, Lucide icon, i18n key, command id in the command registry).
+/// Entries whose command is not registered are shown disabled (implemented in later milestones).
 const TOOLBAR: &[(&str, &str, &str, Option<&str>)] = &[
     (
         "tb-connection",
@@ -227,7 +227,7 @@ impl MainWindow {
             .update(cx, |a, cx| a.toggle_dock(placement, window, cx));
     }
 
-    /// 信息窗格“最大化/还原”：把右侧 dock 扩到窗口宽度减去导航窗格，再次点击还原。
+    /// Info pane maximize/restore: widens the right dock to the window width minus the navigator; clicking again restores it.
     fn toggle_info_maximized(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let rem = window.rem_size();
         let restore = self.info_restore.take();
@@ -251,7 +251,7 @@ impl MainWindow {
         self.save_state(window, cx);
     }
 
-    /// 在对象窗格中打开对象：同一对象的选项卡已经打开时切换过去，否则新建。
+    /// Opens an object in the object pane, switching to its tab if it is already open.
     fn open_object(&mut self, object: &ObjectRef, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(id) = self.open_tabs.get(object).copied()
             && self.dock.read(cx).panel(id).is_some()
@@ -353,9 +353,9 @@ impl Render for MainWindow {
                 window.remove_window();
             }))
             .on_action(|_: &CloseTab, _, _| {
-                // M1 只有固定的“对象”选项卡，不可关闭；编辑器选项卡在 M2 加入
+                // ⌘W does not close editor tabs yet; they close from the tab's close button
             });
-        let root = navidog_connection::bind_actions(root);
+        let root = navidog_navigator::bind_actions(navidog_connection::bind_actions(root));
         let _ = window;
         root.child(
             TitleBar::new().child(

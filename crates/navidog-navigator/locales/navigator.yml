@@ -24,6 +24,12 @@ nav:
   new_group:
     en: New Group
     zh-CN: 新建组
+  new_group_default:
+    en: New Group
+    zh-CN: 新建组
+  n_connections:
+    en: "%{n} connections"
+    zh-CN: "%{n} 个连接"
   rename_group:
     en: Rename Group…
     zh-CN: 重命名…

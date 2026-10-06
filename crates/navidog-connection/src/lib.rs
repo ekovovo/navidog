@@ -1,9 +1,8 @@
-//! 连接管理：类型选择、连接表单、秘密解析、连接组，以及连接命令的处理。
+//! Connection management: type picker, connection form, secret resolution and connection commands.
 
 rust_i18n::i18n!("locales", fallback = "en");
 
 mod form;
-mod groups;
 mod picker;
 mod secrets;
 
@@ -34,7 +33,7 @@ pub fn init(cx: &mut App) {
     );
 }
 
-/// 启动时打开勾选了“自动连接”的连接。
+/// Opens the connections marked "auto connect" at startup.
 pub fn auto_connect(window: &mut Window, cx: &mut App) {
     let ids: Vec<_> = ConnectionStore::global(cx)
         .read(cx)
@@ -48,7 +47,7 @@ pub fn auto_connect(window: &mut Window, cx: &mut App) {
     }
 }
 
-/// 在窗口根元素上绑定连接命令，菜单栏、工具栏、右键菜单共用。
+/// Binds the connection commands on the window root, shared by the menu bar, toolbar and context menus.
 pub fn bind_actions<E: InteractiveElement>(el: E) -> E {
     el.on_action(|_: &NewConnection, window, cx| picker::open(window, cx))
         .on_action(|a: &NewConnectionOf, window, cx| form::open_new(a.driver.clone(), window, cx))
@@ -88,8 +87,6 @@ pub fn bind_actions<E: InteractiveElement>(el: E) -> E {
                 Sessions::global(cx).update(cx, |s, cx| s.refresh(&id, cx));
             }
         })
-        .on_action(|_: &NewGroup, window, cx| groups::new_group(window, cx))
-        .on_action(|_: &RenameGroup, window, cx| groups::rename_group(window, cx))
         .on_action(|_: &DeleteGroup, window, cx| confirm_delete_group(window, cx))
         .on_action(|a: &SetColor, _, cx| {
             let Some(id) = selected_connection(cx) else {
@@ -99,11 +96,20 @@ pub fn bind_actions<E: InteractiveElement>(el: E) -> E {
             ConnectionStore::global(cx).update(cx, |s, cx| s.update(&id, |c| c.color = color, cx));
         })
         .on_action(|a: &MoveToGroup, _, cx| {
-            let Some(id) = selected_connection(cx) else {
-                return;
-            };
+            let ids: Vec<String> = Workspace::global(cx)
+                .read(cx)
+                .selections()
+                .filter_map(|s| match s {
+                    Selection::Connection(id) => Some(id.clone()),
+                    _ => None,
+                })
+                .collect();
             let group = a.group.as_ref().map(|g| g.to_string());
-            ConnectionStore::global(cx).update(cx, |s, cx| s.move_to_group(&id, group, cx));
+            ConnectionStore::global(cx).update(cx, |s, cx| {
+                for id in &ids {
+                    s.move_to_group(id, group.clone(), cx);
+                }
+            });
         })
 }
 
@@ -115,7 +121,7 @@ pub(crate) fn selected_connection(cx: &App) -> Option<String> {
         .cloned()
 }
 
-/// 解析秘密字段（必要时解锁主密码、询问密码）后打开连接。
+/// Opens a connection after resolving its secrets (unlocking the master password or asking for passwords if needed).
 pub fn open_connection(id: String, window: &mut Window, cx: &mut App) {
     let target = id.clone();
     secrets::resolve(id, window, cx, move |secrets, _, cx| {

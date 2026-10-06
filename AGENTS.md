@@ -22,8 +22,11 @@ navidog 用 gpui-kit 0.7 复刻 Navicat Premium 17（macOS）。决策、架构�
 
 - 切换外观时，只有带 `highlight` 的主题才会替换编辑器配色，所以 `themes/navicat.json` 的两套主题都要写全 `highlight`（`editor.*` 和 `syntax`）。没开 tree-sitter 特性时，gpui-component 用的高亮器存根不认 `editor.*` 键，测试主题的 crate 要开 `tree-sitter-sql`。
 - `DataTable` 只在按下和抬起是同一格时发出 `SelectCell`；单元格不进测试元素注册表，UI 测试用 `click_at(("row", n), 偏移)` 点击。
+- `Tree` 和 `DataTable` 的行由 `TreeState` / `TableState` 自己的视图渲染。只影响行外观的状态（重命名框、编辑中的单元格）改变后，要通知这个状态实体，只通知外层面板不会重绘行。
 - 测试元素注册表只登记按钮、列表项等元素，普通容器的 id 用 `find` 找不到。
 - headless 测试中 `dispatch_action` 之前要先 `render_frame` 并聚焦目标元素；`RadioGroup` 的子项 id 是 `ElementId::Integer(序号)`。
+- 同一个 `update_window` 闭包里的 `notify` 要到闭包结束才生效。会改变界面的命令放在单独的 `update_window` 里派发，接着 `run_until_parked()`，然后再输入文字或按键。
+- 需要带修饰键的点击（⌘ 点按）时，用 `window.dispatch_event` 发送带 `modifiers` 的 `MouseDownEvent` / `MouseUpEvent`，示例见 `crates/navidog-navigator/tests/navigator.rs`。
 
 ## 验证
 

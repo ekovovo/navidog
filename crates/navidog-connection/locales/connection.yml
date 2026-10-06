@@ -352,12 +352,6 @@ nav:
   new_database:
     en: New Database…
     zh-CN: 新建数据库…
-  group_name:
-    en: Group name
-    zh-CN: 组名称
-  new_group_default:
-    en: New Group
-    zh-CN: 新建组
   filter_types:
     en: Filter by connection type
     zh-CN: 按连接类型筛选

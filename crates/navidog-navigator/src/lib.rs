@@ -1,6 +1,6 @@
-//! 对象浏览：导航窗格、对象选项卡、信息窗格、只读 DDL 选项卡与元数据缓存（20-objects.md）。
+//! Object browsing: navigator, objects tab, info pane, read-only DDL tab and the metadata cache (20-objects.md).
 
-// Action 派生宏输出 `gpui::` 路径
+// The Action derive macro emits `gpui::` paths
 extern crate gpui_kit as gpui;
 
 rust_i18n::i18n!("locales", fallback = "en");
@@ -10,6 +10,7 @@ mod ddl;
 mod info;
 mod navigator;
 mod objects;
+mod selection;
 
 use gpui_kit::{Action, App, SharedString};
 use navidog_core::object::ObjectKind;
@@ -20,10 +21,10 @@ use rust_i18n::t;
 
 pub use ddl::DdlPanel;
 pub use info::InfoPanel;
-pub use navigator::{NavigatorPanel, set_view_options};
+pub use navigator::{NavigatorPanel, bind_actions, set_view_options};
 pub use objects::ObjectsPanel;
 
-/// 主工具栏的分类按钮：在当前数据库或模式下显示该分类的对象。
+/// Category buttons of the main toolbar: show that category's objects in the current database or schema.
 #[derive(Clone, PartialEq, Debug, Action)]
 #[action(namespace = objects, no_json)]
 pub struct ShowCategory {
@@ -48,7 +49,7 @@ pub fn init(cx: &mut App) {
     register_commands(cx);
 }
 
-/// 分类按钮作用的作用域：MySQL / SQLite 为数据库，PostgreSQL 必须选到模式。
+/// Scope the category buttons act on: the database for MySQL / SQLite; PostgreSQL needs a schema.
 fn category_scope(cx: &App) -> Option<navidog_core::object::Scope> {
     let scope = Workspace::global(cx).read(cx).selection().scope()?;
     let dialect = navidog_db::sessions::Sessions::global(cx)
@@ -57,7 +58,7 @@ fn category_scope(cx: &App) -> Option<navidog_core::object::Scope> {
     (!dialect.has_schemas() || scope.schema.is_some()).then_some(scope)
 }
 
-/// 当前作用域存在且方言支持该分类时，分类按钮可用。
+/// A category button is enabled when there is a scope and its dialect supports the category.
 fn category_enabled(cx: &App, kind: ObjectKind) -> bool {
     category_scope(cx)
         .and_then(|s| {
@@ -133,7 +134,7 @@ pub(crate) fn driver_name(driver: &str, cx: &App) -> SharedString {
         .unwrap_or_else(|| driver.to_string().into())
 }
 
-/// 状态栏文本（10-shell.md 第 8 节）：对象选项卡的项目数，或所选连接的类型与地址。
+/// Status bar text (10-shell.md §8): item count of the objects tab, or the selected connection's type and address.
 pub fn status_text(cx: &App) -> SharedString {
     let selection = Workspace::global(cx).read(cx).selection().clone();
     if let objects::Content::Rows(rows, _) = ObjectsPanel::content(cx) {

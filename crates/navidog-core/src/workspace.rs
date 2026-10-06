@@ -1,4 +1,4 @@
-//! 跨 feature 共享的工作区状态：导航树的当前选择与状态栏文本。
+//! Workspace state shared across features: the navigator selection and the status bar text.
 
 use gpui_kit::{App, AppContext as _, Context, Entity, EventEmitter, Global, SharedString};
 
@@ -12,9 +12,9 @@ pub enum Selection {
     Group(GroupId),
     Connection(ConnectionId),
     Database(ConnectionId, String),
-    /// PostgreSQL 的模式
+    /// A PostgreSQL schema
     Schema(Scope),
-    /// 数据库或模式下的对象分类节点
+    /// An object category node under a database or schema
     Category(Scope, ObjectKind),
     Object(ObjectRef),
 }
@@ -29,7 +29,7 @@ impl Selection {
         }
     }
 
-    /// 选择所在的数据库 / 模式作用域（选中连接或组时为 `None`）。
+    /// Database / schema scope of the selection (`None` for connections and groups).
     pub fn scope(&self) -> Option<Scope> {
         match self {
             Self::Database(c, d) => Some(Scope::new(c.clone(), d.clone(), None)),
@@ -47,6 +47,8 @@ pub enum WorkspaceEvent {
 #[derive(Default)]
 pub struct Workspace {
     selection: Selection,
+    /// Other selected nodes besides the primary one (⌘- or ⇧-click in the navigator)
+    also: Vec<Selection>,
     status: SharedString,
 }
 
@@ -64,9 +66,26 @@ impl Workspace {
         &self.selection
     }
 
+    /// All selected nodes, the primary one first.
+    pub fn selections(&self) -> impl Iterator<Item = &Selection> {
+        std::iter::once(&self.selection).chain(&self.also)
+    }
+
     pub fn select(&mut self, selection: Selection, cx: &mut Context<Self>) {
-        if self.selection != selection {
-            self.selection = selection;
+        self.select_many(selection, Vec::new(), cx);
+    }
+
+    /// Selects several nodes; `primary` drives the objects tab and info pane.
+    pub fn select_many(
+        &mut self,
+        primary: Selection,
+        mut also: Vec<Selection>,
+        cx: &mut Context<Self>,
+    ) {
+        also.retain(|s| *s != primary && *s != Selection::None);
+        if self.selection != primary || self.also != also {
+            self.selection = primary;
+            self.also = also;
             cx.emit(WorkspaceEvent::SelectionChanged);
             cx.notify();
         }

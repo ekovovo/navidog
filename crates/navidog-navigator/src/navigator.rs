@@ -4,17 +4,17 @@
 use std::collections::HashSet;
 
 use gpui_kit::component::dock::{BasePanel, Panel, PanelEvent, panel_handle, register_panel};
-use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::input::{Escape, Input, InputEvent, InputState};
 use gpui_kit::component::list::ListItem;
 use gpui_kit::component::native_menu::NativeMenu;
 use gpui_kit::component::tree::{TreeEntry, TreeEvent, TreeItem, TreeState, tree};
 use gpui_kit::component::{Icon, IconName, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, AppContext as _, ClickEvent, Context, Entity, EventEmitter, FocusHandle,
-    Focusable, Global, Hsla, InteractiveElement as _, IntoElement, MouseButton, MouseDownEvent,
-    ParentElement as _, Render, SharedString, Styled as _, StyledImage as _, Subscription,
-    WeakEntity, Window, div, img,
+    AnyElement, App, AppContext as _, ClickEvent, Context, ElementId, Entity, EventEmitter,
+    FocusHandle, Focusable, Global, Hsla, InteractiveElement as _, IntoElement, MouseButton,
+    MouseDownEvent, ParentElement as _, Render, SharedString, StatefulInteractiveElement as _,
+    Styled as _, StyledImage as _, Subscription, WeakEntity, Window, div, img,
 };
 use navidog_core::actions::*;
 use navidog_core::connection::Connection;
@@ -28,6 +28,7 @@ use navidog_ui::{palette, tokens};
 use rust_i18n::t;
 
 use crate::catalog::{Catalog, Load};
+use crate::selection::{self, Click};
 
 const PANEL: &str = "NavigatorPanel";
 const SEP: char = '\u{1f}';
@@ -161,11 +162,53 @@ impl Node {
     }
 }
 
+/// Connections being dragged onto a group (or onto the blank area, meaning top level).
+#[derive(Clone)]
+struct DraggedConnections {
+    ids: Vec<String>,
+    label: SharedString,
+}
+
+impl Render for DraggedConnections {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let p = palette(cx);
+        div()
+            .px_2()
+            .py_1()
+            .rounded_md()
+            .bg(p.window_bg)
+            .border_1()
+            .border_color(p.separator)
+            .text_color(p.label)
+            .child(self.label.clone())
+    }
+}
+
+fn move_connections(ids: &[String], group: Option<String>, cx: &mut App) {
+    ConnectionStore::global(cx).update(cx, |s, cx| {
+        for id in ids {
+            s.move_to_group(id, group.clone(), cx);
+        }
+    });
+}
+
+/// Group being renamed in place.
+struct Rename {
+    group: String,
+    input: Entity<InputState>,
+    _subscription: Subscription,
+}
+
 pub struct NavigatorPanel {
     focus_handle: FocusHandle,
     tree: Entity<TreeState>,
     filter: Entity<InputState>,
     expanded: HashSet<SharedString>,
+    /// Ids of all selected nodes (the workspace's primary and secondary selections)
+    marked: HashSet<SharedString>,
+    /// Anchor of ⇧-click range selection
+    anchor: Option<SharedString>,
+    renaming: Option<Rename>,
     pub filter_on_top: bool,
     pub hide_groups: bool,
     _subscriptions: Vec<Subscription>,
@@ -246,18 +289,23 @@ impl NavigatorPanel {
                     }
                     cx.notify();
                 }),
+                // Keyboard navigation moves the tree's own selection; mirror it unless it is
+                // already the primary selection (which would drop the secondary ones)
                 cx.observe(&tree, |_, tree, cx| {
                     let selection = tree
                         .read(cx)
                         .selected_item()
                         .and_then(|i| Node::parse(&i.id))
                         .and_then(|n| n.selection());
-                    if let Some(sel) = selection {
+                    if let Some(sel) = selection
+                        && Workspace::global(cx).read(cx).selection() != &sel
+                    {
                         Workspace::global(cx).update(cx, |w, cx| w.select(sel, cx));
                     }
                 }),
                 cx.subscribe(&Workspace::global(cx), |this, _, e: &WorkspaceEvent, cx| {
                     let WorkspaceEvent::SelectionChanged = e;
+                    this.marked = Self::selected_ids(cx).into_iter().collect();
                     this.reveal_selection(cx);
                 }),
             ];
@@ -266,6 +314,9 @@ impl NavigatorPanel {
                 tree,
                 filter,
                 expanded: HashSet::new(),
+                marked: HashSet::new(),
+                anchor: None,
+                renaming: None,
                 filter_on_top: false,
                 hide_groups: false,
                 _subscriptions: subs,
@@ -389,6 +440,117 @@ impl NavigatorPanel {
         if let Some(sel) = node.selection() {
             Workspace::global(cx).update(cx, |w, cx| w.select(sel, cx));
         }
+    }
+
+    fn selected_ids(cx: &App) -> Vec<SharedString> {
+        Workspace::global(cx)
+            .read(cx)
+            .selections()
+            .filter_map(Node::from_selection)
+            .map(|n| n.id())
+            .collect()
+    }
+
+    fn click_select(&mut self, id: &SharedString, cmd: bool, shift: bool, cx: &mut Context<Self>) {
+        let selected = Self::selected_ids(cx);
+        let tree = self.tree.read(cx);
+        let visible: Vec<SharedString> = (0..)
+            .map_while(|ix| tree.entry(ix).map(|e| e.item().id.clone()))
+            .collect();
+        let click = Click {
+            selected: &selected,
+            anchor: self.anchor.as_ref(),
+            visible: &visible,
+            cmd,
+            shift,
+        };
+        let (ids, anchor) = selection::click(click, id);
+        self.anchor = anchor;
+        let mut selections = ids.iter().filter_map(|id| Node::parse(id)?.selection());
+        let primary = selections.next().unwrap_or_default();
+        let also = selections.collect();
+        Workspace::global(cx).update(cx, |w, cx| w.select_many(primary, also, cx));
+    }
+
+    /// Selected connections that are dragged together with `id` (just `id` when it is not selected).
+    fn drag_ids(&self, id: &SharedString, conn: &str) -> Vec<String> {
+        if !self.marked.contains(id) {
+            return vec![conn.to_string()];
+        }
+        self.marked
+            .iter()
+            .filter_map(|m| match Node::parse(m) {
+                Some(Node::Connection(c)) => Some(c),
+                _ => None,
+            })
+            .collect()
+    }
+
+    pub(crate) fn new_group(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let parent = match Workspace::global(cx).read(cx).selection() {
+            Selection::Group(g) => Some(g.clone()),
+            _ => None,
+        };
+        if let Some(p) = &parent {
+            self.expanded.insert(Node::Group(p.clone()).id());
+        }
+        let name = t!("nav.new_group_default").to_string();
+        let id = ConnectionStore::global(cx).update(cx, |s, cx| s.add_group(name, parent, cx));
+        Workspace::global(cx).update(cx, |w, cx| w.select(Selection::Group(id.clone()), cx));
+        self.start_rename(id, window, cx);
+    }
+
+    pub(crate) fn start_rename(
+        &mut self,
+        group: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let store = ConnectionStore::global(cx);
+        let Some(name) = store
+            .read(cx)
+            .groups()
+            .iter()
+            .find(|g| g.id == group)
+            .map(|g| g.name.clone())
+        else {
+            return;
+        };
+        let input = cx.new(|cx| InputState::new(window, cx).default_value(name));
+        input.update(cx, |s, cx| {
+            s.focus(window, cx);
+            s.select_all(window, cx);
+        });
+        let subscription =
+            cx.subscribe_in(&input, window, |this, _, e: &InputEvent, window, cx| {
+                if matches!(e, InputEvent::PressEnter { .. } | InputEvent::Blur) {
+                    this.finish_rename(true, window, cx);
+                }
+            });
+        self.renaming = Some(Rename {
+            group,
+            input,
+            _subscription: subscription,
+        });
+        self.refresh_rows(cx);
+    }
+
+    /// Rows are rendered by the tree's own view, which only re-renders when it is notified.
+    fn refresh_rows(&self, cx: &mut Context<Self>) {
+        self.tree.update(cx, |_, cx| cx.notify());
+        cx.notify();
+    }
+
+    fn finish_rename(&mut self, commit: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(r) = self.renaming.take() else {
+            return;
+        };
+        let name = r.input.read(cx).value().trim().to_string();
+        if commit && !name.is_empty() {
+            ConnectionStore::global(cx).update(cx, |s, cx| s.rename_group(&r.group, name, cx));
+        }
+        window.focus(&self.focus_handle, cx);
+        self.refresh_rows(cx);
     }
 
     fn context_menu(node: Option<&Node>, cx: &App) -> NativeMenu {
@@ -573,14 +735,15 @@ impl NavigatorPanel {
 
     fn render_row(
         &self,
-        ix: usize,
         entry: &TreeEntry,
         selected: bool,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> ListItem {
         let p = palette(cx);
-        let node = Node::parse(&entry.item().id);
+        let id = entry.item().id.clone();
+        let node = Node::parse(&id);
+        let selected = selected || self.marked.contains(&id);
         let focused = self.focus_handle.contains_focused(window, cx);
         let (icon, color) = self.row_icon(&node, entry, cx);
         let placeholder = matches!(node, Some(Node::Placeholder(_)));
@@ -611,7 +774,13 @@ impl NavigatorPanel {
         });
         let right_node = node.clone();
         let click_node = node.clone();
-        ListItem::new(ix)
+        let label = match (&node, &self.renaming) {
+            (Some(Node::Group(g)), Some(r)) if *g == r.group => {
+                Input::new(&r.input).xsmall().into_any_element()
+            }
+            _ => entry.item().label.clone().into_any_element(),
+        };
+        let row = ListItem::new(ElementId::Name(id.clone()))
             .h(tokens::navigator::ROW_HEIGHT.rems())
             .pl(tokens::navigator::ROW_INSET_X.rems()
                 + tokens::navigator::ROW_INDENT.rems() * (entry.depth() as f32))
@@ -626,36 +795,67 @@ impl NavigatorPanel {
                             .children(chevron),
                     )
                     .child(icon)
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .overflow_hidden()
-                            .child(entry.item().label.clone()),
-                    )
+                    .child(div().flex_1().min_w_0().overflow_hidden().child(label))
                     .when_some(color, |r, c| {
                         r.child(div().size_2().rounded_full().bg(c).mr_2())
                     }),
-            )
-            .on_mouse_down(
-                MouseButton::Right,
-                cx.listener(move |this, e: &MouseDownEvent, window, cx| {
+            );
+        let row = match &node {
+            Some(Node::Connection(c)) => {
+                let ids = self.drag_ids(&id, c);
+                let label = if ids.len() > 1 {
+                    t!("nav.n_connections", n = ids.len()).to_string().into()
+                } else {
+                    entry.item().label.clone()
+                };
+                row.on_drag(DraggedConnections { ids, label }, |d, _, _, cx| {
+                    cx.new(|_| d.clone())
+                })
+            }
+            _ => row,
+        };
+        // Dropping onto a group moves into it; onto a connection, into that connection's group
+        let target = match &node {
+            Some(Node::Group(g)) => Some(Some(g.clone())),
+            Some(Node::Connection(c)) => Some(
+                ConnectionStore::global(cx)
+                    .read(cx)
+                    .get(c)
+                    .and_then(|c| c.group.clone()),
+            ),
+            _ => None,
+        };
+        let row = match target {
+            Some(group) => row
+                .drag_over::<DraggedConnections>(move |s, _, _, _| s.bg(p.fill))
+                .on_drop(cx.listener(move |_, d: &DraggedConnections, _, cx| {
                     cx.stop_propagation();
-                    if let Some(n) = &right_node {
-                        Self::select(n, cx);
-                    }
-                    window.focus(&this.focus_handle, cx);
-                    Self::context_menu(right_node.as_ref(), cx).show(e.position, window, cx);
-                }),
-            )
-            .on_click(cx.listener(move |this, e: &ClickEvent, window, cx| {
-                window.focus(&this.focus_handle, cx);
-                let Some(n) = &click_node else { return };
-                Self::select(n, cx);
-                if e.click_count() >= 2 {
-                    this.toggle(n, window, cx);
+                    move_connections(&d.ids, group.clone(), cx);
+                })),
+            None => row,
+        };
+        row.on_mouse_down(
+            MouseButton::Right,
+            cx.listener(move |this, e: &MouseDownEvent, window, cx| {
+                cx.stop_propagation();
+                if let Some(n) = &right_node {
+                    Self::select(n, cx);
                 }
-            }))
+                window.focus(&this.focus_handle, cx);
+                Self::context_menu(right_node.as_ref(), cx).show(e.position, window, cx);
+            }),
+        )
+        .on_click(cx.listener(move |this, e: &ClickEvent, window, cx| {
+            window.focus(&this.focus_handle, cx);
+            let Some(n) = &click_node else { return };
+            if e.click_count() >= 2 {
+                Self::select(n, cx);
+                this.toggle(n, window, cx);
+            } else {
+                let m = e.modifiers();
+                this.click_select(&n.id(), m.platform, m.shift, cx);
+            }
+        }))
     }
 
     fn render_filter(&self, cx: &App) -> AnyElement {
@@ -875,13 +1075,13 @@ impl Render for NavigatorPanel {
             this.upgrade()
                 .map(|panel| {
                     panel.update(cx, |panel, cx| {
-                        panel.render_row(ix, entry, selected, window, cx)
+                        panel.render_row(entry, selected, window, cx)
                     })
                 })
                 .unwrap_or_else(|| ListItem::new(ix))
         });
         let filter = self.render_filter(cx);
-        // Rows stop propagation of their right-click, so this only fires on the blank area below them
+        // Rows stop propagation of their right-click and drop, so these only fire on the blank area
         let body = div()
             .id("nav-tree")
             .flex_1()
@@ -894,6 +1094,9 @@ impl Render for NavigatorPanel {
                     Self::context_menu(None, cx).show(e.position, window, cx);
                 }),
             )
+            .on_drop(
+                cx.listener(|_, d: &DraggedConnections, _, cx| move_connections(&d.ids, None, cx)),
+            )
             .child(tree_view);
         let filter = if self.filter_on_top {
             div().border_b_1().border_color(p.separator).child(filter)
@@ -905,6 +1108,13 @@ impl Render for NavigatorPanel {
             .key_context("Navigator")
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::on_refresh))
+            .on_action(cx.listener(|this, _: &Escape, window, cx| {
+                if this.renaming.is_some() {
+                    this.finish_rename(false, window, cx);
+                } else {
+                    cx.propagate();
+                }
+            }))
             .on_action(cx.listener(Self::on_open_database))
             .on_action(cx.listener(Self::on_close_database))
             .size_full()
@@ -927,6 +1137,18 @@ fn with_navigator(cx: &mut App, f: impl FnOnce(&mut NavigatorPanel, &mut Context
         return;
     };
     panel.update(cx, f);
+}
+
+/// Group commands edit the name in place in the navigator, wherever they are dispatched from.
+pub fn bind_actions<E: gpui_kit::InteractiveElement>(el: E) -> E {
+    el.on_action(|_: &NewGroup, window, cx| {
+        with_navigator(cx, |this, cx| this.new_group(window, cx))
+    })
+    .on_action(|_: &RenameGroup, window, cx| {
+        if let Selection::Group(g) = Workspace::global(cx).read(cx).selection().clone() {
+            with_navigator(cx, |this, cx| this.start_rename(g, window, cx));
+        }
+    })
 }
 
 /// Toggles "Show filter at top" and "Hide connection groups" (View > Navigation Pane).
