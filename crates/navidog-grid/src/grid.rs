@@ -1,6 +1,8 @@
 //! Result grid: wraps `DataTable` with rectangular selection, in-place editing, change markers, and
 //! copy/paste (21-table-viewer.md §1, §7).
 
+use std::collections::BTreeMap;
+
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Escape, Input, InputEvent, InputState};
 use gpui_kit::component::native_menu::NativeMenu;
@@ -13,9 +15,10 @@ use gpui_kit::{
     App, AppContext as _, ClipboardItem, Context, Entity, EventEmitter, FocusHandle, Focusable,
     InteractiveElement as _, IntoElement, KeyBinding, MouseButton, MouseDownEvent, MouseMoveEvent,
     MouseUpEvent, ParentElement as _, Pixels, Render, SharedString, Styled as _, Subscription,
-    WeakEntity, Window, actions, div,
+    WeakEntity, Window, actions, div, px,
 };
 use navidog_core::object::Scope;
+use navidog_core::settings::Settings;
 use navidog_db::dialect::Dialect;
 use navidog_ui::skin::truncated;
 use navidog_ui::{palette, tokens};
@@ -122,6 +125,8 @@ pub struct GridDelegate {
     find: Option<(SharedString, bool)>,
     /// Data columns fixed on the left, after the marker column
     frozen: usize,
+    /// Resized widths by column name, so a refresh does not snap back to the default
+    widths: BTreeMap<SharedString, Pixels>,
     /// The row a plain click or key move settled on. Leaving it while it is dirty commits.
     settled: Option<usize>,
     /// The pointer dragged the selection, so the mouse-up (not SelectCell) settles the row.
@@ -174,8 +179,13 @@ impl TableDelegate for GridDelegate {
             Some((c, false)) if c + 1 == ix => ColumnSort::Descending,
             _ => ColumnSort::Default,
         };
+        let width = self
+            .widths
+            .get(&col.name)
+            .copied()
+            .unwrap_or_else(|| self.width(tokens::grid::COLUMN_WIDTH));
         let mut column = Column::new(SharedString::from(ix.to_string()), col.name.clone())
-            .width(self.width(tokens::grid::COLUMN_WIDTH))
+            .width(width)
             .sort(sort)
             .movable(false)
             .p_0();
@@ -412,6 +422,7 @@ impl ResultGrid {
             dialect: Dialect::Sqlite,
             find: None,
             frozen: 0,
+            widths: BTreeMap::new(),
             settled: None,
             dragged: false,
             commit_requested: false,
@@ -462,8 +473,17 @@ impl ResultGrid {
             .map(|t| t.dialect)
             .unwrap_or(Dialect::Sqlite);
         self.target = target;
-        self.table
-            .update(cx, |t, _| t.delegate_mut().dialect = dialect);
+        let widths = self
+            .target
+            .as_ref()
+            .map(|t| load_widths(t, cx))
+            .unwrap_or_default();
+        self.table.update(cx, |t, cx| {
+            let d = t.delegate_mut();
+            d.dialect = dialect;
+            d.widths = widths;
+            t.refresh(cx);
+        });
     }
 
     /// Raw data mode: string cells gain SQL quotes, and later edits are expressions.
@@ -526,6 +546,32 @@ impl ResultGrid {
         self.scroll_to_row(pos.0, cx);
     }
 
+    /// Remembers resized columns by name and writes them to settings for the open table.
+    fn store_widths(&mut self, reported: &[Pixels], cx: &mut Context<Self>) {
+        let Some(target) = self.target.clone() else {
+            return;
+        };
+        let names: Vec<SharedString> = self
+            .model(cx)
+            .columns
+            .iter()
+            .map(|c| c.name.clone())
+            .collect();
+        let saved = width_pairs(&names, reported);
+        self.table.update(cx, |t, _| {
+            let map = &mut t.delegate_mut().widths;
+            for (name, width) in &saved {
+                map.insert(SharedString::from(name.as_str()), px(*width));
+            }
+        });
+        if cx.has_global::<Settings>() {
+            let key = width_key(&target.scope, &target.table);
+            Settings::update(cx, |s| {
+                s.column_widths.insert(key, saved);
+            });
+        }
+    }
+
     pub fn scroll_to_row(&self, row: usize, cx: &mut App) {
         self.table.update(cx, |t, cx| t.scroll_to_row(row, cx));
     }
@@ -545,6 +591,10 @@ impl ResultGrid {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if let TableEvent::ColumnWidthsChanged(widths) = e {
+            self.store_widths(widths, cx);
+            return;
+        }
         match *e {
             TableEvent::SelectCell(r, ix) => {
                 self.commit_edit(window, cx);
@@ -922,5 +972,52 @@ impl Render for RowHeight {
                             }),
                     ),
             )
+    }
+}
+
+fn width_key(scope: &Scope, table: &str) -> String {
+    format!(
+        "{}\u{1f}{}\u{1f}{}\u{1f}{table}",
+        scope.connection,
+        scope.database,
+        scope.schema.as_deref().unwrap_or("")
+    )
+}
+
+fn load_widths(target: &GridTarget, cx: &App) -> BTreeMap<SharedString, Pixels> {
+    if !cx.has_global::<Settings>() {
+        return BTreeMap::new();
+    }
+    Settings::global(cx)
+        .column_widths
+        .get(&width_key(&target.scope, &target.table))
+        .map(|cols| {
+            cols.iter()
+                .map(|(name, width)| (SharedString::from(name.clone()), px(*width)))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// `reported` is every column including the marker at index 0.
+fn width_pairs(names: &[SharedString], reported: &[Pixels]) -> BTreeMap<String, f32> {
+    names
+        .iter()
+        .zip(reported.iter().skip(1))
+        .map(|(name, width)| (name.to_string(), width.as_f32()))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resized_widths_skip_the_marker_column() {
+        let names = ["id", "name"].map(SharedString::from);
+        let saved = width_pairs(&names, &[px(20.), px(80.), px(140.)]);
+        assert_eq!(saved.get("id"), Some(&80.));
+        assert_eq!(saved.get("name"), Some(&140.));
+        assert_eq!(saved.len(), 2);
     }
 }

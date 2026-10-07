@@ -91,6 +91,8 @@ pub struct Settings {
     pub auto_begin_transaction: bool,
     /// Objects tab detail view: hidden property columns per object kind ("Choose Columns")
     pub object_hidden_columns: std::collections::BTreeMap<String, Vec<String>>,
+    /// Table viewer column widths in pixels, keyed by scope and table then column name
+    pub column_widths: std::collections::BTreeMap<String, std::collections::BTreeMap<String, f32>>,
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
 }
@@ -109,6 +111,7 @@ impl Default for Settings {
             records_per_page: 1000,
             auto_begin_transaction: false,
             object_hidden_columns: Default::default(),
+            column_widths: Default::default(),
             extra: Default::default(),
         }
     }
@@ -129,9 +132,9 @@ impl Settings {
     }
 
     pub fn save(&self) {
-        let bytes = serde_json::to_vec_pretty(self).expect("设置可序列化");
+        let bytes = serde_json::to_vec_pretty(self).expect("settings serialize");
         if let Err(err) = paths::write_atomic(&Self::path(), &bytes) {
-            tracing::error!("保存 settings.json 失败: {err}");
+            tracing::error!("failed to save settings.json: {err}");
         }
     }
 
