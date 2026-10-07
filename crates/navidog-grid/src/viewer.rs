@@ -419,12 +419,15 @@ impl TableViewer {
                     Ok(Ok((dialect, columns))) => {
                         this.dialect = Some(dialect);
                         this.columns = columns;
-                        this.grid.update(cx, |g, _| {
-                            g.set_target(Some(GridTarget {
-                                dialect,
-                                scope: this.object.scope.clone(),
-                                table: this.object.name.clone(),
-                            }))
+                        this.grid.update(cx, |g, cx| {
+                            g.set_target(
+                                Some(GridTarget {
+                                    dialect,
+                                    scope: this.object.scope.clone(),
+                                    table: this.object.name.clone(),
+                                }),
+                                cx,
+                            )
                         });
                     }
                     Ok(Err(e)) => this.status = e.to_string().into(),
@@ -486,11 +489,10 @@ impl TableViewer {
                             .iter()
                             .map(|c| {
                                 let info = this.columns.iter().find(|i| i.name == c.name);
-                                let type_name = if c.type_name.is_empty() {
-                                    info.map(|i| i.type_name.clone()).unwrap_or_default()
-                                } else {
-                                    c.type_name.clone()
-                                };
+                                let type_name = info
+                                    .map(|i| i.type_name.clone())
+                                    .filter(|t| !t.is_empty())
+                                    .unwrap_or_else(|| c.type_name.clone());
                                 GridColumn {
                                     name: c.name.clone().into(),
                                     type_name: type_name.into(),
@@ -755,10 +757,11 @@ impl TableViewer {
 
     fn write_form_cell(&mut self, row: usize, c: usize, text: String, cx: &mut Context<Self>) {
         let raw = self.raw_data;
+        let dialect = self.dialect.unwrap_or(Dialect::Sqlite);
         self.grid.update(cx, |g, cx| {
             g.update_model(cx, |m| {
-                let old = m.value(row, c).cloned().flatten().unwrap_or_default();
-                if text != old.as_ref() {
+                let old = m.raw_text(row, c, raw, dialect);
+                if text != old {
                     let cell = Some(text.into());
                     if raw {
                         m.set_raw(row, c, cell);
@@ -772,8 +775,9 @@ impl TableViewer {
 
     fn toggle_raw(&mut self, cx: &mut Context<Self>) {
         self.raw_data = !self.raw_data;
+        self.form_for = None;
         let raw = self.raw_data;
-        self.grid.update(cx, |g, _| g.set_raw_mode(raw));
+        self.grid.update(cx, |g, cx| g.set_raw_mode(raw, cx));
         cx.notify();
     }
 
@@ -790,14 +794,9 @@ impl TableViewer {
         }
         self.form_inputs.clear();
         for c in 0..n {
-            let value = self
-                .grid
-                .read(cx)
-                .model(cx)
-                .value(row, c)
-                .cloned()
-                .flatten()
-                .unwrap_or_default();
+            let raw = self.raw_data;
+            let dialect = self.dialect.unwrap_or(Dialect::Sqlite);
+            let value = self.grid.read(cx).model(cx).raw_text(row, c, raw, dialect);
             let input = cx.new(|cx| InputState::new(window, cx).default_value(value));
             let row_at = row;
             cx.subscribe_in(

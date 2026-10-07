@@ -6,8 +6,8 @@ use std::rc::Rc;
 
 use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{AppContext as _, Entity, TestAppContext, WindowBounds, WindowOptions, size};
-use navidog_grid::model::GridColumn;
 use navidog_db::dialect::Written;
+use navidog_grid::model::GridColumn;
 use navidog_grid::{GridEvent, ResultGrid};
 use navidog_ui::tokens;
 

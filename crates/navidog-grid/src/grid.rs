@@ -107,6 +107,9 @@ pub struct GridDelegate {
     /// Show the field type or comment in the column header (F-DATA-013)
     show_type: bool,
     show_comment: bool,
+    /// String values are shown as SQL literals (F-DATA-010)
+    raw: bool,
+    dialect: Dialect,
     /// The row a plain click or key move settled on. Leaving it while it is dirty commits.
     settled: Option<usize>,
     /// The pointer dragged the selection, so the mouse-up (not SelectCell) settles the row.
@@ -285,10 +288,13 @@ impl TableDelegate for GridDelegate {
                 .into_any_element();
         }
         let selected = self.model.is_selected(r, c);
+        let shown = self.model.raw_text(r, c, self.raw, self.dialect);
         let (text, muted): (SharedString, bool) = match self.model.value(r, c) {
             // A cell shows one line, like Navicat; the cell editor shows the full value
-            Some(Some(s)) if s.contains('\n') => (s.replace(['\r', '\n'], " ").into(), false),
-            Some(Some(s)) => (s.clone(), false),
+            Some(Some(_)) if shown.contains('\n') => {
+                (shown.replace(['\r', '\n'], " ").into(), false)
+            }
+            Some(Some(_)) => (shown.into(), false),
             Some(None) => ("(NULL)".into(), true),
             None => ("".into(), true),
         };
@@ -371,6 +377,8 @@ impl ResultGrid {
             rem: window.rem_size(),
             show_type: false,
             show_comment: false,
+            raw: false,
+            dialect: Dialect::Sqlite,
             settled: None,
             dragged: false,
             commit_requested: false,
@@ -414,13 +422,23 @@ impl ResultGrid {
         }
     }
 
-    pub fn set_target(&mut self, target: Option<GridTarget>) {
+    pub fn set_target(&mut self, target: Option<GridTarget>, cx: &mut Context<Self>) {
+        let dialect = target
+            .as_ref()
+            .map(|t| t.dialect)
+            .unwrap_or(Dialect::Sqlite);
         self.target = target;
+        self.table
+            .update(cx, |t, _| t.delegate_mut().dialect = dialect);
     }
 
-    /// Raw data mode: later edits are SQL expressions. Values already typed keep how they were written.
-    pub fn set_raw_mode(&mut self, raw: bool) {
+    /// Raw data mode: string cells gain SQL quotes, and later edits are expressions.
+    pub fn set_raw_mode(&mut self, raw: bool, cx: &mut Context<Self>) {
         self.raw = raw;
+        self.table.update(cx, |t, cx| {
+            t.delegate_mut().raw = raw;
+            cx.notify();
+        });
     }
 
     /// Replaces the data with a new page, discarding uncommitted changes.
@@ -580,12 +598,12 @@ impl ResultGrid {
 
     pub fn start_edit(&mut self, pos: Pos, window: &mut Window, cx: &mut Context<Self>) {
         self.commit_edit(window, cx);
-        let text = self
-            .model(cx)
-            .value(pos.0, pos.1)
-            .cloned()
-            .flatten()
-            .unwrap_or_default();
+        let (raw, dialect) = {
+            let table = self.table.read(cx);
+            let d = table.delegate();
+            (d.raw, d.dialect)
+        };
+        let text = self.model(cx).raw_text(pos.0, pos.1, raw, dialect);
         let input = cx.new(|cx| InputState::new(window, cx).default_value(text));
         self.edit_sub = Some(cx.subscribe_in(
             &input,
@@ -614,14 +632,13 @@ impl ResultGrid {
         };
         self.edit_sub = None;
         let text = input.read(cx).value().to_string();
-        let old = self
-            .model(cx)
-            .value(r, c)
-            .cloned()
-            .flatten()
-            .unwrap_or_default();
-        if text != old.as_ref() {
-            let raw = self.raw;
+        let (raw, dialect) = {
+            let table = self.table.read(cx);
+            let d = table.delegate();
+            (d.raw, d.dialect)
+        };
+        let old = self.model(cx).raw_text(r, c, raw, dialect);
+        if text != old {
             self.update_model(cx, |m| {
                 let cell = Some(text.into());
                 if raw {
