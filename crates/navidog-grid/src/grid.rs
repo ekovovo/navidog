@@ -719,12 +719,21 @@ impl ResultGrid {
         {
             return;
         }
+        let kind = self
+            .model(cx)
+            .columns
+            .get(pos.1)
+            .and_then(|col| crate::date::temporal_kind(&col.type_name));
         let (raw, dialect) = {
             let table = self.table.read(cx);
             let d = table.delegate();
             (d.raw, d.dialect)
         };
         let text = self.model(cx).raw_text(pos.0, pos.1, raw, dialect);
+        if let Some(kind) = kind {
+            crate::date::open(pos, kind, &text, cx.entity().downgrade(), window, cx);
+            return;
+        }
         let input = cx.new(|cx| InputState::new(window, cx).default_value(text));
         self.edit_sub = Some(cx.subscribe_in(
             &input,

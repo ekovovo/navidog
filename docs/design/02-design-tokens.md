@@ -78,6 +78,7 @@
 | `grid.header.height` | 28 | nib:GridViewController/NSTableHeaderView（高 28） |
 | `grid.row_number_width` | 20 | nib:GridViewController/行号 NSScrollView（宽 20） |
 | `grid.row.height` | 20 | 暂定，待 AX |
+| `grid.date_picker.width` | 317 | nib:NAVDateTimePicker/NSWindowRect（317 × 247） |
 | `viewer.bottom_bar.height` | 28 | nib:TableViewViewController/底部栏（1153 × 28） |
 | `viewer.bottom_bar.button` | 20 × 16 | nib:TableViewViewController/NSButton |
 | `viewer.limit.width` | 212 | nib:TableViewViewController/“Limit … records per page”（212 × 24，11pt） |

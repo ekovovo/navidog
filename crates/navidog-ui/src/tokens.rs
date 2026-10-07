@@ -120,6 +120,8 @@ pub mod grid {
     // Provisional until measured with AX
     pub const ROW_HEIGHT: Pt = Pt(20.);
     pub const COLUMN_WIDTH: Pt = Pt(140.);
+    // nib:NAVDateTimePicker/NSWindowRect (317 × 247)
+    pub const DATE_PICKER_WIDTH: Pt = Pt(317.);
 }
 
 pub mod viewer {

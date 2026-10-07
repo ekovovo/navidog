@@ -1,10 +1,11 @@
-//! 结果网格与表查看器（21-table-viewer.md）。结果网格会被查询编辑器（M3）复用。
+//! Result grid and table viewer (21-table-viewer.md). The result grid is reused by the query editor (M3).
 
-// Action 派生宏输出 `gpui::` 路径
+// The Action derive macro emits `gpui::` paths
 extern crate gpui_kit as gpui;
 
 rust_i18n::i18n!("locales", fallback = "en");
 
+mod date;
 pub mod grid;
 pub mod model;
 mod viewer;

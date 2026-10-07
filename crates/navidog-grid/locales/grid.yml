@@ -60,6 +60,12 @@ grid:
   raw_data:
     en: Raw Data Mode
     zh-CN: 原始数据模式
+  weekdays:
+    en: Mo Tu We Th Fr Sa Su
+    zh-CN: 一 二 三 四 五 六 日
+  date_today:
+    en: Today
+    zh-CN: 今天
   ok:
     en: OK
     zh-CN: 确定
