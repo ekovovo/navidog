@@ -1,0 +1,112 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- navidog app icon: a chubby database cylinder drawn as a dog. macOS grid: 824 body, 100 inset. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6A9BFF"/>
+      <stop offset="1" stop-color="#2D47C4"/>
+    </linearGradient>
+    <radialGradient id="bg-glow" cx="0.3" cy="0.2" r="0.75">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#EECB98"/>
+      <stop offset="0.22" stop-color="#FFF2DE"/>
+      <stop offset="0.55" stop-color="#FFF9F0"/>
+      <stop offset="1" stop-color="#E8C08A"/>
+    </linearGradient>
+    <linearGradient id="body-shade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0.6" stop-color="#C98F4E" stop-opacity="0"/>
+      <stop offset="1" stop-color="#C98F4E" stop-opacity="0.22"/>
+    </linearGradient>
+    <linearGradient id="top" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#FFF1DE"/>
+    </linearGradient>
+    <linearGradient id="ear" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#CF8B4B"/>
+      <stop offset="1" stop-color="#94562A"/>
+    </linearGradient>
+    <linearGradient id="collar" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F45E66"/>
+      <stop offset="1" stop-color="#C9363E"/>
+    </linearGradient>
+    <radialGradient id="tag" cx="0.38" cy="0.32" r="0.75">
+      <stop offset="0" stop-color="#FFE9A6"/>
+      <stop offset="1" stop-color="#E2A52C"/>
+    </radialGradient>
+    <clipPath id="body-clip">
+      <path id="body-shape" d="M276 330 C276 260 384 226 512 226 C640 226 748 260 748 330 C754 420 768 590 742 690 C718 762 620 800 512 800 C404 800 306 762 282 690 C256 590 270 420 276 330 Z"/>
+    </clipPath>
+    <filter id="icon-shadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000000" flood-opacity="0.3"/>
+    </filter>
+    <filter id="soft" x="-20%" y="-50%" width="140%" height="200%">
+      <feGaussianBlur stdDeviation="14"/>
+    </filter>
+  </defs>
+
+  <!-- Background tile -->
+  <g filter="url(#icon-shadow)">
+    <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+    <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg-glow)"/>
+  </g>
+
+  <!-- Ground shadow -->
+  <ellipse cx="512" cy="826" rx="220" ry="32" fill="#0E1E66" opacity="0.45" filter="url(#soft)"/>
+
+  <!-- Chubby body with a domed head -->
+  <use href="#body-shape" fill="url(#body)"/>
+  <g clip-path="url(#body-clip)">
+    <rect x="240" y="220" width="544" height="600" fill="url(#body-shade)"/>
+    <!-- Collar: the cylinder's middle disk -->
+    <path d="M220 550 A292 88 0 0 0 804 550 V592 A292 88 0 0 1 220 592 Z" fill="url(#collar)"/>
+  </g>
+
+  <!-- Tag -->
+  <circle cx="512" cy="688" r="11" fill="none" stroke="#C98F1F" stroke-width="6"/>
+  <circle cx="512" cy="722" r="26" fill="url(#tag)" stroke="#B9821B" stroke-width="4"/>
+  <!-- A tiny database on the tag -->
+  <g fill="none" stroke="#A86E12" stroke-width="3" stroke-linecap="round">
+    <ellipse cx="512" cy="711" rx="11" ry="4"/>
+    <path d="M501 711 V731 M523 711 V731 M501 721 A11 4 0 0 0 523 721 M501 731 A11 4 0 0 0 523 731"/>
+  </g>
+
+  <!-- Paws -->
+  <g fill="#FFF7EA" stroke="#E0BA86" stroke-width="4">
+    <ellipse cx="428" cy="800" rx="54" ry="34"/>
+    <ellipse cx="596" cy="800" rx="54" ry="34"/>
+  </g>
+  <g fill="none" stroke="#E0BA86" stroke-width="4" stroke-linecap="round">
+    <path d="M412 792 V812 M444 792 V812"/>
+    <path d="M580 792 V812 M612 792 V812"/>
+  </g>
+
+  <!-- Floppy ears, tucked under the top -->
+  <g transform="translate(0 -70)">
+    <path d="M336 352 C262 330 192 392 186 476 C180 560 214 628 262 632 C302 636 320 596 322 552 C324 500 344 420 336 352 Z" fill="url(#ear)"/>
+    <path d="M688 352 C762 330 832 392 838 476 C844 560 810 628 762 632 C722 636 704 596 702 552 C700 500 680 420 688 352 Z" fill="url(#ear)"/>
+  </g>
+
+  <!-- Domed head highlight -->
+  <ellipse cx="452" cy="266" rx="110" ry="26" fill="url(#top)" opacity="0.8"/>
+  <!-- Tuft -->
+  <path d="M500 238 Q492 212 506 194 M520 236 Q524 210 542 198" fill="none" stroke="#CF8B4B" stroke-width="12" stroke-linecap="round"/>
+
+  <!-- Face -->
+  <g transform="translate(0 -70)">
+  <ellipse cx="604" cy="516" rx="66" ry="56" transform="rotate(-12 604 516)" fill="#DFA05A" opacity="0.8"/>
+  <ellipse cx="380" cy="592" rx="32" ry="20" fill="#FF8A9A" opacity="0.38"/>
+  <ellipse cx="644" cy="592" rx="32" ry="20" fill="#FF8A9A" opacity="0.38"/>
+  <circle cx="424" cy="522" r="30" fill="#1F2433"/>
+  <circle cx="600" cy="522" r="30" fill="#1F2433"/>
+  <circle cx="414" cy="511" r="10" fill="#FFFFFF"/>
+  <circle cx="590" cy="511" r="10" fill="#FFFFFF"/>
+  <circle cx="433" cy="533" r="4" fill="#FFFFFF" opacity="0.8"/>
+  <circle cx="609" cy="533" r="4" fill="#FFFFFF" opacity="0.8"/>
+  <path d="M498 626 Q498 662 512 662 Q526 662 526 626 Z" fill="#FF7A8C"/>
+  <path d="M478 574 C478 554 546 554 546 574 C546 594 526 606 512 606 C498 606 478 594 478 574 Z" fill="#1F2433"/>
+  <ellipse cx="500" cy="568" rx="11" ry="6" fill="#FFFFFF" opacity="0.5"/>
+  <path d="M512 606 V618 M474 620 Q493 642 512 620 Q531 642 550 620" fill="none" stroke="#1F2433" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>
