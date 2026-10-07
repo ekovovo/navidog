@@ -5,15 +5,13 @@
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::list::ListItem;
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{Disableable as _, IconName, Sizable as _, TitleBar, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyWindowHandle, App, AppContext as _, Context, Entity, Global, InteractiveElement as _,
-    IntoElement, ParentElement as _, Render, SharedString, StatefulInteractiveElement as _,
-    Styled as _, Subscription, Window, WindowBounds, WindowOptions, div,
-};
-use navidog_core::actions::{
-    DeleteConnection, EditConnection, NewConnection, ToggleHidden, ToggleStar,
+    IntoElement, ParentElement as _, Render, SharedString, Styled as _, Subscription, Window,
+    WindowBounds, WindowOptions, div,
 };
 use navidog_core::connection::Connection;
 use navidog_core::store::ConnectionStore;
@@ -153,29 +151,27 @@ impl Render for Manage {
             .border_color(p.separator)
             .child(
                 button("manage-new", "plus", t!("conn.new_connection").to_string())
-                    .on_click(|_, window, cx| window.dispatch_action(Box::new(NewConnection), cx)),
+                    .on_click(|_, window, cx| crate::picker::open(window, cx)),
             )
             .child(
                 button("manage-edit", "pencil", t!("conn.manage_edit").to_string())
                     .disabled(selected.len() != 1)
-                    .on_click(|_, window, cx| window.dispatch_action(Box::new(EditConnection), cx)),
+                    .on_click(|_, window, cx| crate::edit_selected(window, cx)),
             )
             .child(
                 button("manage-star", "star", t!("conn.manage_star").to_string())
                     .disabled(none)
-                    .on_click(|_, window, cx| window.dispatch_action(Box::new(ToggleStar), cx)),
+                    .on_click(|_, _, cx| crate::toggle_star(cx)),
             )
             .child(
                 button("manage-hide", "eye-off", t!("conn.manage_hide").to_string())
                     .disabled(none)
-                    .on_click(|_, window, cx| window.dispatch_action(Box::new(ToggleHidden), cx)),
+                    .on_click(|_, _, cx| crate::toggle_hidden(cx)),
             )
             .child(
                 button("manage-delete", "trash", t!("conn.delete").to_string())
                     .disabled(selected.len() != 1)
-                    .on_click(|_, window, cx| {
-                        window.dispatch_action(Box::new(DeleteConnection), cx)
-                    }),
+                    .on_click(|_, window, cx| crate::delete_selected(window, cx)),
             )
             .child(div().flex_1())
             .child(
@@ -208,7 +204,7 @@ impl Render for Manage {
                         Workspace::global(cx)
                             .update(cx, |w, cx| w.select(Selection::Connection(id.clone()), cx));
                         if e.click_count() >= 2 {
-                            window.dispatch_action(Box::new(EditConnection), cx);
+                            crate::edit_selected(window, cx);
                         }
                     })
                     .child(
@@ -253,7 +249,7 @@ impl Render for Manage {
                         .flex_1()
                         .min_h_0()
                         .min_w_0()
-                        .overflow_scroll()
+                        .overflow_scrollbar()
                         .child(
                             v_flex()
                                 .w(table_width())

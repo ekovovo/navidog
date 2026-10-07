@@ -151,8 +151,14 @@ impl ObjectsPanel {
         let panel = cx.new(|cx: &mut Context<Self>| {
             let subs = vec![
                 cx.observe(&ConnectionStore::global(cx), |_, _, cx| cx.notify()),
-                cx.observe(&Sessions::global(cx), |_, _, cx| cx.notify()),
-                cx.observe(&Catalog::global(cx), |_, _, cx| cx.notify()),
+                cx.observe(&Sessions::global(cx), |_, _, cx| {
+                    Self::ensure_loaded(cx);
+                    cx.notify();
+                }),
+                cx.observe(&Catalog::global(cx), |_, _, cx| {
+                    Self::ensure_loaded(cx);
+                    cx.notify();
+                }),
                 cx.subscribe(&Workspace::global(cx), |_, _, e: &WorkspaceEvent, cx| {
                     let WorkspaceEvent::SelectionChanged = e;
                     Self::ensure_loaded(cx);
@@ -193,6 +199,36 @@ impl ObjectsPanel {
         if let Some((scope, kind)) = listed_kind(&selection) {
             catalog.update(cx, |cat, cx| cat.ensure_objects(&scope, kind, false, cx));
         }
+    }
+
+    /// True when the selection wants a catalog entry that was wiped (the connection
+    /// opened and dropped in-flight loads) and the session can serve it again.
+    fn stalled_load(cx: &App) -> bool {
+        let selection = Workspace::global(cx).read(cx).selection().clone();
+        let catalog = Catalog::global(cx).read(cx);
+        let sessions = Sessions::global(cx).read(cx);
+        let missing = |scope: &Scope, kind: ObjectKind| {
+            catalog.objects(scope, kind).is_none()
+                && sessions.state(&scope.connection).is_open()
+                && sessions.dialect(&scope.connection).is_some()
+        };
+        if let Selection::Database(c, d) = &selection {
+            match sessions.dialect(c) {
+                Some(dialect) if dialect.has_schemas() => {
+                    if catalog.schemas(c, d).is_none() && sessions.state(c).is_open() {
+                        return true;
+                    }
+                }
+                Some(_) => {
+                    let scope = Scope::new(c.clone(), d.clone(), None);
+                    if missing(&scope, ObjectKind::Table) {
+                        return true;
+                    }
+                }
+                None => {}
+            }
+        }
+        listed_kind(&selection).is_some_and(|(scope, kind)| missing(&scope, kind))
     }
 
     pub(crate) fn content(cx: &App) -> Content {
@@ -688,7 +724,12 @@ impl ObjectsPanel {
 }
 
 impl Render for ObjectsPanel {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // A load that was wiped when the connection opened leaves an empty
+        // slot. The pane then stays on "Loading…" because nothing asks again.
+        if Self::stalled_load(cx) {
+            cx.defer_in(window, |_, _, cx| Self::ensure_loaded(cx));
+        }
         let p = palette(cx);
         let content = Self::content(cx);
         let (body, listed) = match content {

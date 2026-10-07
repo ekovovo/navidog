@@ -54,11 +54,7 @@ pub fn auto_connect(window: &mut Window, cx: &mut App) {
 pub fn bind_actions<E: InteractiveElement>(el: E) -> E {
     el.on_action(|_: &NewConnection, window, cx| picker::open(window, cx))
         .on_action(|a: &NewConnectionOf, window, cx| form::open_new(a.driver.clone(), window, cx))
-        .on_action(|_: &EditConnection, window, cx| {
-            if let Some(id) = selected_connection(cx) {
-                form::open_edit(id, window, cx);
-            }
-        })
+        .on_action(|_: &EditConnection, window, cx| edit_selected(window, cx))
         .on_action(|_: &DuplicateConnection, window, cx| {
             let Some(id) = selected_connection(cx) else {
                 return;
@@ -74,7 +70,7 @@ pub fn bind_actions<E: InteractiveElement>(el: E) -> E {
                 );
             }
         })
-        .on_action(|_: &DeleteConnection, window, cx| confirm_delete_connection(window, cx))
+        .on_action(|_: &DeleteConnection, window, cx| delete_selected(window, cx))
         .on_action(|_: &OpenConnection, window, cx| {
             if let Some(id) = selected_connection(cx) {
                 open_connection(id, window, cx);
@@ -98,31 +94,8 @@ pub fn bind_actions<E: InteractiveElement>(el: E) -> E {
             let color = a.color.as_ref().map(|c| c.to_string());
             ConnectionStore::global(cx).update(cx, |s, cx| s.update(&id, |c| c.color = color, cx));
         })
-        .on_action(|_: &ToggleStar, _, cx| {
-            let ids = selected_connections(cx);
-            let store = ConnectionStore::global(cx);
-            // Star them all unless every selected connection is starred already
-            let star = ids
-                .iter()
-                .any(|id| store.read(cx).get(id).is_some_and(|c| !c.starred));
-            store.update(cx, |s, cx| {
-                for id in &ids {
-                    s.update(id, |c| c.starred = star, cx);
-                }
-            });
-        })
-        .on_action(|_: &ToggleHidden, _, cx| {
-            let ids = selected_connections(cx);
-            let store = ConnectionStore::global(cx);
-            let hide = ids
-                .iter()
-                .any(|id| store.read(cx).get(id).is_some_and(|c| !c.hidden));
-            store.update(cx, |s, cx| {
-                for id in &ids {
-                    s.update(id, |c| c.hidden = hide, cx);
-                }
-            });
-        })
+        .on_action(|_: &ToggleStar, _, cx| toggle_star(cx))
+        .on_action(|_: &ToggleHidden, _, cx| toggle_hidden(cx))
         .on_action(|_: &ManageConnections, _, cx| manage::open(cx))
         .on_action(|a: &SwitchProfile, window, cx| {
             if let Some(id) = selected_connection(cx) {
@@ -153,6 +126,46 @@ pub fn bind_actions<E: InteractiveElement>(el: E) -> E {
                 }
             });
         })
+}
+
+/// Toolbar and row actions call these directly. `Window::dispatch_action` starts at the
+/// focused node, and the manage window's buttons refuse focus on mouse down, so a click
+/// before anything else was focused never reached `bind_actions`.
+pub(crate) fn edit_selected(window: &mut Window, cx: &mut App) {
+    if let Some(id) = selected_connection(cx) {
+        form::open_edit(id, window, cx);
+    }
+}
+
+pub(crate) fn toggle_star(cx: &mut App) {
+    let ids = selected_connections(cx);
+    let store = ConnectionStore::global(cx);
+    // Star them all unless every selected connection is starred already.
+    let star = ids
+        .iter()
+        .any(|id| store.read(cx).get(id).is_some_and(|c| !c.starred));
+    store.update(cx, |s, cx| {
+        for id in &ids {
+            s.update(id, |c| c.starred = star, cx);
+        }
+    });
+}
+
+pub(crate) fn toggle_hidden(cx: &mut App) {
+    let ids = selected_connections(cx);
+    let store = ConnectionStore::global(cx);
+    let hide = ids
+        .iter()
+        .any(|id| store.read(cx).get(id).is_some_and(|c| !c.hidden));
+    store.update(cx, |s, cx| {
+        for id in &ids {
+            s.update(id, |c| c.hidden = hide, cx);
+        }
+    });
+}
+
+pub(crate) fn delete_selected(window: &mut Window, cx: &mut App) {
+    confirm_delete_connection(window, cx);
 }
 
 /// All selected connections (⌘-click selects several in the navigator).

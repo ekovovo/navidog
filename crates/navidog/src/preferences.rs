@@ -377,7 +377,7 @@ impl Render for Preferences {
 }
 
 /// Sets or changes the master password: the new password is entered twice.
-fn open_master_dialog(window: &mut Window, cx: &mut App) {
+pub fn open_master_dialog(window: &mut Window, cx: &mut App) {
     let view = cx.new(|cx| MasterDialog {
         first: cx.new(|cx| InputState::new(window, cx).masked(true)),
         second: cx.new(|cx| InputState::new(window, cx).masked(true)),
@@ -421,15 +421,17 @@ impl Render for MasterDialog {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
         v_flex()
+            .w_full()
+            .min_w_0()
             .gap(tokens::form::ROW_GAP.rems())
             .child(heading(t!("prefs.master_password").to_string()))
             .child(FormRow::new(
                 t!("prefs.master_new").to_string(),
-                Input::new(&self.first).w(tokens::form::FIELD_WIDTH.rems()),
+                Input::new(&self.first).w_full().min_w_0(),
             ))
             .child(FormRow::new(
                 t!("prefs.master_confirm").to_string(),
-                Input::new(&self.second).w(tokens::form::FIELD_WIDTH.rems()),
+                Input::new(&self.second).w_full().min_w_0(),
             ))
             .when_some(self.error.clone(), |v, e| {
                 v.child(FormRow::bare(div().text_color(p.danger).child(e)))

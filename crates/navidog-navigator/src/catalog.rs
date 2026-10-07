@@ -26,6 +26,14 @@ pub struct Catalog {
     columns: HashMap<(Scope, String), Load<Vec<ColumnInfo>>>,
     children: HashMap<(Scope, String), Load<TableChildren>>,
     tasks: HashMap<String, Task<()>>,
+    /// Bumps on every cache change. Panes that draw from a snapshot (the
+    /// navigator tree) compare this, because a catalog read during render
+    /// makes gpui skip observers and only redraw the pane that read it.
+    revision: u64,
+    /// One token per in-flight load, so a result from a load that
+    /// `invalidate_connection` already replaced cannot overwrite the new one.
+    generation: HashMap<String, u64>,
+    generation_clock: u64,
 }
 
 struct GlobalCatalog(Entity<Catalog>);
@@ -65,6 +73,14 @@ impl Catalog {
         self.children.get(&(scope.clone(), table.to_string()))
     }
 
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    fn bump(&mut self) {
+        self.revision = self.revision.wrapping_add(1);
+    }
+
     fn load<K, T>(
         &mut self,
         key: K,
@@ -80,8 +96,13 @@ impl Catalog {
             return;
         }
         let Some(job) = job else { return };
-        slot(self).insert(key.clone(), Load::Loading);
+        self.generation_clock = self.generation_clock.wrapping_add(1);
+        let generation = self.generation_clock;
         let task_key = format!("{key:?}");
+        self.generation.insert(task_key.clone(), generation);
+        slot(self).insert(key.clone(), Load::Loading);
+        self.bump();
+        let task_key_for_task = task_key.clone();
         let task = cx.spawn(async move |this, cx| {
             let result = match job.await {
                 Ok(Ok(v)) => Load::Ready(v),
@@ -89,10 +110,14 @@ impl Catalog {
                 Err(e) => Load::Failed(e.to_string().into()),
             };
             let _ = this.update(cx, |this, cx| {
-                // Results arriving after an invalidation are stale; drop them
-                if slot(this).contains_key(&key) {
-                    slot(this).insert(key, result);
+                // A newer load, or an invalidation, owns this key now.
+                if this.generation.get(&task_key_for_task) != Some(&generation)
+                    || !slot(this).contains_key(&key)
+                {
+                    return;
                 }
+                slot(this).insert(key, result);
+                this.bump();
                 cx.notify();
             });
         });
@@ -186,6 +211,7 @@ impl Catalog {
 
     /// Drops everything cached for a connection (closed or refreshed).
     pub fn invalidate_connection(&mut self, conn: &str, cx: &mut Context<Self>) {
+        self.bump();
         self.schemas.retain(|(c, _), _| c != conn);
         self.objects.retain(|(s, _), _| s.connection != conn);
         self.ddl.retain(|o, _| o.scope.connection != conn);
@@ -196,6 +222,7 @@ impl Catalog {
 
     /// Reloads what is loaded under a scope (a database or schema).
     pub fn refresh_scope(&mut self, scope: &Scope, cx: &mut Context<Self>) {
+        self.bump();
         let kinds: Vec<_> = self
             .objects
             .keys()

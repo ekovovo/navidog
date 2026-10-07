@@ -10,7 +10,8 @@ use gpui_kit::component::{Icon, h_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     Action, App, Entity, Global, InteractiveElement as _, IntoElement, MouseButton,
-    ParentElement as _, SharedString, Styled as _, WeakEntity,
+    ParentElement as _, PlatformInput, ScrollDelta, ScrollWheelEvent, SharedString, Styled as _,
+    WeakEntity, point, px,
 };
 use rust_i18n::t;
 
@@ -223,6 +224,21 @@ pub fn title(
         .on_mouse_down(MouseButton::Right, move |e, window, cx| {
             cx.stop_propagation();
             context_menu(panel).show(e.position, window, cx);
+        })
+        // The dock tab strip scrolls on x only and has no scrollbar of its own.
+        // A vertical wheel does not move it; turn that wheel into a horizontal one.
+        .on_scroll_wheel(|event: &ScrollWheelEvent, window, cx| {
+            let delta = event.delta.pixel_delta(window.line_height());
+            if delta.x.abs() >= delta.y.abs() {
+                return;
+            }
+            cx.stop_propagation();
+            let mut forwarded = event.clone();
+            // raw-px: the vertical delta is moved onto x; y is cleared
+            forwarded.delta = ScrollDelta::Pixels(point(delta.y, px(0.)));
+            window.defer(cx, move |window, cx| {
+                window.dispatch_event(PlatformInput::ScrollWheel(forwarded), cx);
+            });
         })
 }
 

@@ -317,10 +317,13 @@ impl TableDelegate for GridDelegate {
         if let Some((pos, input)) = &self.editing
             && *pos == (r, c)
         {
-            return Input::new(input)
-                .xsmall()
-                .appearance(false)
+            // The cell's click commits the edit. Stop it here so a click that
+            // only moves the caret stays inside the editor.
+            return div()
                 .size_full()
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_mouse_up(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .child(Input::new(input).xsmall().appearance(false).size_full())
                 .into_any_element();
         }
         let selected = self.model.is_selected(r, c);
@@ -600,6 +603,18 @@ impl ResultGrid {
         }
         match *e {
             TableEvent::SelectCell(r, ix) => {
+                let editing_here = ix > 0
+                    && self
+                        .table
+                        .read(cx)
+                        .delegate()
+                        .editing
+                        .as_ref()
+                        .is_some_and(|(pos, _)| *pos == (r, ix - 1));
+                // Clicking the cell being edited moves the caret; it does not commit.
+                if editing_here {
+                    return;
+                }
                 self.commit_edit(window, cx);
                 let shift = window.modifiers().shift;
                 self.table.update(cx, |t, cx| {

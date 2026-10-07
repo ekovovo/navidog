@@ -241,6 +241,14 @@ mod macos {
             })
             .unwrap();
         shot_of(&mut cx, prefs, "preferences.png");
+        cx.update(|cx| Theme::change(ThemeMode::Dark, None, cx));
+        cx.update_window(prefs, |_, window, cx| {
+            window.render_frame(cx);
+            navidog::preferences::open_master_dialog(window, cx);
+            window.render_frame(cx);
+        })
+        .unwrap();
+        shot_of(&mut cx, prefs, "master-password.png");
         let _ = std::fs::remove_dir_all(home);
     }
 

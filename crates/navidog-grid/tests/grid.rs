@@ -116,6 +116,30 @@ fn select_copy_and_edit(cx: &mut TestAppContext) {
     .unwrap();
     let v = cx.update(|cx| grid.read(cx).model(cx).value(1, 1).cloned());
     assert_eq!(v, Some(Some("bb".into())));
+
+    // A click inside the editor moves the caret and stays in edit mode.
+    cx.update_window(handle, |_, window, cx| {
+        window.press("enter", cx);
+        window.render_frame(cx);
+        window.press("cmd-a", cx);
+        window.input("Q", cx);
+        let rem = window.rem_size();
+        let col = tokens::grid::COLUMN_WIDTH.to_pixels(rem);
+        // The edited cell is the second data column (name), past the marker and id.
+        let x = tokens::grid::ROW_NUMBER_WIDTH.to_pixels(rem) + col + col / 2.;
+        window.click_at(
+            gpui_kit::ElementId::NamedInteger("row".into(), 1),
+            gpui_kit::point(x, rem / 2.),
+            cx,
+        );
+        window.render_frame(cx);
+        window.input("Z", cx);
+        window.press("enter", cx);
+        window.render_frame(cx);
+    })
+    .unwrap();
+    let v = cx.update(|cx| grid.read(cx).model(cx).value(1, 1).cloned());
+    assert_eq!(v, Some(Some("QZ".into())));
 }
 
 /// The table viewer's column: a pane of fixed size and a grid slot that must not grow

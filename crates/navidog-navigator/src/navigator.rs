@@ -401,6 +401,8 @@ pub struct NavigatorPanel {
     /// Quick filters next to the search field
     type_filter: Option<SharedString>,
     only_starred: bool,
+    /// Catalog revision the tree was built from. See `render`.
+    built_revision: u64,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -474,10 +476,18 @@ impl NavigatorPanel {
                 cx.observe_global::<Settings>(|this, cx| this.rebuild(cx)),
                 cx.observe(&VirtualGroups::global(cx), |this, _, cx| this.rebuild(cx)),
                 cx.observe(&Sessions::global(cx), |this, _, cx| this.rebuild(cx)),
-                cx.observe(&Catalog::global(cx), |this, _, cx| this.rebuild(cx)),
+                cx.observe(&Catalog::global(cx), |this, _, cx| {
+                    // Runs only while no pane is reading the catalog during
+                    // render. After the first frame, `render` schedules this.
+                    this.ensure_expanded(cx);
+                    this.rebuild(cx);
+                }),
                 cx.subscribe(&Sessions::global(cx), |this, _, e: &SessionsEvent, cx| {
                     if let SessionsEvent::Opened(id) = e {
                         this.expanded.insert(Node::Connection(id.clone()).id());
+                        // Opening drops the catalog. Nodes that were already
+                        // expanded do not emit Expanded again, so restart them.
+                        this.ensure_expanded(cx);
                         this.rebuild(cx);
                     }
                 }),
@@ -517,6 +527,7 @@ impl NavigatorPanel {
                 view: ViewOptions::default(),
                 type_filter: None,
                 only_starred: false,
+                built_revision: 0,
                 _subscriptions: subs,
             };
             this.rebuild(cx);
@@ -554,7 +565,21 @@ impl NavigatorPanel {
         }
     }
 
+    /// Restarts loads for nodes that are already expanded. Opening a connection
+    /// drops the cache; the tree does not emit Expanded again for those nodes.
+    fn ensure_expanded(&mut self, cx: &mut Context<Self>) {
+        let nodes: Vec<Node> = self
+            .expanded
+            .iter()
+            .filter_map(|id| Node::parse(id))
+            .collect();
+        for node in nodes {
+            Self::ensure_children(&node, false, cx);
+        }
+    }
+
     fn rebuild(&mut self, cx: &mut Context<Self>) {
+        self.built_revision = Catalog::global(cx).read(cx).revision();
         let query = self.filter.read(cx).value().trim().to_lowercase();
         let filtering = !query.is_empty();
         let builder = TreeBuilder {
@@ -1879,7 +1904,18 @@ impl TreeBuilder<'_> {
 }
 
 impl Render for NavigatorPanel {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Other panes read the catalog while they render, so gpui skips its
+        // observers and only redraws those panes. This tree is a snapshot, and
+        // would keep showing "Loading…" until the next click. Reading the
+        // revision subscribes this pane; a change rebuilds on the next frame.
+        let revision = Catalog::global(cx).read(cx).revision();
+        if revision != self.built_revision {
+            cx.defer_in(window, |this, _, cx| {
+                this.ensure_expanded(cx);
+                this.rebuild(cx);
+            });
+        }
         let p = palette(cx);
         let this = cx.entity().downgrade();
         let tree_view = tree(&self.tree, move |ix, entry, selected, window, cx| {

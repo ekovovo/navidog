@@ -126,7 +126,8 @@ impl InfoPanel {
                 cx.observe(&ConnectionStore::global(cx), |_, _, cx| cx.notify()),
                 cx.observe(&Sessions::global(cx), |_, _, cx| cx.notify()),
                 cx.observe_in(&Catalog::global(cx), window, |this, _, window, cx| {
-                    this.sync_ddl(window, cx)
+                    this.sync_ddl(window, cx);
+                    cx.notify();
                 }),
                 cx.observe_in(&Workspace::global(cx), window, |this, _, window, cx| {
                     this.ensure_loaded(cx);

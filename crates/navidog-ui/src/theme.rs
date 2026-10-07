@@ -1,3 +1,4 @@
+use gpui_kit::component::scroll::ScrollbarMode;
 use gpui_kit::component::{Theme, ThemeMode, ThemeRegistry};
 use gpui_kit::{App, Window};
 
@@ -9,16 +10,26 @@ pub const DARK: &str = "Navicat Dark";
 pub fn init(cx: &mut App) {
     ThemeRegistry::global_mut(cx)
         .load_themes_from_str(NAVICAT_THEME)
-        .expect("内置主题 navicat.json 必须能解析");
+        .expect("bundled navicat.json must parse");
     let registry = ThemeRegistry::global(cx);
-    let light = registry.themes().get(LIGHT).cloned().expect("缺少浅色主题");
-    let dark = registry.themes().get(DARK).cloned().expect("缺少深色主题");
+    let light = registry
+        .themes()
+        .get(LIGHT)
+        .cloned()
+        .expect("missing light theme");
+    let dark = registry
+        .themes()
+        .get(DARK)
+        .cloned()
+        .expect("missing dark theme");
     let theme = Theme::global_mut(cx);
     theme.light_theme = light;
     theme.dark_theme = dark;
     Theme::change(ThemeMode::Light, None, cx);
-    // Like NSScrollView: always-visible scroll bars when macOS says so (e.g. a mouse is connected)
-    Theme::sync_scrollbar_appearance(cx);
+    // gpui maps "show scrollbars" to Hover and "auto hide" to Scrolling.
+    // Neither is visible until a scroll is already happening, so a mouse
+    // cannot start a horizontal scroll. Keep the bars on screen.
+    Theme::set_scrollbar_mode(ScrollbarMode::Always, cx);
 }
 
 /// Applies the appearance: `None` follows the system, `Some(true)` forces dark, `Some(false)` forces light.
