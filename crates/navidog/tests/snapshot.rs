@@ -185,6 +185,21 @@ mod macos {
         })
         .unwrap();
         shot(&mut cx, "viewer-wide-scrolled.png");
+        cx.update_window(handle, |_, window, cx| {
+            // raw-px: far past the last column, so the grid stops at its right edge
+            let dx = gpui_kit::px(-100000.);
+            let delta = gpui_kit::ScrollDelta::Pixels(gpui_kit::point(dx, gpui_kit::Pixels::ZERO));
+            window.scroll(
+                gpui_kit::ElementId::NamedInteger("row".into(), 0),
+                delta,
+                cx,
+            );
+        })
+        .unwrap();
+        shot(&mut cx, "viewer-wide-end.png");
+        cx.update(|cx| Theme::change(ThemeMode::Dark, None, cx));
+        shot(&mut cx, "viewer-wide-end-dark.png");
+        cx.update(|cx| Theme::change(ThemeMode::Light, None, cx));
 
         // Share from the info pane's general page
         cx.update(|cx| {
