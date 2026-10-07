@@ -322,3 +322,60 @@ viewer:
   close_pending:
     en: "\"%{name}\" has uncommitted changes. Commit them?"
     zh-CN: "“%{name}”有未提交的更改，是否提交？"
+  editor:
+    en: Cell Editor
+    zh-CN: 单元格编辑器
+  editor_text:
+    en: Text
+    zh-CN: 文本
+  editor_hex:
+    en: Hex
+    zh-CN: 十六进制
+  editor_image:
+    en: Image
+    zh-CN: 图像
+  editor_web:
+    en: Web
+    zh-CN: 网页
+  editor_json:
+    en: JSON
+    zh-CN: JSON
+  editor_enum:
+    en: Enum
+    zh-CN: 枚举
+  editor_update:
+    en: Update
+    zh-CN: 更新
+  editor_format:
+    en: Format
+    zh-CN: 格式化
+  editor_load:
+    en: Load
+    zh-CN: 加载
+  editor_save:
+    en: Save to Disk
+    zh-CN: 保存到磁盘
+  editor_clear:
+    en: Clear
+    zh-CN: 清除
+  editor_web_note:
+    en: HTML is shown as source, not in a browser.
+    zh-CN: 以源代码显示 HTML，不在浏览器中渲染。
+  editor_hex_invalid:
+    en: Hex is invalid or is not UTF-8 text.
+    zh-CN: 十六进制无效，或不是 UTF-8 文本。
+  editor_json_invalid:
+    en: Not valid JSON.
+    zh-CN: 不是有效的 JSON。
+  editor_enum_missing:
+    en: This column's type does not list enum or set values.
+    zh-CN: 该字段的类型里没有枚举或集合的值列表。
+  editor_image_binary:
+    en: The image is previewed here. The grid stores text, so it was not written into the cell.
+    zh-CN: 图像只在这里预览。网格只保存文本，因此没有写入单元格。
+  editor_image_read:
+    en: Could not read the file.
+    zh-CN: 无法读取文件。
+  editor_image_write:
+    en: Could not write the file.
+    zh-CN: 无法写入文件。
