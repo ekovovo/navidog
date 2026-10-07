@@ -174,7 +174,7 @@ fn sqlite_metadata_and_change_sets() {
         for sql in d.render_changes(&scope, "actor", &update, true) {
             rel.execute(&sql).await.unwrap();
         }
-        let page = d.select_page(&scope, "actor", "", "id", Some(10), 0);
+        let page = d.select_page(&scope, "actor", "", "id", Some(10), 0, false);
         let rows = rel.execute(&page).await.unwrap().remove(0).rows;
         assert_eq!(
             rows,

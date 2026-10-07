@@ -31,7 +31,7 @@ use navidog_ui::skin::FormRow;
 use navidog_ui::{palette, tabs, tokens};
 use rust_i18n::t;
 
-use crate::grid::{GridEvent, GridTarget, HideColumn, ResultGrid, ToggleRawData};
+use crate::grid::{GridEvent, GridTarget, HideColumn, ResultGrid, ToggleRawData, ToggleRowId};
 use crate::model::{Cell, GridColumn, GridModel};
 
 const PANEL: &str = "TableViewer";
@@ -93,6 +93,8 @@ pub struct TableViewer {
     form: bool,
     /// Cell text is submitted as SQL (F-DATA-010)
     raw_data: bool,
+    /// SQLite only: SELECT includes rowid as a read-only column
+    show_rowid: bool,
     form_inputs: Vec<Entity<InputState>>,
     form_for: Option<usize>,
     in_transaction: bool,
@@ -165,7 +167,7 @@ impl BasePanel for TableViewer {
                         })
                         .await;
                         if let Ok(Err(e)) = r {
-                            tracing::warn!("关闭选项卡时提交失败: {e}");
+                            tracing::warn!("commit on tab close failed: {e}");
                         }
                         close_session(session);
                     });
@@ -391,6 +393,7 @@ impl TableViewer {
                 add_after_commit: false,
                 form: false,
                 raw_data: false,
+                show_rowid: false,
                 form_inputs: Vec::new(),
                 form_for: None,
                 in_transaction: false,
@@ -488,7 +491,15 @@ impl TableViewer {
         let filter = self.filter.read(cx).value().to_string();
         let order = self.order.read(cx).value().to_string();
         let offset = self.page * self.limit.unwrap_or(0);
-        let sql = d.select_page(scope, table, &filter, &order, self.limit, offset);
+        let sql = d.select_page(
+            scope,
+            table,
+            &filter,
+            &order,
+            self.limit,
+            offset,
+            self.show_rowid,
+        );
         let count_sql = count.then(|| d.count(scope, table, &filter));
         self.status = sql.clone().into();
         self.busy = true;
@@ -523,11 +534,17 @@ impl TableViewer {
                                     .map(|i| i.type_name.clone())
                                     .filter(|t| !t.is_empty())
                                     .unwrap_or_else(|| c.type_name.clone());
+                                let read_only = c.name == "_rowid";
                                 GridColumn {
-                                    name: c.name.clone().into(),
+                                    name: if read_only {
+                                        "ROWID".into()
+                                    } else {
+                                        c.name.clone().into()
+                                    },
                                     type_name: type_name.into(),
                                     primary_key: pk(&c.name),
                                     comment: info.and_then(|i| i.comment.clone()).map(Into::into),
+                                    read_only,
                                 }
                             })
                             .collect();
@@ -694,7 +711,7 @@ impl TableViewer {
         if let Some(cancel) = self.cancel.clone() {
             navidog_db::runtime::spawn(async move {
                 if let Err(e) = cancel().await {
-                    tracing::warn!("取消查询失败: {e}");
+                    tracing::warn!("cancel query failed: {e}");
                 }
             });
         }
@@ -923,6 +940,16 @@ impl TableViewer {
                             .on_click(cx.listener(|this, _, _, cx| this.form_step(1, cx))),
                     ),
             )
+    }
+
+    fn toggle_rowid(&mut self, cx: &mut Context<Self>) {
+        if self.dialect != Some(Dialect::Sqlite) {
+            return;
+        }
+        self.show_rowid = !self.show_rowid;
+        let on = self.show_rowid;
+        self.grid.update(cx, |g, _| g.show_rowid = on);
+        self.reload(false, cx);
     }
 
     fn open_find(&mut self, replace: bool, window: &mut Window, cx: &mut Context<Self>) {
@@ -1424,6 +1451,7 @@ impl Render for TableViewer {
                 this.toggle_column(action.name.to_string(), window, cx);
             }))
             .on_action(cx.listener(|this, _: &ToggleRawData, _, cx| this.toggle_raw(cx)))
+            .on_action(cx.listener(|this, _: &ToggleRowId, _, cx| this.toggle_rowid(cx)))
             .on_action(
                 cx.listener(|this, _: &ShowFind, window, cx| this.open_find(false, window, cx)),
             )

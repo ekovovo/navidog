@@ -45,6 +45,15 @@ grid:
   hide_column:
     en: Hide Column
     zh-CN: 隐藏列
+  freeze:
+    en: Freeze up to This Column
+    zh-CN: 冻结到此列
+  unfreeze:
+    en: Unfreeze
+    zh-CN: 取消冻结
+  rowid:
+    en: Show or Hide ROWID
+    zh-CN: 显示或隐藏 ROWID
   row_height:
     en: Set Row Height
     zh-CN: 设置行高

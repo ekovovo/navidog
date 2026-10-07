@@ -251,7 +251,7 @@ fn table_viewer_sql_on_mysql_and_postgres() {
             let d = rel.dialect();
             let order = format!("{} DESC", d.quote_ident("actor_id"));
             let page = rel
-                .execute(&d.select_page(&scope, "actor", "actor_id > 1", &order, Some(2), 0))
+                .execute(&d.select_page(&scope, "actor", "actor_id > 1", &order, Some(2), 0, false))
                 .await
                 .unwrap();
             assert_eq!(page[0].rows.len(), 2);
@@ -272,7 +272,7 @@ fn table_viewer_sql_on_mysql_and_postgres() {
                     .unwrap_or_else(|e| panic!("{sql}: {e}"));
             }
             let name = rel
-                .execute(&d.select_page(&scope, "actor", "actor_id = 1", "", None, 0))
+                .execute(&d.select_page(&scope, "actor", "actor_id = 1", "", None, 0, false))
                 .await
                 .unwrap();
             assert_eq!(name[0].rows[0][1].as_deref(), Some("O'Hara\\"));

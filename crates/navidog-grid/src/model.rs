@@ -59,6 +59,8 @@ pub struct GridColumn {
     pub type_name: SharedString,
     pub primary_key: bool,
     pub comment: Option<SharedString>,
+    /// Shown but not written back (SQLite ROWID)
+    pub read_only: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -148,6 +150,9 @@ impl GridModel {
     }
 
     fn write(&mut self, r: usize, c: usize, v: Cell, raw: bool) {
+        if self.columns.get(c).is_some_and(|col| col.read_only) {
+            return;
+        }
         let stored = match r.checked_sub(self.rows.len()) {
             None if self.rows[r].get(c) == Some(&v) => {
                 self.edits.remove(&(r, c));
@@ -251,7 +256,7 @@ impl GridModel {
             self.columns
                 .iter()
                 .zip(&self.rows[r])
-                .filter(|(col, _)| !pk || col.primary_key)
+                .filter(|(col, _)| (!pk || col.primary_key) && !col.read_only)
                 .map(|(col, v)| (col.name.to_string(), v.as_ref().map(|s| s.to_string())))
                 .collect(),
         )
@@ -270,7 +275,7 @@ impl GridModel {
         };
         let mut updates: BTreeMap<usize, Writes> = BTreeMap::new();
         for (&(r, c), v) in &self.edits {
-            if !self.deleted.contains(&r) {
+            if !self.deleted.contains(&r) && !self.columns[c].read_only {
                 updates.entry(r).or_default().push(written(r, c, v));
             }
         }
@@ -291,7 +296,12 @@ impl GridModel {
                     let r = self.rows.len() + i;
                     row.iter()
                         .enumerate()
-                        .filter_map(|(c, v)| Some(written(r, c, v.as_ref()?)))
+                        .filter_map(|(c, v)| {
+                            if self.columns.get(c).is_some_and(|col| col.read_only) {
+                                return None;
+                            }
+                            Some(written(r, c, v.as_ref()?))
+                        })
                         .collect::<Writes>()
                 })
                 .filter(|v| !v.is_empty())
@@ -592,6 +602,7 @@ mod tests {
             type_name: "".into(),
             primary_key: pk,
             comment: None,
+            read_only: false,
         };
         let mut m = GridModel::default();
         let cell = |s: &str| Some(SharedString::from(s.to_string()));
@@ -722,5 +733,14 @@ mod tests {
         assert_eq!(m.value(0, 1), Some(&Some("z".into())));
         assert_eq!(m.replace_all("z", "zz", false), 1);
         assert!(m.has_changes());
+    }
+
+    #[test]
+    fn read_only_columns_are_not_written() {
+        let mut m = model(true);
+        m.columns[0].read_only = true;
+        m.set_value(0, 0, Some("9".into()));
+        assert!(m.change_set().updates.is_empty());
+        assert_eq!(m.value(0, 0), Some(&Some("1".into())));
     }
 }

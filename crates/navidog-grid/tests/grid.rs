@@ -17,6 +17,7 @@ fn col(name: &str, pk: bool) -> GridColumn {
         type_name: "".into(),
         primary_key: pk,
         comment: None,
+        read_only: false,
     }
 }
 

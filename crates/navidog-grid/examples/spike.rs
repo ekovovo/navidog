@@ -57,6 +57,7 @@ mod macos {
                 type_name: "".into(),
                 primary_key: c == 0,
                 comment: None,
+                read_only: false,
             })
             .collect();
         let rows = (0..ROWS)

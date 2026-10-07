@@ -40,7 +40,8 @@ actions!(
         ToggleFieldType,
         ToggleFieldComment,
         SetRowHeight,
-        ToggleRawData
+        ToggleRawData,
+        ToggleRowId
     ]
 );
 
@@ -49,6 +50,13 @@ actions!(
 #[action(namespace = grid, no_json)]
 pub struct SelectColumn {
     pub index: usize,
+}
+
+/// Freeze this many data columns on the left (F-DATA-009). Zero clears the freeze.
+#[derive(Clone, PartialEq, Eq, Debug, gpui_kit::Action)]
+#[action(namespace = grid, no_json)]
+pub struct FreezeColumns {
+    pub count: usize,
 }
 
 /// Hide or show one column by name (F-DATA-009). The viewer owns the hidden set.
@@ -112,6 +120,8 @@ pub struct GridDelegate {
     dialect: Dialect,
     /// Highlight cells containing this text (query, case sensitive)
     find: Option<(SharedString, bool)>,
+    /// Data columns fixed on the left, after the marker column
+    frozen: usize,
     /// The row a plain click or key move settled on. Leaving it while it is dirty commits.
     settled: Option<usize>,
     /// The pointer dragged the selection, so the mouse-up (not SelectCell) settles the row.
@@ -164,11 +174,15 @@ impl TableDelegate for GridDelegate {
             Some((c, false)) if c + 1 == ix => ColumnSort::Descending,
             _ => ColumnSort::Default,
         };
-        Column::new(SharedString::from(ix.to_string()), col.name.clone())
+        let mut column = Column::new(SharedString::from(ix.to_string()), col.name.clone())
             .width(self.width(tokens::grid::COLUMN_WIDTH))
             .sort(sort)
             .movable(false)
-            .p_0()
+            .p_0();
+        if ix - 1 < self.frozen {
+            column = column.fixed_left();
+        }
+        column
     }
 
     fn perform_sort(
@@ -247,6 +261,14 @@ impl TableDelegate for GridDelegate {
                                 .menu(
                                     t!("grid.hide_column").to_string(),
                                     Box::new(HideColumn { name }),
+                                )
+                                .menu(
+                                    t!("grid.freeze").to_string(),
+                                    Box::new(FreezeColumns { count: c + 1 }),
+                                )
+                                .menu(
+                                    t!("grid.unfreeze").to_string(),
+                                    Box::new(FreezeColumns { count: 0 }),
                                 )
                                 .show(e.position, window, cx);
                         }),
@@ -363,6 +385,8 @@ pub struct ResultGrid {
     row_height: tokens::Pt,
     /// Typed cell text is SQL, not a quoted string (F-DATA-010)
     raw: bool,
+    /// The context menu shows a check while SQLite ROWID is visible
+    pub show_rowid: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -387,6 +411,7 @@ impl ResultGrid {
             raw: false,
             dialect: Dialect::Sqlite,
             find: None,
+            frozen: 0,
             settled: None,
             dragged: false,
             commit_requested: false,
@@ -426,6 +451,7 @@ impl ResultGrid {
             edit_sub: None,
             row_height: tokens::grid::ROW_HEIGHT,
             raw: false,
+            show_rowid: false,
             _subscriptions: subs,
         }
     }
@@ -569,7 +595,7 @@ impl ResultGrid {
             .menu(t!("grid.copy_tsv_data").to_string(), copy_as("tsv"))
             .menu(t!("grid.copy_tsv_names").to_string(), copy_as("names"))
             .menu(t!("grid.copy_tsv_both").to_string(), copy_as("both"));
-        NativeMenu::new()
+        let mut menu = NativeMenu::new()
             .menu(t!("grid.set_empty").to_string(), Box::new(SetEmpty))
             .menu(t!("grid.set_null").to_string(), Box::new(SetNull))
             .separator()
@@ -579,13 +605,23 @@ impl ResultGrid {
             .separator()
             .menu(t!("grid.delete_rows").to_string(), Box::new(DeleteRows))
             .separator()
-            .menu(t!("grid.row_height").to_string(), Box::new(SetRowHeight))
-            .separator()
-            .menu_with_check(
-                t!("grid.raw_data").to_string(),
-                self.raw,
-                Box::new(ToggleRawData),
-            )
+            .menu(t!("grid.row_height").to_string(), Box::new(SetRowHeight));
+        if self
+            .target
+            .as_ref()
+            .is_some_and(|t| t.dialect == Dialect::Sqlite)
+        {
+            menu = menu.menu_with_check(
+                t!("grid.rowid").to_string(),
+                self.show_rowid,
+                Box::new(ToggleRowId),
+            );
+        }
+        menu.separator().menu_with_check(
+            t!("grid.raw_data").to_string(),
+            self.raw,
+            Box::new(ToggleRawData),
+        )
     }
 
     /// Marks the current row as settled without committing, so a just-inserted row is the one
@@ -625,6 +661,14 @@ impl ResultGrid {
 
     pub fn start_edit(&mut self, pos: Pos, window: &mut Window, cx: &mut Context<Self>) {
         self.commit_edit(window, cx);
+        if self
+            .model(cx)
+            .columns
+            .get(pos.1)
+            .is_some_and(|col| col.read_only)
+        {
+            return;
+        }
         let (raw, dialect) = {
             let table = self.table.read(cx);
             let d = table.delegate();
@@ -812,6 +856,12 @@ impl Render for ResultGrid {
             }))
             .on_action(cx.listener(|this, a: &SelectColumn, _, cx| {
                 this.update_model(cx, |m| m.select_column(a.index, false));
+            }))
+            .on_action(cx.listener(|this, a: &FreezeColumns, _, cx| {
+                this.table.update(cx, |t, cx| {
+                    t.delegate_mut().frozen = a.count;
+                    t.refresh(cx);
+                });
             }))
             .on_action(cx.listener(|this, _: &Escape, window, cx| this.cancel_edit(window, cx)))
             .on_action(cx.listener(|this, _: &ExtendUp, _, cx| this.extend(-1, 0, cx)))

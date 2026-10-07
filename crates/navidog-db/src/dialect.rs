@@ -235,6 +235,7 @@ impl Dialect {
 
     /// Paged query for the table viewer. `filter` and `order` are the user-entered WHERE /
     /// ORDER BY clauses (without the keywords).
+    #[allow(clippy::too_many_arguments)]
     pub fn select_page(
         self,
         scope: &Scope,
@@ -243,8 +244,14 @@ impl Dialect {
         order: &str,
         limit: Option<u64>,
         offset: u64,
+        rowid: bool,
     ) -> String {
-        let mut sql = format!("SELECT * FROM {}", self.qualified(scope, table));
+        let list = if rowid && self == Self::Sqlite {
+            "*, rowid AS \"_rowid\""
+        } else {
+            "*"
+        };
+        let mut sql = format!("SELECT {list} FROM {}", self.qualified(scope, table));
         if !filter.trim().is_empty() {
             sql.push_str(&format!(" WHERE {}", filter.trim()));
         }
@@ -498,11 +505,15 @@ mod tests {
     fn paging_and_count() {
         let s = scope(None);
         assert_eq!(
-            Dialect::Sqlite.select_page(&s, "t", " id > 1 ", "name DESC", Some(1000), 2000),
+            Dialect::Sqlite.select_page(&s, "t", " id > 1 ", "name DESC", Some(1000), 2000, false),
             "SELECT * FROM \"app\".\"t\" WHERE id > 1 ORDER BY name DESC LIMIT 1000 OFFSET 2000"
         );
         assert_eq!(
-            Dialect::MySql.select_page(&s, "t", "", "", None, 0),
+            Dialect::Sqlite.select_page(&s, "t", "", "", None, 0, true),
+            "SELECT *, rowid AS \"_rowid\" FROM \"app\".\"t\""
+        );
+        assert_eq!(
+            Dialect::MySql.select_page(&s, "t", "", "", None, 0, true),
             "SELECT * FROM `app`.`t`"
         );
         assert_eq!(
