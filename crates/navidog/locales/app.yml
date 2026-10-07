@@ -117,6 +117,9 @@ menu:
   hide_object_groups:
     en: Hide Object Groups
     zh-CN: 隐藏对象组
+  show_table_profile:
+    en: Show Table Profiles
+    zh-CN: 显示表概况
   info_pane:
     en: Information Pane
     zh-CN: 信息窗格

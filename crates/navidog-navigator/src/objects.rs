@@ -94,6 +94,30 @@ pub(crate) enum Content {
     Empty,
 }
 
+/// Redraws the objects pane after a View menu option changes.
+pub(crate) fn refresh(cx: &mut App) {
+    if let Some(panel) = cx.try_global::<SharedObjects>().and_then(|s| s.0.upgrade()) {
+        panel.update(cx, |_, cx| cx.notify());
+    }
+}
+
+/// Joins already-labeled property pairs into the one-line table profile.
+pub(crate) fn join_profile(parts: &[(String, String)]) -> String {
+    parts
+        .iter()
+        .map(|(k, v)| format!("{k}: {v}"))
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
+fn profile_line(properties: &[(String, String)]) -> String {
+    let parts = properties
+        .iter()
+        .map(|(k, v)| (t!(format!("col.{k}")).to_string(), v.clone()))
+        .collect::<Vec<_>>();
+    join_profile(&parts)
+}
+
 impl EventEmitter<PanelEvent> for ObjectsPanel {}
 
 impl Focusable for ObjectsPanel {
@@ -732,6 +756,9 @@ impl Render for ObjectsPanel {
         }
         let p = palette(cx);
         let content = Self::content(cx);
+        let show_profile = crate::navigator::view_options(cx).show_table_profile;
+        let selection = Workspace::global(cx).read(cx).selection().clone();
+        let mut profile = None;
         let (body, listed) = match content {
             Content::Empty => (
                 v_flex()
@@ -774,6 +801,11 @@ impl Render for ObjectsPanel {
                 } else {
                     rows
                 };
+                if show_profile {
+                    profile = rows.iter().find(|r| r.target == selection).and_then(|r| {
+                        (!r.properties.is_empty()).then(|| profile_line(&r.properties))
+                    });
+                }
                 (self.render_rows(rows, detail, cx), listed)
             }
         };
@@ -801,6 +833,23 @@ impl Render for ObjectsPanel {
             })
             .child(self.render_toolbar(listed.as_ref(), cx))
             .child(body)
+            .when_some(profile, |el, text| {
+                el.child(
+                    h_flex()
+                        .id("table-profile")
+                        .w_full()
+                        .h(tokens::list::ROW_HEIGHT.rems())
+                        .px_2()
+                        .min_w_0()
+                        .flex_none()
+                        .overflow_hidden()
+                        .border_t_1()
+                        .border_color(p.separator)
+                        .text_color(p.label_secondary)
+                        .items_center()
+                        .child(truncated("table-profile-text", text)),
+                )
+            })
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |this, e: &MouseDownEvent, window, cx| {
@@ -812,5 +861,24 @@ impl Render for ObjectsPanel {
                         .show(e.position, window, cx);
                 }),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::join_profile;
+
+    #[test]
+    fn profile_joins_labeled_properties() {
+        let parts = vec![
+            ("行".into(), "200".into()),
+            ("数据长度".into(), "16384".into()),
+            ("引擎".into(), "InnoDB".into()),
+        ];
+        assert_eq!(
+            join_profile(&parts),
+            "行: 200 · 数据长度: 16384 · 引擎: InnoDB"
+        );
+        assert_eq!(join_profile(&[]), "");
     }
 }

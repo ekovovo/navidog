@@ -5,6 +5,7 @@ use gpui_kit::{App, KeyBinding, Menu, MenuItem, OsAction, SystemMenuType};
 use navidog_core::actions::{
     CloseConnection, ManageConnections, NewConnection, NewConnectionOf, NewGroup, Refresh,
     ToggleFocusMode, ToggleHideObjectGroups, ToggleOnlyActive, ToggleShowHidden,
+    ToggleShowTableProfile,
 };
 use navidog_core::favorites::Favorites;
 use navidog_ui::tabs::{CloseTab, NextTab, PrevTab};
@@ -195,6 +196,11 @@ pub fn set_menus(cx: &mut App) {
                 t!("menu.hide_object_groups").to_string(),
                 Box::new(ToggleHideObjectGroups),
                 state.view.hide_object_groups,
+            ),
+            checked(
+                t!("menu.show_table_profile").to_string(),
+                Box::new(ToggleShowTableProfile),
+                state.view.show_table_profile,
             ),
             MenuItem::submenu(Menu::new(t!("menu.info_pane").to_string()).items([
                 MenuItem::action(t!("menu.show_info_pane").to_string(), ToggleInfoPane),

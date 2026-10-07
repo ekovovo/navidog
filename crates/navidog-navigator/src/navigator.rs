@@ -421,6 +421,8 @@ pub struct ViewOptions {
     pub show_hidden: bool,
     /// Ignore virtual groups of objects (flat object lists)
     pub hide_object_groups: bool,
+    /// "Show Table Profiles": a one-line summary under the object list
+    pub show_table_profile: bool,
 }
 
 impl EventEmitter<PanelEvent> for NavigatorPanel {}
@@ -2157,6 +2159,7 @@ pub fn set_view_options(view: ViewOptions, cx: &mut App) {
         this.view = view;
         this.rebuild(cx);
     });
+    crate::objects::refresh(cx);
 }
 
 #[cfg(test)]

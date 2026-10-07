@@ -16,7 +16,7 @@ use gpui_kit::{
 };
 use navidog_core::actions::{
     OpenConnection, OpenObject, ToggleFocusMode, ToggleHideObjectGroups, ToggleOnlyActive,
-    ToggleShowHidden,
+    ToggleShowHidden, ToggleShowTableProfile,
 };
 use navidog_core::favorites::Favorites;
 use navidog_core::object::ObjectRef;
@@ -543,6 +543,13 @@ impl Render for MainWindow {
             .on_action(cx.listener(|this, _: &ToggleHideObjectGroups, window, cx| {
                 this.toggle(
                     |s| s.view.hide_object_groups = !s.view.hide_object_groups,
+                    window,
+                    cx,
+                )
+            }))
+            .on_action(cx.listener(|this, _: &ToggleShowTableProfile, window, cx| {
+                this.toggle(
+                    |s| s.view.show_table_profile = !s.view.show_table_profile,
                     window,
                     cx,
                 )

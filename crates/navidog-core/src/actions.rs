@@ -36,7 +36,12 @@ gpui_kit::actions!(navidog, [ToggleFocusMode]);
 // View > Navigation Pane options; the shell persists them and passes them to the navigator
 gpui_kit::actions!(
     navigator,
-    [ToggleOnlyActive, ToggleShowHidden, ToggleHideObjectGroups]
+    [
+        ToggleOnlyActive,
+        ToggleShowHidden,
+        ToggleHideObjectGroups,
+        ToggleShowTableProfile
+    ]
 );
 
 // Operations on the selected objects (navigator tree, objects tab, menu bar)
