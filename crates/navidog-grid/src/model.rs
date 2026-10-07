@@ -6,52 +6,10 @@ use std::ops::RangeInclusive;
 
 use gpui_kit::SharedString;
 use navidog_db::dialect::{ChangeSet, Dialect, RowKey, RowUpdate, Writes, Written};
+use navidog_util::sql_type::is_string_type;
 
 /// A cell value; `None` inside the `Option` is NULL, and a missing cell is an unfilled new row.
 pub type Cell = Option<SharedString>;
-
-/// Character types are quoted in raw data mode. Accepts SQL names (`varchar(45)`,
-/// `character varying`) and the MySQL protocol names the driver puts on a result column.
-pub fn is_string_type(type_name: &str) -> bool {
-    let t = type_name.to_ascii_lowercase();
-    if t.contains("mysql_type_string")
-        || t.contains("mysql_type_var_string")
-        || t.contains("mysql_type_varchar")
-        || t.contains("mysql_type_enum")
-        || t.contains("mysql_type_set")
-        || t.contains("mysql_type_json")
-    {
-        return true;
-    }
-    let base = t
-        .split(|ch: char| ch == '(' || ch.is_whitespace())
-        .next()
-        .unwrap_or("");
-    matches!(
-        base,
-        "char"
-            | "varchar"
-            | "nchar"
-            | "nvarchar"
-            | "character"
-            | "bpchar"
-            | "text"
-            | "tinytext"
-            | "mediumtext"
-            | "longtext"
-            | "ntext"
-            | "clob"
-            | "citext"
-            | "string"
-            | "enum"
-            | "set"
-            | "json"
-            | "jsonb"
-            | "xml"
-            | "uuid"
-            | "name"
-    )
-}
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct GridColumn {
@@ -782,13 +740,6 @@ mod tests {
 
     #[test]
     fn raw_mode_quotes_string_values_only() {
-        assert!(is_string_type("varchar(45)"));
-        assert!(is_string_type("character varying(20)"));
-        assert!(is_string_type("TEXT"));
-        assert!(is_string_type("MYSQL_TYPE_VAR_STRING"));
-        assert!(!is_string_type("int"));
-        assert!(!is_string_type("timestamp without time zone"));
-        assert!(!is_string_type("MYSQL_TYPE_LONG"));
         let mut m = model(true);
         m.columns[1].type_name = "varchar(45)".into();
         assert_eq!(m.raw_text(0, 1, true, Dialect::Sqlite), "'a'");

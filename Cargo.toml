@@ -13,6 +13,7 @@ publish = false
 [workspace.dependencies]
 navidog-ui = { path = "crates/navidog-ui" }
 navidog-core = { path = "crates/navidog-core" }
+navidog-util = { path = "crates/navidog-util" }
 navidog-db = { path = "crates/navidog-db" }
 navidog-plugin = { path = "crates/navidog-plugin" }
 navidog-connection = { path = "crates/navidog-connection" }

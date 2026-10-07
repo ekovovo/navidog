@@ -15,12 +15,7 @@ use rust_i18n::t;
 use crate::grid::ResultGrid;
 use crate::model::Pos;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Temporal {
-    Date,
-    Time,
-    DateTime,
-}
+pub(crate) use navidog_util::sql_type::{Temporal, temporal_kind};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Parts {
@@ -30,32 +25,6 @@ struct Parts {
     h: u32,
     min: u32,
     s: u32,
-}
-
-/// Column types that open the picker. `None` keeps the plain text editor.
-pub(crate) fn temporal_kind(type_name: &str) -> Option<Temporal> {
-    let t = type_name.to_ascii_lowercase();
-    if t.contains("mysql_type_datetime") || t.contains("mysql_type_timestamp") {
-        return Some(Temporal::DateTime);
-    }
-    if t.contains("mysql_type_date") {
-        return Some(Temporal::Date);
-    }
-    if t.contains("mysql_type_time") {
-        return Some(Temporal::Time);
-    }
-    let base = t
-        .split(|ch: char| ch == '(' || ch.is_whitespace())
-        .next()
-        .unwrap_or("");
-    match base {
-        "datetime" | "timestamp" | "timestamptz" | "datetime2" | "smalldatetime" => {
-            Some(Temporal::DateTime)
-        }
-        "date" => Some(Temporal::Date),
-        "time" | "timetz" => Some(Temporal::Time),
-        _ => None,
-    }
 }
 
 fn format_parts(kind: Temporal, p: Parts) -> String {
@@ -342,18 +311,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn kinds_formats_and_october_2026() {
-        assert_eq!(temporal_kind("varchar(45)"), None);
-        assert_eq!(temporal_kind("date"), Some(Temporal::Date));
-        assert_eq!(temporal_kind("time"), Some(Temporal::Time));
-        assert_eq!(
-            temporal_kind("timestamp without time zone"),
-            Some(Temporal::DateTime)
-        );
-        assert_eq!(
-            temporal_kind("MYSQL_TYPE_DATETIME"),
-            Some(Temporal::DateTime)
-        );
+    fn formats_and_october_2026() {
         let p = parse_parts("2026-10-07 16:05:09.12", Temporal::DateTime);
         assert_eq!(
             p,

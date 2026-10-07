@@ -7,7 +7,7 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Escape, Input, InputEvent, InputState};
 use gpui_kit::component::native_menu::NativeMenu;
 use gpui_kit::component::table::{
-    Column, ColumnGroup, ColumnSort, DataTable, TableDelegate, TableEvent, TableState,
+    Column, ColumnSort, DataTable, TableDelegate, TableEvent, TableState,
 };
 use gpui_kit::component::{Sizable as _, Size, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -20,8 +20,10 @@ use gpui_kit::{
 use navidog_core::object::Scope;
 use navidog_core::settings::{RowShade, Settings};
 use navidog_db::dialect::Dialect;
+use navidog_ui::assets::lucide;
 use navidog_ui::skin::truncated;
 use navidog_ui::{palette, tokens};
+use navidog_util::sql_type::{TypeKind, type_kind};
 use rust_i18n::t;
 
 use crate::model::{Cell, GridColumn, GridModel, Pos, RowState};
@@ -185,6 +187,47 @@ impl GridDelegate {
     fn width(&self, pt: tokens::Pt) -> Pixels {
         pt.to_pixels(self.rem)
     }
+
+    /// Width of the pinned columns. DataTable draws a hairline at this edge on every real row.
+    fn pinned_span(&self) -> Pixels {
+        let mut span = self.width(tokens::grid::ROW_NUMBER_WIDTH);
+        for (ix, col) in self.model.columns.iter().enumerate() {
+            if ix >= self.frozen {
+                break;
+            }
+            span += self
+                .widths
+                .get(&col.name)
+                .copied()
+                .unwrap_or_else(|| self.width(tokens::grid::COLUMN_WIDTH));
+        }
+        span
+    }
+}
+
+fn type_tint(kind: TypeKind, cx: &gpui_kit::App) -> gpui_kit::Hsla {
+    let p = palette(cx);
+    match kind {
+        TypeKind::Number => p.icon_blue,
+        TypeKind::Text => p.icon_green,
+        TypeKind::Time => p.icon_orange,
+        TypeKind::Bool => p.icon_teal,
+        TypeKind::Binary => p.icon_yellow,
+        TypeKind::Json => p.icon_purple,
+        TypeKind::Other => p.label_secondary,
+    }
+}
+
+fn type_glyph(kind: TypeKind) -> gpui_kit::component::Icon {
+    match kind {
+        TypeKind::Number => lucide("hash"),
+        TypeKind::Text => lucide("a-large-small"),
+        TypeKind::Time => lucide("calendar"),
+        TypeKind::Bool => lucide("check"),
+        TypeKind::Binary => lucide("binary"),
+        TypeKind::Json => lucide("braces"),
+        TypeKind::Other => lucide("square"),
+    }
 }
 
 fn header_type(col: &GridColumn, show_comment: bool) -> String {
@@ -288,68 +331,30 @@ impl TableDelegate for GridDelegate {
         self.sort_changed = true;
     }
 
-    fn group_headers(&self, _: &App) -> Option<Vec<Vec<ColumnGroup>>> {
-        if !self.show_type {
-            return None;
-        }
-        // DataTable uses one row height for the header and the body, so the name
-        // and the type are two header rows. The name is the group row.
-        let mut row = Vec::with_capacity(self.model.columns.len() + 1);
-        row.push(ColumnGroup::new("", 1));
-        for col in &self.model.columns {
-            row.push(ColumnGroup::new(col.name.clone(), 1));
-        }
-        Some(vec![row])
-    }
-
-    fn render_group_th(
+    fn render_tr(
         &mut self,
-        label: &SharedString,
-        _col_span: usize,
-        width: Pixels,
+        row_ix: usize,
         _: &mut Window,
         cx: &mut Context<TableState<Self>>,
-    ) -> impl IntoElement {
-        let p = palette(cx);
-        let (show_type, show_comment) = (self.show_type, self.show_comment);
-        let hit = (!label.is_empty()).then(|| {
-            self.model
-                .columns
-                .iter()
-                .position(|c| c.name.as_ref() == label.as_ref())
-        });
-        div()
-            .w(width)
-            .h_full()
-            .flex_shrink_0()
-            .px_1()
-            .flex()
-            .items_center()
-            .overflow_hidden()
-            .border_r_1()
-            .border_color(p.grid_line)
-            .text_color(p.label)
-            .when_some(hit.flatten(), |d, c| {
-                let name = label.clone();
-                d.child(truncated(("grid-group", c), label.clone()))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |t, e: &MouseDownEvent, _, cx| {
-                            let shift = e.modifiers.shift;
-                            t.delegate_mut().model.select_column(c, shift);
-                            t.delegate_mut().finish_navigation(shift);
-                            cx.notify();
-                        }),
-                    )
-                    .on_mouse_down(
-                        MouseButton::Right,
-                        cx.listener(move |_t, e: &MouseDownEvent, window, cx| {
-                            cx.stop_propagation();
-                            column_menu(c, name.clone(), show_type, show_comment)
-                                .show(e.position, window, cx);
-                        }),
-                    )
-            })
+    ) -> gpui_kit::Stateful<gpui_kit::Div> {
+        let mut row = div().id(("row", row_ix));
+        // The blank row under the records is still a real row, so DataTable paints the
+        // pinned-column hairline through its first cell. Cover that strip after the row paints.
+        if self.model.row_count() > 0 && row_ix == self.model.row_count() {
+            let p = palette(cx);
+            let striped = row_shade(cx) == RowShade::Alternate && row_ix % 2 == 1;
+            row = row.child(gpui_kit::deferred(
+                div()
+                    .absolute()
+                    .left(self.pinned_span() - px(2.)) // raw-px: pinned hairline plus antialiasing
+                    .top_0()
+                    .bottom_0()
+                    .w(px(2.)) // raw-px: same strip
+                    .bg(p.control_bg)
+                    .when(striped, |d| d.child(div().size_full().bg(p.row_alt))),
+            ));
+        }
+        row
     }
 
     fn render_th(
@@ -361,53 +366,82 @@ impl TableDelegate for GridDelegate {
         let col_ix = ix.checked_sub(1);
         let col = col_ix.and_then(|c| self.model.columns.get(c));
         let (show_type, show_comment) = (self.show_type, self.show_comment);
-        let header = col.zip(col_ix).map(|(c, ix)| {
-            let text = if show_type {
+        let header = col.zip(col_ix).map(|(c, data_ix)| {
+            let mut title = c.name.to_string();
+            let type_label = if show_type {
                 header_type(c, show_comment)
             } else {
-                let mut label = c.name.to_string();
                 if show_comment && let Some(comment) = &c.comment {
-                    label = format!("{label}  {comment}");
+                    title = format!("{title}  {comment}");
                 }
-                label
+                String::new()
             };
-            (ix, c.name.clone(), text)
+            (
+                data_ix,
+                c.name.clone(),
+                title,
+                type_kind(&c.type_name),
+                type_label,
+            )
         });
         let p = palette(cx);
+        // Data columns already get a hairline from the resize handle, after the sort icon.
+        // A border on this content would sit between the type name and that icon.
         div()
             .size_full()
+            .min_w_0()
             .px_1()
-            .flex()
-            .items_center()
             .overflow_hidden()
-            .border_r_1()
-            .border_color(p.grid_line)
-            .text_color(if show_type {
-                p.label_secondary
-            } else {
-                p.label
-            })
-            .when(show_type, |d| d.text_size(tokens::font::SIZE_SMALL.rems()))
-            .when_some(header, |d, (c, name, label)| {
-                d.child(truncated(("grid-th", ix), label))
-                    // A click selects the column; the sort icon still runs on its own hit target
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |t, e: &MouseDownEvent, _, cx| {
-                            let shift = e.modifiers.shift;
-                            t.delegate_mut().model.select_column(c, shift);
-                            t.delegate_mut().finish_navigation(shift);
-                            cx.notify();
+            .when(col.is_none(), |d| d.border_r_1().border_color(p.grid_line))
+            .when_some(header, |d, (c, name, title, kind, type_label)| {
+                let tint = type_tint(kind, cx);
+                d.child(
+                    v_flex()
+                        .size_full()
+                        .min_w_0()
+                        .justify_center()
+                        .child(
+                            truncated(("grid-th", ix), title)
+                                .text_color(p.label)
+                                .line_height(tokens::Pt(15.).rems()),
+                        )
+                        .when(show_type && !type_label.is_empty(), |d| {
+                            d.child(
+                                h_flex()
+                                    .w_full()
+                                    .min_w_0()
+                                    .items_center()
+                                    .gap(tokens::Pt(3.).rems())
+                                    .text_size(tokens::font::SIZE_SMALL.rems())
+                                    .line_height(tokens::Pt(13.).rems())
+                                    .text_color(tint)
+                                    .child(
+                                        type_glyph(kind)
+                                            .size(tokens::font::SIZE_SMALL.rems())
+                                            .text_color(tint),
+                                    )
+                                    .child(truncated(("grid-type", ix), type_label)),
+                            )
                         }),
-                    )
-                    .on_mouse_down(
-                        MouseButton::Right,
-                        cx.listener(move |_t, e: &MouseDownEvent, window, cx| {
-                            cx.stop_propagation();
-                            column_menu(c, name.clone(), show_type, show_comment)
-                                .show(e.position, window, cx);
-                        }),
-                    )
+                )
+                // A click selects the column; the sort icon still runs on its own hit target
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |t, e: &MouseDownEvent, _, cx| {
+                        let shift = e.modifiers.shift;
+                        t.delegate_mut().model.select_column(c, shift);
+                        t.delegate_mut().finish_navigation(shift);
+                        cx.notify();
+                    }),
+                )
+                .on_mouse_down(
+                    MouseButton::Right,
+                    cx.listener(move |_t, e: &MouseDownEvent, window, cx| {
+                        cx.stop_propagation();
+                        column_menu(c, name.clone(), show_type, show_comment)
+                            .show(e.position, window, cx);
+                    }),
+                )
             })
     }
 
@@ -421,10 +455,9 @@ impl TableDelegate for GridDelegate {
         let p = palette(cx);
         // The trailing blank row only reserves space under the horizontal scrollbar.
         if r >= self.model.row_count() {
+            // No column rules: this row only keeps the last record above the scrollbar.
             return div()
                 .size_full()
-                .border_r_1()
-                .border_color(p.grid_line)
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_mouse_up(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .into_any_element();
@@ -1133,9 +1166,14 @@ impl ResultGrid {
 
 impl Render for ResultGrid {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let row = self
-            .row_height
-            .to_pixels(self.table.read(cx).delegate().rem);
+        let rem = self.table.read(cx).delegate().rem;
+        let row = self.row_height.to_pixels(rem);
+        // The header and the body share one row height. Two lines need the taller one.
+        let row = if self.table.read(cx).delegate().show_type {
+            row.max(tokens::grid::TYPE_HEADER_HEIGHT.to_pixels(rem))
+        } else {
+            row
+        };
         let font_pt = grid_font_pt(cx);
         let alternate = row_shade(cx) == RowShade::Alternate;
         // The dock clips overflow. Without a zero minimum the grid grows to the

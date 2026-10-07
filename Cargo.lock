@@ -4895,6 +4895,7 @@ dependencies = [
  "navidog-core",
  "navidog-db",
  "navidog-ui",
+ "navidog-util",
  "rust-i18n",
  "serde_json",
  "tokio",
@@ -4932,6 +4933,13 @@ dependencies = [
  "anyhow",
  "gpui-kit",
  "rust-i18n",
+ "serde_json",
+]
+
+[[package]]
+name = "navidog-util"
+version = "0.1.0"
+dependencies = [
  "serde_json",
 ]
 

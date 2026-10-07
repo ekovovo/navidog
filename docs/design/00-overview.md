@@ -94,6 +94,7 @@ flowchart TD
   featQuery --> ui
   featConn --> db[navidog-db]
   featGrid --> db
+  featGrid --> util[navidog-util]
   plugin --> core[navidog-core]
   plugin --> gpuiShell[gpui-shell]
   db --> core
@@ -106,7 +107,8 @@ flowchart TD
 | --- | --- | --- |
 | `navidog` | 应用外壳：初始化、窗口、Dock 默认布局、菜单栏、主工具栏骨架、组合各 feature crate。不放功能逻辑。 | M1 |
 | `navidog-ui` | Navicat 主题 JSON、具名 token、AppKit 外观皮肤、图标资源 | M1 |
-| `navidog-core` | 领域模型（连接、分组）、配置目录、加密存储、注册表、通用 SQL 工具 | M1 |
+| `navidog-core` | 领域模型（连接、分组）、配置目录、加密存储、注册表 | M1 |
+| `navidog-util` | 不依赖界面和驱动的纯函数：SQL 类型名归类、enum/set 列表、十六进制和 JSON 文本 | M2 |
 | `navidog-db` | 驱动 trait、三类数据库 trait、tokio 运行时、内置驱动、SSL 和 SSH 隧道 | M1 |
 | `navidog-plugin` | gpui-shell 宿主：manifest、授权、HostModule `navidog` | M1 建空壳，M5 实现 |
 | `navidog-connection` | 连接对话框、连接管理、导航树中的连接节点操作 | M1 |
@@ -121,9 +123,9 @@ flowchart TD
 | `navidog-ai` | AI 助手 | M11 |
 
 规则：
-- 依赖只能向下：feature crate 可以依赖 `navidog-ui`、`navidog-core`、`navidog-db`，**不能依赖其他 feature crate**。feature 之间通过 `navidog-core` 中的命令、事件和领域 ID 协作。
+- 依赖只能向下：feature crate 可以依赖 `navidog-ui`、`navidog-core`、`navidog-db`、`navidog-util`，**不能依赖其他 feature crate**。feature 之间通过 `navidog-core` 中的命令、事件和领域 ID 协作。`navidog-util` 不依赖本仓库的其他 crate。
 - 每个 feature crate 把自己的 model、service、view、command、dialog 放在一起，禁止建立全局的 `models/`、`views/`、`commands/` 目录。
-- 小能力先作为 module 留在最接近的 crate 里，等边界有实际收益再拆成 crate。
+- 小能力先作为 module 留在最接近的 crate 里，等边界有实际收益再拆成 crate。不依赖界面、也不需要驱动的纯函数例外，直接放 `navidog-util`。
 - feature crate 对外只暴露 `init(cx)`、需要被外壳放进 Dock 的 Panel 类型，以及少量公开的 Entity 或命令。
 
 ### 4.2 运行时数据流

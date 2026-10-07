@@ -34,9 +34,11 @@ use navidog_db::{CancelHandle, ColumnInfo, DbResult, ResultSet};
 use navidog_ui::assets::lucide;
 use navidog_ui::skin::{FormRow, truncated};
 use navidog_ui::{palette, tabs, tokens};
+use navidog_util::format::{decode_hex, encode_hex, pretty_json};
+use navidog_util::sql_type::{Choices, choices};
 use rust_i18n::t;
 
-use crate::editor::{self, Choices, Kind};
+use crate::editor::{self, Kind};
 use crate::filter::{self, Filter, Rule, Sort};
 use crate::grid::{GridEvent, GridTarget, HideColumn, ResultGrid, ToggleRawData, ToggleRowId};
 use crate::model::{Cell, GridColumn, GridModel};
@@ -1386,8 +1388,8 @@ impl TableViewer {
         self.editor_cell = Some((r, c));
         self.editor_note = SharedString::default();
         let shown = match kind {
-            Kind::Hex => editor::encode_hex(&text),
-            Kind::Json => editor::pretty_json(&text).unwrap_or(text.clone()),
+            Kind::Hex => encode_hex(&text),
+            Kind::Json => pretty_json(&text).unwrap_or(text.clone()),
             _ => text.clone(),
         };
         self.editor_input
@@ -1412,7 +1414,7 @@ impl TableViewer {
         };
         let raw = self.editor_input.read(cx).value().to_string();
         let text = match self.editor {
-            Some(Kind::Hex) => match editor::decode_hex(&raw) {
+            Some(Kind::Hex) => match decode_hex(&raw) {
                 Some(text) => text,
                 None => {
                     self.editor_note = t!("viewer.editor_hex_invalid").into();
@@ -1430,7 +1432,7 @@ impl TableViewer {
 
     fn format_json(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let raw = self.editor_input.read(cx).value().to_string();
-        match editor::pretty_json(&raw) {
+        match pretty_json(&raw) {
             Some(pretty) => {
                 self.editor_note = SharedString::default();
                 self.editor_input
@@ -1522,7 +1524,7 @@ impl TableViewer {
         let Some((r, c, current, type_name)) = self.focused_cell(cx) else {
             return;
         };
-        let text = match editor::choices(&type_name) {
+        let text = match choices(&type_name) {
             Some(Choices::Many(values)) => {
                 let mut picked: Vec<String> = current
                     .split(',')
@@ -2325,21 +2327,19 @@ impl TableViewer {
                         ),
                 )
             })
-            .when(kind == Kind::Enum, |pane| {
-                match editor::choices(&type_name) {
-                    Some(Choices::One(values)) => {
-                        pane.child(self.choice_row(&values, &text, false, cx))
-                    }
-                    Some(Choices::Many(values)) => {
-                        pane.child(self.choice_row(&values, &text, true, cx))
-                    }
-                    None => pane.child(
-                        div()
-                            .text_xs()
-                            .text_color(p.label_secondary)
-                            .child(t!("viewer.editor_enum_missing").to_string()),
-                    ),
+            .when(kind == Kind::Enum, |pane| match choices(&type_name) {
+                Some(Choices::One(values)) => {
+                    pane.child(self.choice_row(&values, &text, false, cx))
                 }
+                Some(Choices::Many(values)) => {
+                    pane.child(self.choice_row(&values, &text, true, cx))
+                }
+                None => pane.child(
+                    div()
+                        .text_xs()
+                        .text_color(p.label_secondary)
+                        .child(t!("viewer.editor_enum_missing").to_string()),
+                ),
             })
             .when(!self.editor_note.is_empty(), |pane| {
                 pane.child(

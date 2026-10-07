@@ -11,6 +11,7 @@ navidog 用 gpui-kit 0.7 复刻 Navicat Premium 17（macOS）。决策、架构�
 ## 写代码
 
 - **依赖方向**：feature crate（`navidog-connection`、`navidog-navigator`、`navidog-grid`……）之间不互相依赖。跨 feature 的命令放 `navidog_core::actions`，会话放 `navidog_db::sessions`，由外壳 `crates/navidog` 组合面板（按对象类型选编辑器在 `src/editors.rs`）。
+- **纯函数**：不依赖界面、也不需要驱动的工具函数放 `navidog-util`。SQL 类型名归类、enum/set 列表、十六进制和 JSON 文本在 `navidog_util::sql_type` 和 `navidog_util::format`。图标和颜色留在画它们的 crate。需要驱动或方言的放 `navidog-db`。
 - **token**：Navicat 的实测数值只写在 `crates/navidog-ui/src/tokens.rs`（`Pt(n).rems()`，基准 13）和 `themes/navicat.json`，新 token 在 `docs/design/02-design-tokens.md` 登记来源。界面代码用具名 token 和 `palette(cx)`；必须写裸值时在同一行或上一行注明 `// raw-px: <理由>`。
 - **图标**：`lucide(name)` 只能取到 `navidog-ui/src/assets.rs` 中 `ExtraIcons` 列出的图标和 gpui-kit 默认的 101 个，缺失的图标只在日志里留下加载错误、界面上显示为空白，新图标先加进列表。`every_icon_used_in_the_sources_loads` 测试会扫描源码中 `lucide("…")` 和 `button(id, "…", …)` 的字面量；运行时拼出的图标名（如 `kind_icon`）要自己核对。
 - **连接配置文件**：`Connection` 顶层的 `general`、`advanced`、`ssl`、`ssh` 永远是当前激活的配置文件，其余配置文件在 `profiles` 里，切换时整体交换。按连接处理秘密字段的代码（重新加密、复制连接……）必须同时覆盖 `profiles`，参照 `ConnectionsFile::reencrypt`。
