@@ -31,7 +31,7 @@ use navidog_ui::skin::FormRow;
 use navidog_ui::{palette, tabs, tokens};
 use rust_i18n::t;
 
-use crate::grid::{GridEvent, GridTarget, HideColumn, ResultGrid};
+use crate::grid::{GridEvent, GridTarget, HideColumn, ResultGrid, ToggleRawData};
 use crate::model::{Cell, GridColumn, GridModel};
 
 const PANEL: &str = "TableViewer";
@@ -78,6 +78,8 @@ pub struct TableViewer {
     /// Insert a row once the commit that made room for it succeeds
     add_after_commit: bool,
     form: bool,
+    /// Cell text is submitted as SQL (F-DATA-010)
+    raw_data: bool,
     form_inputs: Vec<Entity<InputState>>,
     form_for: Option<usize>,
     in_transaction: bool,
@@ -358,6 +360,7 @@ impl TableViewer {
                 hidden_revert: None,
                 add_after_commit: false,
                 form: false,
+                raw_data: false,
                 form_inputs: Vec::new(),
                 form_for: None,
                 in_transaction: false,
@@ -751,14 +754,27 @@ impl TableViewer {
     }
 
     fn write_form_cell(&mut self, row: usize, c: usize, text: String, cx: &mut Context<Self>) {
+        let raw = self.raw_data;
         self.grid.update(cx, |g, cx| {
             g.update_model(cx, |m| {
                 let old = m.value(row, c).cloned().flatten().unwrap_or_default();
                 if text != old.as_ref() {
-                    m.set_value(row, c, Some(text.into()));
+                    let cell = Some(text.into());
+                    if raw {
+                        m.set_raw(row, c, cell);
+                    } else {
+                        m.set_value(row, c, cell);
+                    }
                 }
             });
         });
+    }
+
+    fn toggle_raw(&mut self, cx: &mut Context<Self>) {
+        self.raw_data = !self.raw_data;
+        let raw = self.raw_data;
+        self.grid.update(cx, |g, _| g.set_raw_mode(raw));
+        cx.notify();
     }
 
     fn sync_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -958,6 +974,15 @@ impl TableViewer {
                     .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
                         this.columns_menu().show(event.position(), window, cx);
                     })),
+            )
+            .child(
+                Button::new("viewer-raw")
+                    .ghost()
+                    .small()
+                    .icon(lucide("square-function"))
+                    .tooltip(t!("viewer.raw_data").to_string())
+                    .selected(self.raw_data)
+                    .on_click(cx.listener(|this, _, _, cx| this.toggle_raw(cx))),
             )
             .child(
                 Button::new("viewer-form")
@@ -1205,6 +1230,7 @@ impl Render for TableViewer {
             .on_action(cx.listener(|this, action: &HideColumn, window, cx| {
                 this.toggle_column(action.name.to_string(), window, cx);
             }))
+            .on_action(cx.listener(|this, _: &ToggleRawData, _, cx| this.toggle_raw(cx)))
             .child(self.render_toolbar(cx))
             .when(self.show_filter, |v| v.child(self.render_filter(cx)))
             .child(

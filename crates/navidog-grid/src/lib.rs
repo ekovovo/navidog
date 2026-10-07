@@ -9,7 +9,7 @@ pub mod grid;
 pub mod model;
 mod viewer;
 
-pub use grid::{GridEvent, GridTarget, ResultGrid};
+pub use grid::{GridEvent, GridTarget, ResultGrid, ToggleRawData};
 pub use viewer::TableViewer;
 
 pub fn init(cx: &mut gpui_kit::App) {

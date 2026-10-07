@@ -39,7 +39,8 @@ actions!(
         ExtendRight,
         ToggleFieldType,
         ToggleFieldComment,
-        SetRowHeight
+        SetRowHeight,
+        ToggleRawData
     ]
 );
 
@@ -347,6 +348,8 @@ pub struct ResultGrid {
     target: Option<GridTarget>,
     edit_sub: Option<Subscription>,
     row_height: tokens::Pt,
+    /// Typed cell text is SQL, not a quoted string (F-DATA-010)
+    raw: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -406,12 +409,18 @@ impl ResultGrid {
             target: None,
             edit_sub: None,
             row_height: tokens::grid::ROW_HEIGHT,
+            raw: false,
             _subscriptions: subs,
         }
     }
 
     pub fn set_target(&mut self, target: Option<GridTarget>) {
         self.target = target;
+    }
+
+    /// Raw data mode: later edits are SQL expressions. Values already typed keep how they were written.
+    pub fn set_raw_mode(&mut self, raw: bool) {
+        self.raw = raw;
     }
 
     /// Replaces the data with a new page, discarding uncommitted changes.
@@ -526,6 +535,12 @@ impl ResultGrid {
             .menu(t!("grid.delete_rows").to_string(), Box::new(DeleteRows))
             .separator()
             .menu(t!("grid.row_height").to_string(), Box::new(SetRowHeight))
+            .separator()
+            .menu_with_check(
+                t!("grid.raw_data").to_string(),
+                self.raw,
+                Box::new(ToggleRawData),
+            )
     }
 
     /// Marks the current row as settled without committing, so a just-inserted row is the one
@@ -606,7 +621,15 @@ impl ResultGrid {
             .flatten()
             .unwrap_or_default();
         if text != old.as_ref() {
-            self.update_model(cx, |m| m.set_value(r, c, Some(text.into())));
+            let raw = self.raw;
+            self.update_model(cx, |m| {
+                let cell = Some(text.into());
+                if raw {
+                    m.set_raw(r, c, cell);
+                } else {
+                    m.set_value(r, c, cell);
+                }
+            });
         }
         self.focus_table(window, cx);
     }
@@ -708,7 +731,8 @@ impl Render for ResultGrid {
             }))
             .on_action(cx.listener(|this, _: &Paste, _, cx| {
                 if let Some(text) = cx.read_from_clipboard().and_then(|c| c.text()) {
-                    this.update_model(cx, |m| m.paste(&text));
+                    let raw = this.raw;
+                    this.update_model(cx, |m| m.paste(&text, raw));
                 }
             }))
             .on_action(cx.listener(|this, _: &SelectAll, _, cx| {

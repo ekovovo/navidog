@@ -7,6 +7,7 @@ use std::rc::Rc;
 use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{AppContext as _, Entity, TestAppContext, WindowBounds, WindowOptions, size};
 use navidog_grid::model::GridColumn;
+use navidog_db::dialect::Written;
 use navidog_grid::{GridEvent, ResultGrid};
 use navidog_ui::tokens;
 
@@ -92,7 +93,7 @@ fn select_copy_and_edit(cx: &mut TestAppContext) {
     assert_eq!(cs.updates.len(), 1);
     assert_eq!(
         cs.updates[0].values,
-        [("name".to_string(), Some("bb".to_string()))]
+        [("name".to_string(), Written::text(Some("bb".to_string())))]
     );
     assert_eq!(
         cs.updates[0].key.0,

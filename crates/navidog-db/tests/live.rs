@@ -216,17 +216,18 @@ fn mysql_and_postgres_metadata() {
 #[test]
 fn table_viewer_sql_on_mysql_and_postgres() {
     use navidog_core::object::Scope;
-    use navidog_db::dialect::{ChangeSet, RowKey, RowUpdate};
+    use navidog_db::dialect::{ChangeSet, RowKey, RowUpdate, Written};
     if !live() {
         return;
     }
     let v = |c: &str, s: &str| (c.to_string(), Some(s.to_string()));
+    let w = |c: &str, s: &str| (c.to_string(), Written::text(Some(s.to_string())));
     let changes = ChangeSet {
         updates: vec![RowUpdate {
             key: RowKey(vec![v("actor_id", "1")]),
-            values: vec![v("first_name", "O'Hara\\")],
+            values: vec![w("first_name", "O'Hara\\")],
         }],
-        inserts: vec![vec![v("first_name", "NEW"), v("last_name", "ROW")]],
+        inserts: vec![vec![w("first_name", "NEW"), w("last_name", "ROW")]],
         deletes: vec![],
     };
     runtime::runtime().block_on(async {

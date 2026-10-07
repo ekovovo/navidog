@@ -48,6 +48,9 @@ grid:
   row_height:
     en: Set Row Height
     zh-CN: 设置行高
+  raw_data:
+    en: Raw Data Mode
+    zh-CN: 原始数据模式
   ok:
     en: OK
     zh-CN: 确定
@@ -85,6 +88,9 @@ viewer:
   form:
     en: Form View
     zh-CN: 表单视图
+  raw_data:
+    en: Raw Data Mode
+    zh-CN: 原始数据模式
   columns:
     en: Columns
     zh-CN: 列

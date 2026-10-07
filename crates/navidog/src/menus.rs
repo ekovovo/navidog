@@ -200,6 +200,8 @@ pub fn set_menus(cx: &mut App) {
                 MenuItem::action(t!("menu.show_info_pane").to_string(), ToggleInfoPane),
             ])),
             MenuItem::separator(),
+            MenuItem::action(t!("menu.raw_data").to_string(), navidog_grid::ToggleRawData),
+            MenuItem::separator(),
             checked(
                 t!("menu.show_status_bar").to_string(),
                 Box::new(ToggleStatusBar),

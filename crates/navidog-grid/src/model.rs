@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ops::RangeInclusive;
 
 use gpui_kit::SharedString;
-use navidog_db::dialect::{ChangeSet, RowKey, RowUpdate, Values};
+use navidog_db::dialect::{ChangeSet, RowKey, RowUpdate, Writes, Written};
 
 /// A cell value; `None` inside the `Option` is NULL, and a missing cell is an unfilled new row.
 pub type Cell = Option<SharedString>;
@@ -38,6 +38,8 @@ pub struct GridModel {
     /// Inserted rows; `None` means that column was left empty and the insert uses the default
     new_rows: Vec<Vec<Option<Cell>>>,
     deleted: BTreeSet<usize>,
+    /// Cells whose text is SQL rather than a string literal (raw data mode)
+    raw: BTreeSet<Pos>,
     anchor: Pos,
     head: Pos,
 }
@@ -67,18 +69,37 @@ impl GridModel {
     }
 
     pub fn set_value(&mut self, r: usize, c: usize, v: Cell) {
-        match r.checked_sub(self.rows.len()) {
+        self.write(r, c, v, false);
+    }
+
+    /// Like `set_value`, but a non-empty value is submitted as SQL (raw data mode).
+    pub fn set_raw(&mut self, r: usize, c: usize, v: Cell) {
+        self.write(r, c, v, true);
+    }
+
+    fn write(&mut self, r: usize, c: usize, v: Cell, raw: bool) {
+        let stored = match r.checked_sub(self.rows.len()) {
             None if self.rows[r].get(c) == Some(&v) => {
                 self.edits.remove(&(r, c));
+                false
             }
             None => {
                 self.edits.insert((r, c), v);
+                true
             }
             Some(n) => {
                 if let Some(cell) = self.new_rows.get_mut(n).and_then(|row| row.get_mut(c)) {
                     *cell = Some(v);
+                    true
+                } else {
+                    false
                 }
             }
+        };
+        if stored && raw {
+            self.raw.insert((r, c));
+        } else {
+            self.raw.remove(&(r, c));
         }
     }
 
@@ -117,7 +138,17 @@ impl GridModel {
         for r in rows.clone().rev() {
             match r.checked_sub(self.rows.len()) {
                 Some(n) if n < self.new_rows.len() => {
+                    let abs = self.rows.len() + n;
                     self.new_rows.remove(n);
+                    self.raw = self
+                        .raw
+                        .iter()
+                        .filter_map(|&(row, col)| match row.cmp(&abs) {
+                            std::cmp::Ordering::Equal => None,
+                            std::cmp::Ordering::Greater => Some((row - 1, col)),
+                            std::cmp::Ordering::Less => Some((row, col)),
+                        })
+                        .collect();
                 }
                 Some(_) => {}
                 None => {
@@ -137,6 +168,7 @@ impl GridModel {
         self.edits.clear();
         self.new_rows.clear();
         self.deleted.clear();
+        self.raw.clear();
     }
 
     pub fn has_primary_key(&self) -> bool {
@@ -157,13 +189,19 @@ impl GridModel {
 
     pub fn change_set(&self) -> ChangeSet {
         let name = |c: usize| self.columns[c].name.to_string();
-        let mut updates: BTreeMap<usize, Values> = BTreeMap::new();
+        let written = |r: usize, c: usize, v: &Cell| {
+            (
+                name(c),
+                Written {
+                    value: v.as_ref().map(|s| s.to_string()),
+                    raw: self.raw.contains(&(r, c)),
+                },
+            )
+        };
+        let mut updates: BTreeMap<usize, Writes> = BTreeMap::new();
         for (&(r, c), v) in &self.edits {
             if !self.deleted.contains(&r) {
-                updates
-                    .entry(r)
-                    .or_default()
-                    .push((name(c), v.as_ref().map(|s| s.to_string())));
+                updates.entry(r).or_default().push(written(r, c, v));
             }
         }
         ChangeSet {
@@ -178,13 +216,13 @@ impl GridModel {
             inserts: self
                 .new_rows
                 .iter()
-                .map(|row| {
+                .enumerate()
+                .map(|(i, row)| {
+                    let r = self.rows.len() + i;
                     row.iter()
                         .enumerate()
-                        .filter_map(|(c, v)| {
-                            Some((name(c), v.as_ref()?.as_ref().map(|s| s.to_string())))
-                        })
-                        .collect::<Values>()
+                        .filter_map(|(c, v)| Some(written(r, c, v.as_ref()?)))
+                        .collect::<Writes>()
                 })
                 .filter(|v| !v.is_empty())
                 .collect(),
@@ -310,7 +348,7 @@ impl GridModel {
     }
 
     /// Writes tab-separated text starting at the selection's top left, appending rows past the end.
-    pub fn paste(&mut self, text: &str) {
+    pub fn paste(&mut self, text: &str, raw: bool) {
         let (rows, cols) = self.selection();
         let (r0, c0) = (*rows.start(), *cols.start());
         let lines: Vec<&str> = text.trim_end_matches(['\n', '\r']).split('\n').collect();
@@ -321,7 +359,12 @@ impl GridModel {
             }
             for (j, v) in line.trim_end_matches('\r').split('\t').enumerate() {
                 if c0 + j < self.columns.len() {
-                    self.set_value(r, c0 + j, Some(v.to_string().into()));
+                    let cell = Some(v.to_string().into());
+                    if raw {
+                        self.set_raw(r, c0 + j, cell);
+                    } else {
+                        self.set_value(r, c0 + j, cell);
+                    }
                 }
             }
         }
@@ -362,15 +405,16 @@ mod tests {
         assert_eq!(m.row_state(1), RowState::Edited);
         let cs = m.change_set();
         let v = |c: &str, s: Option<&str>| (c.to_string(), s.map(String::from));
+        let w = |c: &str, s: Option<&str>| (c.to_string(), Written::text(s.map(String::from)));
         assert_eq!(
             cs.updates,
             [RowUpdate {
                 key: RowKey(vec![v("id", Some("2"))]),
-                values: vec![v("name", Some("b"))]
+                values: vec![w("name", Some("b"))]
             }]
         );
         assert_eq!(cs.deletes, [RowKey(vec![v("id", Some("1"))])]);
-        assert_eq!(cs.inserts, [vec![v("name", Some("c"))]]);
+        assert_eq!(cs.inserts, [vec![w("name", Some("c"))]]);
 
         let mut m = model(false);
         m.set_value(1, 0, Some("3".into()));
@@ -390,7 +434,7 @@ mod tests {
 
         // Pasting two rows at (1, 1): the second is past the end, so it is appended
         m.select((1, 1), false);
-        m.paste("x\ny\n");
+        m.paste("x\ny\n", false);
         assert_eq!(m.value(1, 1), Some(&Some("x".into())));
         assert_eq!(m.row_count(), 3);
         assert_eq!(m.value(2, 1), Some(&Some("y".into())));
@@ -421,5 +465,18 @@ mod tests {
         let (columns, _) =
             GridModel::project(&m.columns, &[], &["id".into(), "name".into()].into());
         assert_eq!(columns.len(), 2);
+    }
+
+    #[test]
+    fn raw_edits_stay_unquoted_and_reverting_clears_the_flag() {
+        let mut m = model(true);
+        m.set_raw(0, 1, Some("UPPER('a')".into()));
+        let cs = m.change_set();
+        assert_eq!(cs.updates[0].values[0].1, Written::expr("UPPER('a')"));
+        m.set_value(0, 1, Some("a".into()));
+        assert!(m.change_set().updates.is_empty());
+        let r = m.insert_row();
+        m.set_raw(r, 1, Some("NOW()".into()));
+        assert_eq!(m.change_set().inserts[0][0].1, Written::expr("NOW()"));
     }
 }

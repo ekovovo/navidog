@@ -52,7 +52,7 @@ fn sqlite_create_attach_execute_and_error_codes() {
 #[test]
 fn sqlite_metadata_and_change_sets() {
     use navidog_core::object::{ObjectKind, Scope};
-    use navidog_db::dialect::{ChangeSet, RowKey, RowUpdate};
+    use navidog_db::dialect::{ChangeSet, RowKey, RowUpdate, Written};
 
     let dir = tempfile::tempdir().unwrap();
     let params = ConnectParams {
@@ -149,13 +149,13 @@ fn sqlite_metadata_and_change_sets() {
         let insert = ChangeSet {
             inserts: vec![
                 vec![
-                    ("id".into(), Some("1".into())),
-                    ("name".into(), Some("O'Brien".into())),
+                    ("id".into(), Written::text(Some("1".into()))),
+                    ("name".into(), Written::text(Some("O'Brien".into()))),
                 ],
                 vec![
-                    ("id".into(), Some("2".into())),
-                    ("name".into(), Some("b".into())),
-                    ("note".into(), None),
+                    ("id".into(), Written::text(Some("2".into()))),
+                    ("name".into(), Written::text(Some("b".into()))),
+                    ("note".into(), Written::text(None)),
                 ],
             ],
             ..Default::default()
@@ -166,7 +166,7 @@ fn sqlite_metadata_and_change_sets() {
         let update = ChangeSet {
             updates: vec![RowUpdate {
                 key: RowKey(vec![("id".into(), Some("1".into()))]),
-                values: vec![("note".into(), Some("hi".into()))],
+                values: vec![("note".into(), Written::text(Some("hi".into())))],
             }],
             deletes: vec![RowKey(vec![("id".into(), Some("2".into()))])],
             ..Default::default()

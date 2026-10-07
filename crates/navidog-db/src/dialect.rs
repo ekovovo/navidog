@@ -13,6 +13,29 @@ pub enum Dialect {
 /// Values of a row keyed by column name; `None` is NULL.
 pub type Values = Vec<(String, Option<String>)>;
 
+/// A value written by an edit or an insert. When `raw` is set and the text is non-empty, it is SQL
+/// (raw data mode) and is not quoted.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Written {
+    pub value: Option<String>,
+    pub raw: bool,
+}
+
+impl Written {
+    pub fn text(value: Option<String>) -> Self {
+        Self { value, raw: false }
+    }
+
+    pub fn expr(sql: impl Into<String>) -> Self {
+        Self {
+            value: Some(sql.into()),
+            raw: true,
+        }
+    }
+}
+
+pub type Writes = Vec<(String, Written)>;
+
 /// Locates a row: only the primary key columns when there is a primary key, otherwise the whole
 /// row's old values.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -21,13 +44,13 @@ pub struct RowKey(pub Values);
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RowUpdate {
     pub key: RowKey,
-    pub values: Values,
+    pub values: Writes,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ChangeSet {
     pub updates: Vec<RowUpdate>,
-    pub inserts: Vec<Values>,
+    pub inserts: Vec<Writes>,
     pub deletes: Vec<RowKey>,
 }
 
@@ -59,6 +82,21 @@ impl Dialect {
         match value {
             None => "NULL".into(),
             Some(v) => self.string_literal(v),
+        }
+    }
+
+    /// Quoted literal, or the text itself when it is a raw-data-mode expression.
+    pub fn written_sql(self, written: &Written) -> String {
+        if written.raw
+            && let Some(expr) = written
+                .value
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+        {
+            expr.to_string()
+        } else {
+            self.literal(written.value.as_deref())
         }
     }
 
@@ -227,6 +265,14 @@ impl Dialect {
         sql
     }
 
+    fn written_list(self, values: &Writes) -> String {
+        values
+            .iter()
+            .map(|(c, v)| format!("{} = {}", self.quote_ident(c), self.written_sql(v)))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
     fn assignments(self, values: &Values, sep: &str) -> String {
         values
             .iter()
@@ -267,16 +313,13 @@ impl Dialect {
             }
             out.push(format!(
                 "UPDATE {target} SET {} WHERE {}{limit}",
-                self.assignments(&u.values, ", "),
+                self.written_list(&u.values),
                 self.assignments(&u.key.0, " AND ")
             ));
         }
         for row in &changes.inserts {
             let cols: Vec<_> = row.iter().map(|(c, _)| self.quote_ident(c)).collect();
-            let vals: Vec<_> = row
-                .iter()
-                .map(|(_, v)| self.literal(v.as_deref()))
-                .collect();
+            let vals: Vec<_> = row.iter().map(|(_, v)| self.written_sql(v)).collect();
             out.push(format!(
                 "INSERT INTO {target} ({}) VALUES ({})",
                 cols.join(", "),
@@ -476,11 +519,14 @@ mod tests {
             updates: vec![RowUpdate {
                 key: RowKey(vec![("id".into(), Some("1".into())), ("note".into(), None)]),
                 values: vec![
-                    ("name".into(), Some("O'Brien".into())),
-                    ("note".into(), None),
+                    ("name".into(), Written::text(Some("O'Brien".into()))),
+                    ("note".into(), Written::text(None)),
                 ],
             }],
-            inserts: vec![vec![("id".into(), Some("9".into())), ("name".into(), None)]],
+            inserts: vec![vec![
+                ("id".into(), Written::text(Some("9".into()))),
+                ("name".into(), Written::text(None)),
+            ]],
         };
         let sql = Dialect::MySql.render_changes(&s, "t", &changes, false);
         assert_eq!(
@@ -493,6 +539,26 @@ mod tests {
         );
         let pg = Dialect::Postgres.render_changes(&scope(Some("public")), "t", &changes, true);
         assert!(pg[0].ends_with("WHERE \"id\" = '3'"), "{pg:?}");
+
+        let raw = ChangeSet {
+            updates: vec![RowUpdate {
+                key: RowKey(vec![("id".into(), Some("1".into()))]),
+                values: vec![
+                    ("name".into(), Written::expr("UPPER('a')")),
+                    ("note".into(), Written::text(Some("x".into()))),
+                ],
+            }],
+            inserts: vec![vec![("stamp".into(), Written::expr("NOW()"))]],
+            ..Default::default()
+        };
+        let sql = Dialect::Sqlite.render_changes(&s, "t", &raw, true);
+        assert_eq!(
+            sql,
+            [
+                "UPDATE \"app\".\"t\" SET \"name\" = UPPER('a'), \"note\" = 'x' WHERE \"id\" = '1'",
+                "INSERT INTO \"app\".\"t\" (\"stamp\") VALUES (NOW())",
+            ]
+        );
     }
 
     #[test]

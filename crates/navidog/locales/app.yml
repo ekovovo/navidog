@@ -66,6 +66,9 @@ menu:
   focus_mode:
     en: Focus Mode
     zh-CN: 专注模式
+  raw_data:
+    en: Raw Data Mode
+    zh-CN: 原始数据模式
   close_window:
     en: Close Window
     zh-CN: 关闭窗口
