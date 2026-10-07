@@ -256,6 +256,12 @@ viewer:
   op_custom:
     en: "[Custom]"
     zh-CN: "[自定义]"
+  find:
+    en: Find
+    zh-CN: 查找
+  close_find:
+    en: Close
+    zh-CN: 关闭
   find_data:
     en: Find Data
     zh-CN: 查找数据

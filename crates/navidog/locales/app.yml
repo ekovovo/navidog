@@ -93,6 +93,18 @@ menu:
   select_all:
     en: Select All
     zh-CN: 全选
+  find:
+    en: Find
+    zh-CN: 查找
+  find_find:
+    en: Find
+    zh-CN: 查找
+  find_replace:
+    en: Replace
+    zh-CN: 替换
+  find_next:
+    en: Find Next
+    zh-CN: 查找下一个
   view:
     en: View
     zh-CN: 查看

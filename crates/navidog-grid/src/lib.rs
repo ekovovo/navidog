@@ -13,7 +13,7 @@ pub mod model;
 mod viewer;
 
 pub use grid::{GridEvent, GridTarget, ResultGrid, ToggleRawData};
-pub use viewer::TableViewer;
+pub use viewer::{FindNext, ShowFind, ShowReplace, TableViewer};
 
 pub fn init(cx: &mut gpui_kit::App) {
     grid::init(cx);

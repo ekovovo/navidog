@@ -11,7 +11,7 @@ use gpui_kit::component::dock::{
     BasePanel, Panel, PanelEvent, PanelId, PanelInfo, PanelState, TabGroup, panel_handle,
     register_panel,
 };
-use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
+use gpui_kit::component::input::{Escape, Input, InputEvent, InputState, Textarea, TextareaState};
 use gpui_kit::component::native_menu::NativeMenu;
 use gpui_kit::component::{
     Disableable as _, Selectable as _, Sizable as _, WindowExt as _, h_flex, v_flex,
@@ -1125,6 +1125,14 @@ impl TableViewer {
         cx.notify();
     }
 
+    fn close_find(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.show_find = false;
+        self.sync_highlight(cx);
+        let handle = self.grid.read(cx).focus_handle(cx);
+        window.focus(&handle, cx);
+        cx.notify();
+    }
+
     fn sync_highlight(&mut self, cx: &mut Context<Self>) {
         let query = self.find_input.read(cx).value().to_string();
         let on = self.show_find && self.find_highlight && !self.find_columns && !query.is_empty();
@@ -1208,6 +1216,14 @@ impl TableViewer {
             .gap_1()
             .border_b_1()
             .border_color(p.separator)
+            .child(
+                Button::new("find-close")
+                    .xsmall()
+                    .ghost()
+                    .icon(lucide("x"))
+                    .tooltip(t!("viewer.close_find").to_string())
+                    .on_click(cx.listener(|this, _, window, cx| this.close_find(window, cx))),
+            )
             .child({
                 let label = if self.find_columns {
                     t!("viewer.find_columns").to_string()
@@ -1713,6 +1729,17 @@ impl TableViewer {
                     this.show_filter = !this.show_filter;
                     cx.notify();
                 })),
+            )
+            .child(
+                button("viewer-find", "search", t!("viewer.find").to_string())
+                    .selected(self.show_find)
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        if this.show_find {
+                            this.close_find(window, cx);
+                        } else {
+                            this.open_find(false, window, cx);
+                        }
+                    })),
             )
             .child(button("import", "file-text", t!("viewer.import").to_string()).disabled(true))
             .child(button("export", "file-text", t!("viewer.export").to_string()).disabled(true))
@@ -2501,6 +2528,13 @@ impl Render for TableViewer {
             }))
             .on_action(cx.listener(|this, _: &ToggleRawData, _, cx| this.toggle_raw(cx)))
             .on_action(cx.listener(|this, _: &ToggleRowId, _, cx| this.toggle_rowid(cx)))
+            .on_action(cx.listener(|this, _: &Escape, window, cx| {
+                if this.show_find {
+                    this.close_find(window, cx);
+                } else {
+                    cx.propagate();
+                }
+            }))
             .on_action(
                 cx.listener(|this, _: &ShowFind, window, cx| this.open_find(false, window, cx)),
             )

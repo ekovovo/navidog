@@ -167,6 +167,15 @@ pub fn set_menus(cx: &mut App) {
                 SelectAll,
                 OsAction::SelectAll,
             ),
+            MenuItem::separator(),
+            MenuItem::submenu(Menu::new(t!("menu.find").to_string()).items([
+                MenuItem::action(t!("menu.find_find").to_string(), navidog_grid::ShowFind),
+                MenuItem::action(
+                    t!("menu.find_replace").to_string(),
+                    navidog_grid::ShowReplace,
+                ),
+                MenuItem::action(t!("menu.find_next").to_string(), navidog_grid::FindNext),
+            ])),
         ]),
         Menu::new(t!("menu.view").to_string()).items([
             MenuItem::submenu(Menu::new(t!("menu.navigation_pane").to_string()).items([
