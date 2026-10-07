@@ -39,3 +39,11 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.taffy]
 opt-level = 3
+
+[profile.release]
+codegen-units = 1
+# lto = "thin"
+strip = "symbols"
+lto = "fat"
+opt-level = "z"
+# panic = "abort"
