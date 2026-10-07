@@ -182,6 +182,7 @@ Navicat 的 nib 中几乎所有颜色都是 AppKit 语义色。在 718 个 nib �
 | `color.grid_deleted` | 暂定，待实测（待删除的行） | `#ffd9d9ff` | `#5c2424ff` |
 | `color.grid_inserted` | 深色截图里的新增行，暂定 | `#f0ddf6ff` | `#4a2960ff` |
 | `color.grid_line` | 深色截图里的列分割线，暂定；`themes/navicat.json` 的 `table.row.border` 用同一色 | `#c8c8c8ff` | `#3a3a3aff` |
+| `table.hover.background` | 暂定。gpui-kit 默认浅色是 `#f5f5f5`，盖在它自己的隔行色 `#fafafa` 上。这里的隔行色已是 `#f4f5f5` / `#ffffff0c`，悬停色要比奇数行和偶数行都更深（深色则更亮），否则偶数行悬停后和奇数行一样 | `#e6e6e8ff` | `#333333ff` |
 | `color.chrome_active` | 深色截图里选中的选项卡和表查看器工具栏按钮，暂定；`tab.active.background` 用同一色。深色 `table.head.background` 为 `#2b2b2bff`，浅色为 `#f6f6f6ff` | `#d5e0eeff` | `#546886ff` |
 | `color.icon_blue` | 工具栏和导航图标，暂定 | `#007affff` | `#5eb0f6ff` |
 | `color.icon_green` | 同上 | `#248a3dff` | `#62c07aff` |
