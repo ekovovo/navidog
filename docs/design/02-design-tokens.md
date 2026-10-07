@@ -179,6 +179,15 @@ Navicat 的 nib 中几乎所有颜色都是 AppKit 语义色。在 718 个 nib �
 | --- | --- | --- | --- |
 | `color.grid_edited` | 暂定，待实测（已修改、未提交的单元格） | `#fff3c4ff` | `#5c4b1aff` |
 | `color.grid_deleted` | 暂定，待实测（待删除的行） | `#ffd9d9ff` | `#5c2424ff` |
+| `color.grid_inserted` | 深色截图里的新增行，暂定 | `#f0ddf6ff` | `#4a2960ff` |
+| `color.grid_line` | 深色截图里的列分割线，暂定；`themes/navicat.json` 的 `table.row.border` 用同一色 | `#c8c8c8ff` | `#3a3a3aff` |
+| `color.chrome_active` | 深色截图里选中的选项卡和表查看器工具栏按钮，暂定；`tab.active.background` 用同一色。深色 `table.head.background` 为 `#2b2b2bff`，浅色为 `#f6f6f6ff` | `#d5e0eeff` | `#546886ff` |
+| `color.icon_blue` | 工具栏和导航图标，暂定 | `#007affff` | `#5eb0f6ff` |
+| `color.icon_green` | 同上 | `#248a3dff` | `#62c07aff` |
+| `color.icon_orange` | 同上 | `#e07a00ff` | `#f0a04bff` |
+| `color.icon_purple` | 同上 | `#8944abff` | `#c792eaff` |
+| `color.icon_yellow` | 同上 | `#c4920aff` | `#e6c15aff` |
+| `color.icon_teal` | 同上 | `#0e8a80ff` | `#4ecdc4ff` |
 | `color.find_highlight` | `findHighlightColor`（即 systemYellow，管理连接窗口等处的搜索高亮，文字固定用黑色） | `#ffcc00ff` | `#ffd60aff` |
 
 SQL 编辑器（DDL 页、DDL 选项卡，以及 M3 的查询编辑器）的底色、文字、当前行、行号分别取 `color.control_bg`、`color.label`、`color.fill_tertiary`、`color.label_tertiary`，写在 `themes/navicat.json` 的 `highlight` 中；语法配色暂用 gpui-component 默认主题的值，待与 Navicat 并排实测后替换。

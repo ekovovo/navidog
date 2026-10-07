@@ -286,8 +286,20 @@ pub struct Palette {
     pub grid_edited: Hsla,
     /// Rows pending deletion in the grid (provisional until measured in Navicat)
     pub grid_deleted: Hsla,
+    /// A newly inserted row (sampled from a Navicat dark screenshot, provisional)
+    pub grid_inserted: Hsla,
+    /// Vertical rules between grid columns (provisional; matches `table.row.border`)
+    pub grid_line: Hsla,
+    /// Selected tab and selected viewer-toolbar button (provisional)
+    pub chrome_active: Hsla,
     /// Search matches (NSColor.findHighlightColor = systemYellow), drawn under black text
     pub find_highlight: Hsla,
+    pub icon_blue: Hsla,
+    pub icon_green: Hsla,
+    pub icon_orange: Hsla,
+    pub icon_purple: Hsla,
+    pub icon_yellow: Hsla,
+    pub icon_teal: Hsla,
 }
 
 fn c(hex: u32) -> Hsla {
@@ -315,7 +327,16 @@ pub fn light_palette() -> Palette {
         success: c(0x34c759ff),
         grid_edited: c(0xfff3c4ff),
         grid_deleted: c(0xffd9d9ff),
+        grid_inserted: c(0xf0ddf6ff),
+        grid_line: c(0xc8c8c8ff),
+        chrome_active: c(0xd5e0eeff),
         find_highlight: c(0xffcc00ff),
+        icon_blue: c(0x007affff),
+        icon_green: c(0x248a3dff),
+        icon_orange: c(0xe07a00ff),
+        icon_purple: c(0x8944abff),
+        icon_yellow: c(0xc4920aff),
+        icon_teal: c(0x0e8a80ff),
     }
 }
 
@@ -340,8 +361,34 @@ pub fn dark_palette() -> Palette {
         success: c(0x30d158ff),
         grid_edited: c(0x5c4b1aff),
         grid_deleted: c(0x5c2424ff),
+        grid_inserted: c(0x4a2960ff),
+        grid_line: c(0x3a3a3aff),
+        chrome_active: c(0x546886ff),
         find_highlight: c(0xffd60aff),
+        icon_blue: c(0x5eb0f6ff),
+        icon_green: c(0x62c07aff),
+        icon_orange: c(0xf0a04bff),
+        icon_purple: c(0xc792eaff),
+        icon_yellow: c(0xe6c15aff),
+        icon_teal: c(0x4ecdc4ff),
     }
+}
+
+/// Tint for a Lucide icon, or `None` when the icon stays the label color.
+/// Provisional, matched against a Navicat dark screenshot.
+pub fn icon_color(icon: &str, cx: &App) -> Option<Hsla> {
+    let p = palette(cx);
+    Some(match icon {
+        "plug" | "table" | "workflow" | "search" | "list-ordered" | "columns-3" | "database" => {
+            p.icon_blue
+        }
+        "square-terminal" | "database-backup" | "arrow-up-down" | "check" => p.icon_green,
+        "funnel" | "square-function" | "file-code" | "key-round" | "rotate-ccw" => p.icon_orange,
+        "eye" | "layers" | "git-commit-horizontal" => p.icon_teal,
+        "user" | "zap" | "folder" | "folder-open" => p.icon_yellow,
+        "shapes" | "calendar-clock" | "chart-pie" => p.icon_purple,
+        _ => return None,
+    })
 }
 
 /// The palette for the current appearance.

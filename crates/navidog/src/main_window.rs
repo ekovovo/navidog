@@ -47,6 +47,8 @@ pub struct MainWindow {
     objects_tab: PanelId,
     /// Editors popped out into their own windows, with the object each shows
     popped: std::collections::HashMap<PanelId, (gpui_kit::AnyWindowHandle, Option<ObjectRef>)>,
+    /// Popped editors closed with their connection. Closing the window must not put them back.
+    closing_popped: std::collections::HashSet<PanelId>,
     /// Objects to open once their connection is open (favorites, recent, URIs, startup screen)
     pending: Vec<ObjectRef>,
     /// What focus mode hid, restored when it ends
@@ -148,6 +150,9 @@ impl MainWindow {
             cx.subscribe_in(&dock, window, |this, _, e: &DockEvent, window, cx| {
                 if matches!(e, DockEvent::LayoutChanged) {
                     this.save_state(window, cx);
+                    // The objects tab is not a separate dock pin. Put it back at the
+                    // front after a drag. Deferred so this does not re-enter the dock update.
+                    cx.defer_in(window, |this, window, cx| this.pin_objects_tab(window, cx));
                 }
             }),
             cx.observe(&Workspace::global(cx), |_, _, cx| cx.notify()),
@@ -159,8 +164,8 @@ impl MainWindow {
             cx.subscribe_in(
                 &Sessions::global(cx),
                 window,
-                |this, _, e: &SessionsEvent, window, cx| {
-                    if let SessionsEvent::Opened(id) = e {
+                |this, _, e: &SessionsEvent, window, cx| match e {
+                    SessionsEvent::Opened(id) => {
                         let (ready, rest) = std::mem::take(&mut this.pending)
                             .into_iter()
                             .partition(|o| &o.scope.connection == id);
@@ -169,6 +174,8 @@ impl MainWindow {
                             this.open_selection(Selection::Object(o), window, cx);
                         }
                     }
+                    SessionsEvent::Closed(id) => this.close_connection_editors(id, window, cx),
+                    SessionsEvent::Failed(_, _) => {}
                 },
             ),
             cx.observe_window_appearance(window, |_, window, cx| {
@@ -196,6 +203,7 @@ impl MainWindow {
             info_restore: None,
             objects_tab,
             popped: Default::default(),
+            closing_popped: Default::default(),
             pending: Vec::new(),
             focus_mode: None,
             _subscriptions: subs,
@@ -239,6 +247,60 @@ impl MainWindow {
             .iter()
             .find(|p| Self::panel_object(p, cx).as_ref() == Some(object))
             .map(|p| p.panel_id(cx))
+    }
+
+    /// Keeps the objects tab at the front of its group. gpui's tab bar scrolls every
+    /// tab together, so this does not freeze it while the strip scrolls.
+    fn pin_objects_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(group) = navidog_ui::tabs::group_of(self.objects_tab, cx) else {
+            return;
+        };
+        let ix = group
+            .read(cx)
+            .panels()
+            .iter()
+            .position(|p| p.panel_id(cx) == self.objects_tab);
+        let Some(ix) = ix else {
+            return;
+        };
+        if ix == 0 {
+            return;
+        }
+        let ctx = group.read(cx).context(cx);
+        let Some(drag) = ctx.drag_panel(ix, cx) else {
+            return;
+        };
+        ctx.drop_panel(drag, Some(0), false, window, cx);
+    }
+
+    /// Closes every editor of `id`, including ones popped into their own window.
+    fn close_connection_editors(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        for group in navidog_ui::tabs::tab_groups(cx) {
+            let victims: Vec<PanelId> = group
+                .read(cx)
+                .panels()
+                .iter()
+                .filter_map(|panel| {
+                    let object = Self::panel_object(panel, cx)?;
+                    (object.scope.connection == id).then(|| panel.panel_id(cx))
+                })
+                .collect();
+            let ctx = group.read(cx).context(cx);
+            for panel in victims {
+                ctx.close(panel, window, cx);
+            }
+        }
+        let popped: Vec<_> = self
+            .popped
+            .iter()
+            .filter(|(_, (_, object))| object.as_ref().is_some_and(|o| o.scope.connection == id))
+            .map(|(panel, (handle, _))| (*panel, *handle))
+            .collect();
+        for (panel, handle) in popped {
+            self.popped.remove(&panel);
+            self.closing_popped.insert(panel);
+            let _ = handle.update(cx, |_, window, _| window.remove_window());
+        }
     }
 
     /// Selects `sel` and, for an object, opens it; when its connection is closed, opens the
@@ -453,7 +515,11 @@ impl MainWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.popped.remove(&view.panel_id(cx));
+        let id = view.panel_id(cx);
+        if self.closing_popped.remove(&id) {
+            return;
+        }
+        self.popped.remove(&id);
         self.dock.update(cx, |a, cx| {
             a.add_panel_view(view, DockPlacement::Center, None, window, cx)
         });
@@ -477,12 +543,16 @@ impl MainWindow {
                     .and_then(|c| registry.get(c))
                     .filter(|info| info.is_enabled(cx))
                     .map(|info| info.action);
-                ToolbarItem::new(*id, lucide(icon), t!(*label).to_string())
-                    .disabled(action.is_none())
-                    .when_some(action, |item, make| {
-                        item.on_click(move |_, window, cx| window.dispatch_action(make(), cx))
-                    })
-                    .into_any_element()
+                let item = ToolbarItem::new(*id, lucide(icon), t!(*label).to_string())
+                    .disabled(action.is_none());
+                let item = match tokens::icon_color(icon, cx) {
+                    Some(color) => item.icon_color(color),
+                    None => item,
+                };
+                item.when_some(action, |item, make| {
+                    item.on_click(move |_, window, cx| window.dispatch_action(make(), cx))
+                })
+                .into_any_element()
             })
             .collect();
         h_flex()

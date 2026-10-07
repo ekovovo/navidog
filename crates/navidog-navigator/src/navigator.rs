@@ -1338,15 +1338,18 @@ impl NavigatorPanel {
         &self,
         node: &Option<Node>,
         entry: &TreeEntry,
+        invert: bool,
         cx: &App,
     ) -> (AnyElement, Option<Hsla>) {
         let p = palette(cx);
         let size = tokens::navigator::ROW_ICON.rems();
         let tinted = |name: &str| {
-            lucide(name)
-                .size(size)
-                .text_color(p.label_secondary)
-                .into_any_element()
+            let color = if invert {
+                p.selection_text
+            } else {
+                tokens::icon_color(name, cx).unwrap_or(p.label_secondary)
+            };
+            lucide(name).size(size).text_color(color).into_any_element()
         };
         match node {
             Some(Node::Group(_)) => (
@@ -1356,7 +1359,11 @@ impl NavigatorPanel {
                     IconName::Folder
                 })
                 .size(size)
-                .text_color(p.label_secondary)
+                .text_color(if invert {
+                    p.selection_text
+                } else {
+                    tokens::icon_color("folder", cx).unwrap_or(p.label_secondary)
+                })
                 .into_any_element(),
                 None,
             ),
@@ -1408,7 +1415,7 @@ impl NavigatorPanel {
         let node = Node::parse(&id);
         let selected = selected || self.marked.contains(&id);
         let focused = self.focus_handle.contains_focused(window, cx);
-        let (icon, color) = self.row_icon(&node, entry, cx);
+        let (icon, color) = self.row_icon(&node, entry, selected && focused, cx);
         let placeholder = matches!(node, Some(Node::Placeholder(_)));
         let chevron = entry.is_folder().then(|| {
             Icon::new(if entry.is_expanded() {

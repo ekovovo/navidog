@@ -5,13 +5,15 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 
-use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::button::{Button, ButtonCustomVariant, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dock::{
     BasePanel, Panel, PanelEvent, PanelId, PanelInfo, PanelState, TabGroup, panel_handle,
     register_panel,
 };
-use gpui_kit::component::input::{Escape, Input, InputEvent, InputState, Textarea, TextareaState};
+use gpui_kit::component::input::{
+    Editor, EditorState, Escape, Input, InputEvent, InputState, Textarea, TextareaState,
+};
 use gpui_kit::component::native_menu::NativeMenu;
 use gpui_kit::component::{
     Disableable as _, Selectable as _, Sizable as _, WindowExt as _, h_flex, v_flex,
@@ -1063,6 +1065,15 @@ impl TableViewer {
         } else {
             format!("{}\n\n{pending}", self.status)
         };
+        let editor = cx.new(|cx| {
+            EditorState::new(window, cx)
+                .language("sql")
+                .line_number(false)
+        });
+        editor.update(cx, |s, cx| {
+            s.set_readonly(true, cx);
+            s.set_value(text, window, cx);
+        });
         window.open_dialog(cx, move |dialog, window, _| {
             dialog
                 .w(tokens::conn_form::WIDTH.to_pixels(window.rem_size()))
@@ -1070,10 +1081,14 @@ impl TableViewer {
                 .child(
                     div()
                         .id("sql-preview")
-                        .max_h(tokens::viewer::CELL_EDITOR_HEIGHT.rems())
-                        .overflow_y_scroll()
-                        .p_2()
-                        .child(text.clone()),
+                        .h(tokens::viewer::CELL_EDITOR_HEIGHT.rems())
+                        .w_full()
+                        .child(
+                            Editor::new(&editor)
+                                .readonly(true)
+                                .bordered(false)
+                                .size_full(),
+                        ),
                 )
         });
     }
@@ -1698,10 +1713,19 @@ impl TableViewer {
         let p = palette(cx);
         let ready = self.session.is_some() && !self.busy;
         let button = |id: &'static str, icon: &'static str, label: String| {
+            let mut glyph = lucide(icon);
+            if let Some(color) = tokens::icon_color(icon, cx) {
+                glyph = glyph.text_color(color);
+            }
             Button::new(id)
-                .ghost()
                 .small()
-                .icon(lucide(icon))
+                .custom(
+                    ButtonCustomVariant::new(cx)
+                        .foreground(p.label)
+                        .hover(p.fill)
+                        .active(p.chrome_active),
+                )
+                .icon(glyph)
                 .label(label)
         };
         h_flex()

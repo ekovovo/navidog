@@ -117,6 +117,19 @@ pub fn group_of(panel: PanelId, cx: &App) -> Option<Entity<TabGroup>> {
     cx.try_global::<Tabs>()?.groups.get(&panel)?.upgrade()
 }
 
+/// Every tab group that currently holds a panel, each group once.
+pub fn tab_groups(cx: &App) -> Vec<Entity<TabGroup>> {
+    let Some(tabs) = cx.try_global::<Tabs>() else {
+        return Vec::new();
+    };
+    let mut seen = HashSet::new();
+    tabs.groups
+        .values()
+        .filter_map(|group| group.upgrade())
+        .filter(|group| seen.insert(group.entity_id()))
+        .collect()
+}
+
 /// Panels to close for `which`, in tab order; the group itself refuses non-closable ones.
 fn targets(ids: &[PanelId], panel: PanelId, which: Close) -> Vec<PanelId> {
     let Some(pos) = ids.iter().position(|p| *p == panel) else {

@@ -58,6 +58,23 @@ fn close_tabs(cx: &mut TestAppContext) {
     }
     assert_eq!(tab_count(cx), 5, "the objects tab plus four editors");
 
+    // Dropping an editor in front of the objects tab puts the objects tab back first
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        let group = tabs::group_of(tabs::active(cx).unwrap(), cx).unwrap();
+        let n = group.read(cx).panels().len();
+        let ctx = group.read(cx).context(cx);
+        let drag = ctx.drag_panel(n - 1, cx).unwrap();
+        ctx.drop_panel(drag, Some(0), false, window, cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    let objects_first = cx.update(|cx| {
+        let group = tabs::group_of(tabs::active(cx).unwrap(), cx).unwrap();
+        !group.read(cx).panels()[0].closable(cx)
+    });
+    assert!(objects_first, "the objects tab stays at the left");
+
     // The close button on a tab: tab 1 is the first editor
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
@@ -120,5 +137,12 @@ fn close_tabs(cx: &mut TestAppContext) {
     dispatch(cx, Box::new(AddToStartup { panel: active }));
     let startup = cx.update(|cx| Settings::global(cx).startup_tabs.clone());
     assert_eq!(startup, [serde_json::to_value(view("x")).unwrap()]);
+
+    // Closing the connection closes its editor tabs and leaves the objects tab
+    cx.update(|cx| {
+        navidog_db::sessions::Sessions::global(cx).update(cx, |s, cx| s.close("c", cx));
+    });
+    cx.run_until_parked();
+    assert_eq!(tab_count(cx), 1);
     let _ = std::fs::remove_dir_all(home);
 }

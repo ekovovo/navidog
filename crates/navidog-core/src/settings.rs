@@ -137,7 +137,7 @@ impl Default for Settings {
             language: Language::System,
             auto_connect_on_startup: true,
             show_schema_objects: true,
-            show_table_children: false,
+            show_table_children: true,
             open_in_new_window: false,
             startup_tabs: Vec::new(),
             limit_records: true,
@@ -203,6 +203,7 @@ mod tests {
         assert_eq!(s.language, Language::System);
         assert!(s.auto_connect_on_startup);
         assert!(s.show_schema_objects);
+        assert!(s.show_table_children);
         assert!(s.sync_record);
         assert!(!s.click_to_edit);
         assert!(s.use_default_grid_font);

@@ -4,7 +4,7 @@
 use gpui_kit::component::{Icon, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, ClickEvent, ElementId, FontWeight, InteractiveElement as _, IntoElement,
+    AnyElement, App, ClickEvent, ElementId, FontWeight, Hsla, InteractiveElement as _, IntoElement,
     ParentElement, RenderOnce, SharedString, StatefulInteractiveElement as _, Styled, Window, div,
 };
 
@@ -65,6 +65,7 @@ pub struct ToolbarItem {
     id: ElementId,
     icon: Icon,
     label: SharedString,
+    icon_color: Option<Hsla>,
     disabled: bool,
     on_click: Option<ClickHandler>,
 }
@@ -75,9 +76,15 @@ impl ToolbarItem {
             id: id.into(),
             icon,
             label: label.into(),
+            icon_color: None,
             disabled: false,
             on_click: None,
         }
+    }
+
+    pub fn icon_color(mut self, color: Hsla) -> Self {
+        self.icon_color = Some(color);
+        self
     }
 
     pub fn disabled(mut self, disabled: bool) -> Self {
@@ -99,6 +106,11 @@ impl RenderOnce for ToolbarItem {
         } else {
             p.label
         };
+        let icon = self.icon.size(tokens::toolbar::ITEM_ICON.rems());
+        let icon = match self.icon_color {
+            Some(color) if !self.disabled => icon.text_color(color),
+            _ => icon,
+        };
         v_flex()
             .id(self.id)
             .items_center()
@@ -108,7 +120,7 @@ impl RenderOnce for ToolbarItem {
             .gap_0p5()
             .rounded_md()
             .text_color(fg)
-            .child(self.icon.size(tokens::toolbar::ITEM_ICON.rems()))
+            .child(icon)
             .child(
                 div()
                     .text_size(tokens::font::SIZE_SMALL.rems())

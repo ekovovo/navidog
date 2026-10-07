@@ -7,7 +7,7 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Escape, Input, InputEvent, InputState};
 use gpui_kit::component::native_menu::NativeMenu;
 use gpui_kit::component::table::{
-    Column, ColumnSort, DataTable, TableDelegate, TableEvent, TableState,
+    Column, ColumnGroup, ColumnSort, DataTable, TableDelegate, TableEvent, TableState,
 };
 use gpui_kit::component::{Sizable as _, Size, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -187,13 +187,59 @@ impl GridDelegate {
     }
 }
 
+fn header_type(col: &GridColumn, show_comment: bool) -> String {
+    let mut label = col.type_name.to_string();
+    if show_comment && let Some(comment) = &col.comment {
+        if label.is_empty() {
+            label = comment.to_string();
+        } else {
+            label = format!("{label}  {comment}");
+        }
+    }
+    label
+}
+
+fn column_menu(col: usize, name: SharedString, show_type: bool, show_comment: bool) -> NativeMenu {
+    NativeMenu::new()
+        .menu(
+            t!("grid.select_column").to_string(),
+            Box::new(SelectColumn { index: col }),
+        )
+        .menu_with_check(
+            t!("grid.show_type").to_string(),
+            show_type,
+            Box::new(ToggleFieldType),
+        )
+        .menu_with_check(
+            t!("grid.show_comment").to_string(),
+            show_comment,
+            Box::new(ToggleFieldComment),
+        )
+        .separator()
+        .menu(
+            t!("grid.hide_column").to_string(),
+            Box::new(HideColumn { name }),
+        )
+        .menu(
+            t!("grid.freeze").to_string(),
+            Box::new(FreezeColumns { count: col + 1 }),
+        )
+        .menu(
+            t!("grid.unfreeze").to_string(),
+            Box::new(FreezeColumns { count: 0 }),
+        )
+}
+
 impl TableDelegate for GridDelegate {
     fn columns_count(&self, _: &App) -> usize {
         self.model.columns.len() + 1
     }
 
     fn rows_count(&self, _: &App) -> usize {
-        self.model.row_count()
+        let n = self.model.row_count();
+        // A blank row under the records. The horizontal scrollbar is an overlay,
+        // so without this the last row sits underneath it.
+        if n == 0 { 0 } else { n + 1 }
     }
 
     fn column(&self, ix: usize, _: &App) -> Column {
@@ -242,34 +288,50 @@ impl TableDelegate for GridDelegate {
         self.sort_changed = true;
     }
 
-    fn render_th(
+    fn group_headers(&self, _: &App) -> Option<Vec<Vec<ColumnGroup>>> {
+        if !self.show_type {
+            return None;
+        }
+        // DataTable uses one row height for the header and the body, so the name
+        // and the type are two header rows. The name is the group row.
+        let mut row = Vec::with_capacity(self.model.columns.len() + 1);
+        row.push(ColumnGroup::new("", 1));
+        for col in &self.model.columns {
+            row.push(ColumnGroup::new(col.name.clone(), 1));
+        }
+        Some(vec![row])
+    }
+
+    fn render_group_th(
         &mut self,
-        ix: usize,
+        label: &SharedString,
+        _col_span: usize,
+        width: Pixels,
         _: &mut Window,
         cx: &mut Context<TableState<Self>>,
     ) -> impl IntoElement {
-        let col = ix.checked_sub(1).and_then(|c| self.model.columns.get(c));
+        let p = palette(cx);
         let (show_type, show_comment) = (self.show_type, self.show_comment);
-        let header = col.map(|c| {
-            let mut label = c.name.to_string();
-            if show_type && !c.type_name.is_empty() {
-                label = format!("{label}  {}", c.type_name);
-            }
-            if show_comment && let Some(comment) = &c.comment {
-                label = format!("{label}  {comment}");
-            }
-            (ix - 1, c.name.clone(), label)
+        let hit = (!label.is_empty()).then(|| {
+            self.model
+                .columns
+                .iter()
+                .position(|c| c.name.as_ref() == label.as_ref())
         });
         div()
-            .size_full()
+            .w(width)
+            .h_full()
+            .flex_shrink_0()
             .px_1()
             .flex()
             .items_center()
             .overflow_hidden()
-            .text_color(palette(cx).label)
-            .when_some(header, |d, (c, name, label)| {
-                d.child(truncated(("grid-th", ix), label))
-                    // A click selects the column; the sort still runs because this does not stop it
+            .border_r_1()
+            .border_color(p.grid_line)
+            .text_color(p.label)
+            .when_some(hit.flatten(), |d, c| {
+                let name = label.clone();
+                d.child(truncated(("grid-group", c), label.clone()))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |t, e: &MouseDownEvent, _, cx| {
@@ -283,35 +345,66 @@ impl TableDelegate for GridDelegate {
                         MouseButton::Right,
                         cx.listener(move |_t, e: &MouseDownEvent, window, cx| {
                             cx.stop_propagation();
-                            let name = name.clone();
-                            NativeMenu::new()
-                                .menu(
-                                    t!("grid.select_column").to_string(),
-                                    Box::new(SelectColumn { index: c }),
-                                )
-                                .menu_with_check(
-                                    t!("grid.show_type").to_string(),
-                                    show_type,
-                                    Box::new(ToggleFieldType),
-                                )
-                                .menu_with_check(
-                                    t!("grid.show_comment").to_string(),
-                                    show_comment,
-                                    Box::new(ToggleFieldComment),
-                                )
-                                .separator()
-                                .menu(
-                                    t!("grid.hide_column").to_string(),
-                                    Box::new(HideColumn { name }),
-                                )
-                                .menu(
-                                    t!("grid.freeze").to_string(),
-                                    Box::new(FreezeColumns { count: c + 1 }),
-                                )
-                                .menu(
-                                    t!("grid.unfreeze").to_string(),
-                                    Box::new(FreezeColumns { count: 0 }),
-                                )
+                            column_menu(c, name.clone(), show_type, show_comment)
+                                .show(e.position, window, cx);
+                        }),
+                    )
+            })
+    }
+
+    fn render_th(
+        &mut self,
+        ix: usize,
+        _: &mut Window,
+        cx: &mut Context<TableState<Self>>,
+    ) -> impl IntoElement {
+        let col_ix = ix.checked_sub(1);
+        let col = col_ix.and_then(|c| self.model.columns.get(c));
+        let (show_type, show_comment) = (self.show_type, self.show_comment);
+        let header = col.zip(col_ix).map(|(c, ix)| {
+            let text = if show_type {
+                header_type(c, show_comment)
+            } else {
+                let mut label = c.name.to_string();
+                if show_comment && let Some(comment) = &c.comment {
+                    label = format!("{label}  {comment}");
+                }
+                label
+            };
+            (ix, c.name.clone(), text)
+        });
+        let p = palette(cx);
+        div()
+            .size_full()
+            .px_1()
+            .flex()
+            .items_center()
+            .overflow_hidden()
+            .border_r_1()
+            .border_color(p.grid_line)
+            .text_color(if show_type {
+                p.label_secondary
+            } else {
+                p.label
+            })
+            .when(show_type, |d| d.text_size(tokens::font::SIZE_SMALL.rems()))
+            .when_some(header, |d, (c, name, label)| {
+                d.child(truncated(("grid-th", ix), label))
+                    // A click selects the column; the sort icon still runs on its own hit target
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |t, e: &MouseDownEvent, _, cx| {
+                            let shift = e.modifiers.shift;
+                            t.delegate_mut().model.select_column(c, shift);
+                            t.delegate_mut().finish_navigation(shift);
+                            cx.notify();
+                        }),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |_t, e: &MouseDownEvent, window, cx| {
+                            cx.stop_propagation();
+                            column_menu(c, name.clone(), show_type, show_comment)
                                 .show(e.position, window, cx);
                         }),
                     )
@@ -326,6 +419,16 @@ impl TableDelegate for GridDelegate {
         cx: &mut Context<TableState<Self>>,
     ) -> impl IntoElement {
         let p = palette(cx);
+        // The trailing blank row only reserves space under the horizontal scrollbar.
+        if r >= self.model.row_count() {
+            return div()
+                .size_full()
+                .border_r_1()
+                .border_color(p.grid_line)
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_mouse_up(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .into_any_element();
+        }
         let state = self.model.row_state(r);
         // Every third row is painted on the cells. Alternate uses DataTable's stripe;
         // the empty filler rows below the data stay plain. ponytail: filler rows are not tinted.
@@ -345,8 +448,12 @@ impl TableDelegate for GridDelegate {
                 .flex()
                 .items_center()
                 .justify_center()
+                .border_r_1()
+                .border_color(p.grid_line)
                 .text_color(p.label_secondary)
                 .when(tint, |d| d.bg(p.row_alt))
+                .when(state == RowState::Inserted, |d| d.bg(p.grid_inserted))
+                .when(state == RowState::Deleted, |d| d.bg(p.grid_deleted))
                 .child(mark)
                 .into_any_element();
         };
@@ -357,6 +464,8 @@ impl TableDelegate for GridDelegate {
             // only moves the caret stays inside the editor.
             return div()
                 .size_full()
+                .border_r_1()
+                .border_color(p.grid_line)
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_mouse_up(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .child(Input::new(input).xsmall().appearance(false).size_full())
@@ -368,14 +477,16 @@ impl TableDelegate for GridDelegate {
             .as_ref()
             .is_some_and(|(query, case)| self.model.cell_matches(r, c, query, *case));
         let shown = self.model.raw_text(r, c, self.raw, self.dialect);
-        let (text, muted): (SharedString, bool) = match self.model.value(r, c) {
+        // Unfilled cells of a new row show Navicat's literal "(Default)" and are not written.
+        let (text, tone): (SharedString, Option<gpui_kit::Hsla>) = match self.model.value(r, c) {
             // A cell shows one line, like Navicat; the cell editor shows the full value
             Some(Some(_)) if shown.contains('\n') => {
-                (shown.replace(['\r', '\n'], " ").into(), false)
+                (shown.replace(['\r', '\n'], " ").into(), None)
             }
-            Some(Some(_)) => (shown.into(), false),
-            Some(None) => ("(NULL)".into(), true),
-            None => ("".into(), true),
+            Some(Some(_)) => (shown.into(), None),
+            Some(None) => ("(NULL)".into(), Some(p.label_tertiary)),
+            None if state == RowState::Inserted => ("(Default)".into(), Some(p.label_secondary)),
+            None => ("".into(), None),
         };
         div()
             .size_full()
@@ -383,11 +494,17 @@ impl TableDelegate for GridDelegate {
             .flex()
             .items_center()
             .overflow_hidden()
+            .border_r_1()
+            .border_color(p.grid_line)
             .when(tint, |d| d.bg(p.row_alt))
+            .when(state == RowState::Inserted, |d| d.bg(p.grid_inserted))
             .when(state == RowState::Deleted, |d| d.bg(p.grid_deleted))
-            .when(self.model.is_edited(r, c), |d| d.bg(p.grid_edited))
+            .when(
+                state != RowState::Inserted && self.model.is_edited(r, c),
+                |d| d.bg(p.grid_edited),
+            )
             .when(hit && !selected, |d| d.bg(p.selection_inactive))
-            .when(muted, |d| d.text_color(p.label_tertiary))
+            .when_some(tone.filter(|_| !selected), |d, color| d.text_color(color))
             .when(selected, |d| d.bg(p.selection).text_color(p.selection_text))
             .on_mouse_down(
                 MouseButton::Left,
@@ -467,7 +584,7 @@ impl ResultGrid {
             sort: None,
             sort_changed: false,
             rem: window.rem_size(),
-            show_type: false,
+            show_type: true,
             show_comment: false,
             raw: false,
             dialect: Dialect::Sqlite,
@@ -656,6 +773,14 @@ impl ResultGrid {
         }
         match *e {
             TableEvent::SelectCell(r, ix) => {
+                let real = self.model(cx).row_count();
+                if r >= real {
+                    if real > 0 {
+                        self.table
+                            .update(cx, |t, cx| t.set_selected_cell(real - 1, ix, cx));
+                    }
+                    return;
+                }
                 let editing_here = ix > 0
                     && self
                         .table
@@ -693,10 +818,10 @@ impl ResultGrid {
                     self.start_edit((r, ix - 1), window, cx);
                 }
             }
-            TableEvent::DoubleClickedCell(r, ix) if ix > 0 => {
+            TableEvent::DoubleClickedCell(r, ix) if ix > 0 && r < self.model(cx).row_count() => {
                 self.start_edit((r, ix - 1), window, cx)
             }
-            TableEvent::RightClickedCell(r, ix) => {
+            TableEvent::RightClickedCell(r, ix) if r < self.model(cx).row_count() => {
                 if !self.model(cx).is_selected(r, ix.saturating_sub(1)) {
                     self.table.update(cx, |t, _| match ix.checked_sub(1) {
                         None => t.delegate_mut().model.select_rows(r, false),
@@ -1055,7 +1180,7 @@ impl Render for ResultGrid {
             .on_action(cx.listener(|this, _: &ToggleFieldType, _, cx| {
                 this.table.update(cx, |t, cx| {
                     t.delegate_mut().show_type = !t.delegate().show_type;
-                    cx.notify();
+                    t.refresh(cx);
                 });
             }))
             .on_action(cx.listener(|this, _: &ToggleFieldComment, _, cx| {

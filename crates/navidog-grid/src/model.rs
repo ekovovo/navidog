@@ -179,7 +179,11 @@ impl GridModel {
     }
 
     pub fn row_state(&self, r: usize) -> RowState {
-        if r >= self.rows.len() {
+        // Past the last row is not an insert. An empty grid used to report row 0 as
+        // Inserted, so "add row" tried to commit nothing and did not insert.
+        if r >= self.row_count() {
+            RowState::Clean
+        } else if r >= self.rows.len() {
             RowState::Inserted
         } else if self.deleted.contains(&r) {
             RowState::Deleted
@@ -676,6 +680,24 @@ mod tests {
         m.set_value(1, 0, Some("3".into()));
         let key = &m.change_set().updates[0].key;
         assert_eq!(key, &RowKey(vec![v("id", Some("2")), v("name", None)]));
+    }
+
+    #[test]
+    fn past_the_last_row_is_not_an_insert() {
+        let m = model(true);
+        assert_eq!(m.row_count(), 2);
+        assert_eq!(m.row_state(2), RowState::Clean);
+        assert!(!m.row_dirty(2));
+
+        let mut empty = GridModel {
+            columns: m.columns.clone(),
+            ..GridModel::default()
+        };
+        assert_eq!(empty.row_count(), 0);
+        assert!(!empty.row_dirty(0));
+        empty.insert_row();
+        assert!(empty.row_dirty(0));
+        assert!(!empty.row_dirty(1));
     }
 
     #[test]
