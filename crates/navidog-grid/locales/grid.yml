@@ -33,6 +33,27 @@ grid:
   delete_rows:
     en: Delete Record
     zh-CN: 删除记录
+  select_column:
+    en: Select Column
+    zh-CN: 选择列
+  show_type:
+    en: Show Field Type
+    zh-CN: 显示字段类型
+  show_comment:
+    en: Show Comment
+    zh-CN: 显示注释
+  hide_column:
+    en: Hide Column
+    zh-CN: 隐藏列
+  row_height:
+    en: Set Row Height
+    zh-CN: 设置行高
+  ok:
+    en: OK
+    zh-CN: 确定
+  cancel:
+    en: Cancel
+    zh-CN: 取消
 viewer:
   begin:
     en: Begin Transaction
@@ -61,6 +82,21 @@ viewer:
   focus_mode:
     en: Focus Mode
     zh-CN: 专注模式
+  form:
+    en: Form View
+    zh-CN: 表单视图
+  columns:
+    en: Columns
+    zh-CN: 列
+  show_sql:
+    en: SQL Preview
+    zh-CN: SQL 预览
+  prev_record:
+    en: Previous Record
+    zh-CN: 上一条记录
+  next_record:
+    en: Next Record
+    zh-CN: 下一条记录
   apply:
     en: Apply
     zh-CN: 应用

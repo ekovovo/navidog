@@ -1,10 +1,13 @@
 //! Headless UI tests for the result grid: click to select, ⇧ + arrow keys to extend the selection,
-//! ⌘C to copy, Return to edit in place.
+//! ⌘C to copy, Return to edit in place, and committing when the current row changes.
+
+use std::cell::Cell;
+use std::rc::Rc;
 
 use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{AppContext as _, Entity, TestAppContext, WindowBounds, WindowOptions, size};
-use navidog_grid::ResultGrid;
 use navidog_grid::model::GridColumn;
+use navidog_grid::{GridEvent, ResultGrid};
 use navidog_ui::tokens;
 
 fn col(name: &str, pk: bool) -> GridColumn {
@@ -12,6 +15,7 @@ fn col(name: &str, pk: bool) -> GridColumn {
         name: name.to_string().into(),
         type_name: "".into(),
         primary_key: pk,
+        comment: None,
     }
 }
 
@@ -160,4 +164,64 @@ fn wide_tables_scroll_horizontally(cx: &mut TestAppContext) {
         );
     })
     .unwrap();
+}
+
+#[gpui_kit::test]
+fn leaving_a_modified_row_requests_a_commit(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        navidog_ui::theme::init(cx);
+        navidog_grid::init(cx);
+    });
+    let (handle, grid): (_, Entity<ResultGrid>) = cx.update(|cx| {
+        // raw-px: test window size
+        let test_size = size(gpui_kit::px(800.), gpui_kit::px(400.));
+        let bounds = gpui_kit::Bounds {
+            origin: Default::default(),
+            size: test_size,
+        };
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
+            ..Default::default()
+        };
+        gpui_kit::open_window(options, cx, |window, cx| {
+            cx.new(|cx| ResultGrid::new(window, cx))
+        })
+        .unwrap()
+    });
+    cx.update(|cx| {
+        grid.update(cx, |g, cx| {
+            let cell = |s: &str| Some(s.to_string().into());
+            g.set_data(
+                vec![col("id", true), col("name", false)],
+                vec![vec![cell("1"), cell("a")], vec![cell("2"), cell("b")]],
+                cx,
+            );
+            g.update_model(cx, |m| m.set_value(0, 1, Some("z".into())));
+        })
+    });
+    let commits = Rc::new(Cell::new(0));
+    let seen = commits.clone();
+    let _sub = cx.update(|cx| {
+        cx.subscribe(&grid, move |_, event: &GridEvent, _| {
+            if matches!(event, GridEvent::CommitRequested) {
+                seen.set(seen.get() + 1);
+            }
+        })
+    });
+    cx.run_until_parked();
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        let rem = window.rem_size();
+        let x = tokens::grid::ROW_NUMBER_WIDTH.to_pixels(rem)
+            + tokens::grid::COLUMN_WIDTH.to_pixels(rem) / 2.;
+        window.click_at(
+            gpui_kit::ElementId::NamedInteger("row".into(), 1),
+            gpui_kit::point(x, rem / 2.),
+            cx,
+        );
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert_eq!(commits.get(), 1);
 }

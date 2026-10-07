@@ -1,5 +1,5 @@
-//! 网格的数据模型：当前页数据、修改覆盖层、新增与待删除行、矩形选区（21-table-viewer.md 第 2 节）。
-//! 不依赖界面，单元测试覆盖修改集合与复制粘贴。
+//! Grid data model: the current page, the edit overlay, inserted and pending-delete rows, and the
+//! rectangular selection (21-table-viewer.md §2). No UI here; unit tests cover the change set and copy/paste.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::RangeInclusive;
@@ -7,7 +7,7 @@ use std::ops::RangeInclusive;
 use gpui_kit::SharedString;
 use navidog_db::dialect::{ChangeSet, RowKey, RowUpdate, Values};
 
-/// 单元格的值，`None` 为 NULL。
+/// A cell value; `None` inside the `Option` is NULL, and a missing cell is an unfilled new row.
 pub type Cell = Option<SharedString>;
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -15,6 +15,7 @@ pub struct GridColumn {
     pub name: SharedString,
     pub type_name: SharedString,
     pub primary_key: bool,
+    pub comment: Option<SharedString>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -25,16 +26,16 @@ pub enum RowState {
     Deleted,
 }
 
-/// 行列坐标都是数据坐标（不含左侧标记列）。
+/// Row and column coordinates are data coordinates (they exclude the marker column on the left).
 pub type Pos = (usize, usize);
 
 #[derive(Default)]
 pub struct GridModel {
     pub columns: Vec<GridColumn>,
     rows: Vec<Vec<Cell>>,
-    /// 已有行的修改：(行, 列) → 新值
+    /// Edits of existing rows: (row, column) to the new value
     edits: BTreeMap<Pos, Cell>,
-    /// 新增行；`None` 表示该列未填写，插入时使用默认值
+    /// Inserted rows; `None` means that column was left empty and the insert uses the default
     new_rows: Vec<Vec<Option<Cell>>>,
     deleted: BTreeSet<usize>,
     anchor: Pos,
@@ -93,11 +94,16 @@ impl GridModel {
         }
     }
 
+    /// The row has edits, is a new row, or is pending deletion, so leaving it commits (F-DATA-003).
+    pub fn row_dirty(&self, r: usize) -> bool {
+        !matches!(self.row_state(r), RowState::Clean)
+    }
+
     pub fn is_edited(&self, r: usize, c: usize) -> bool {
         self.edits.contains_key(&(r, c)) || (r >= self.rows.len() && self.value(r, c).is_some())
     }
 
-    /// 追加一个空行并选中它，返回行号。
+    /// Appends an empty row, selects it and returns its row number.
     pub fn insert_row(&mut self) -> usize {
         self.new_rows.push(vec![None; self.columns.len()]);
         let r = self.row_count() - 1;
@@ -105,7 +111,7 @@ impl GridModel {
         r
     }
 
-    /// 删除选区覆盖的行：新增行直接移除，已有行标记为待删除。
+    /// Deletes the rows the selection covers: inserted rows go away, existing rows are marked pending.
     pub fn delete_selected_rows(&mut self) {
         let rows = self.selection().0;
         for r in rows.clone().rev() {
@@ -168,7 +174,7 @@ impl GridModel {
                     values,
                 })
                 .collect(),
-            // 一列都没填的新增行不插入
+            // An inserted row with nothing typed is not inserted
             inserts: self
                 .new_rows
                 .iter()
@@ -186,13 +192,13 @@ impl GridModel {
         }
     }
 
-    // 选区
+    // Selection
 
     pub fn head(&self) -> Pos {
         self.head
     }
 
-    /// 选区覆盖的行与列（闭区间）。
+    /// Rows and columns the selection covers (inclusive).
     pub fn selection(&self) -> (RangeInclusive<usize>, RangeInclusive<usize>) {
         let (a, h) = (self.anchor, self.head);
         (a.0.min(h.0)..=a.0.max(h.0), a.1.min(h.1)..=a.1.max(h.1))
@@ -203,7 +209,7 @@ impl GridModel {
         rows.contains(&r) && cols.contains(&c)
     }
 
-    /// 选中一格；`extend` 时保留锚点，选区扩展到该格。
+    /// Selects one cell; with `extend`, the anchor stays and the selection grows to that cell.
     pub fn select(&mut self, pos: Pos, extend: bool) {
         self.head = pos;
         if !extend {
@@ -211,7 +217,7 @@ impl GridModel {
         }
     }
 
-    /// 选中整行（点击左侧标记列）。
+    /// Selects the whole row (a click on the marker column).
     pub fn select_rows(&mut self, r: usize, extend: bool) {
         let last = self.columns.len().saturating_sub(1);
         if !extend {
@@ -222,6 +228,17 @@ impl GridModel {
         self.head = (r, last);
     }
 
+    /// Selects every cell of one column. With `extend`, columns from the anchor to this one.
+    pub fn select_column(&mut self, c: usize, extend: bool) {
+        let last = self.row_count().saturating_sub(1);
+        if !extend {
+            self.anchor = (0, c);
+        } else {
+            self.anchor.0 = 0;
+        }
+        self.head = (last, c);
+    }
+
     pub fn select_all(&mut self) {
         self.anchor = (0, 0);
         self.head = (
@@ -230,7 +247,7 @@ impl GridModel {
         );
     }
 
-    /// 选区内的行，每行只含选中的列。
+    /// The selected rows, each holding only its selected columns.
     pub fn selected_values(&self) -> Vec<Vec<Option<String>>> {
         let (rows, cols) = self.selection();
         rows.filter(|&r| r < self.row_count())
@@ -250,8 +267,9 @@ impl GridModel {
             .collect()
     }
 
-    /// 选区的制表符分隔文本；NULL 复制为空串。`header` 时首行为字段名。
-    // ponytail: 值内的制表符和换行不转义，粘贴回网格时会错位；需要时改为带引号的 TSV
+    /// The selection as tab-separated text; NULL is copied as an empty string. `header` adds a name row.
+    // ponytail: tabs and newlines inside a value are not escaped, so pasting back mis-aligns; quote the
+    // TSV if a round trip is needed
     pub fn selected_tsv(&self, header: bool, data: bool) -> String {
         let mut lines = Vec::new();
         if header {
@@ -270,7 +288,28 @@ impl GridModel {
         lines.join("\n")
     }
 
-    /// 把制表符分隔的文本从选区左上角开始写入，超出已有行数时追加新行。
+    /// Columns and cell values with `hidden` names removed. Hiding every column keeps them all,
+    /// since the grid could not show anything to unhide.
+    pub fn project(
+        columns: &[GridColumn],
+        rows: &[Vec<Cell>],
+        hidden: &std::collections::HashSet<String>,
+    ) -> (Vec<GridColumn>, Vec<Vec<Cell>>) {
+        let keep: Vec<usize> = columns
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| hidden.len() >= columns.len() || !hidden.contains(c.name.as_ref()))
+            .map(|(i, _)| i)
+            .collect();
+        let columns = keep.iter().map(|i| columns[*i].clone()).collect();
+        let rows = rows
+            .iter()
+            .map(|r| keep.iter().map(|i| r.get(*i).cloned().flatten()).collect())
+            .collect();
+        (columns, rows)
+    }
+
+    /// Writes tab-separated text starting at the selection's top left, appending rows past the end.
     pub fn paste(&mut self, text: &str) {
         let (rows, cols) = self.selection();
         let (r0, c0) = (*rows.start(), *cols.start());
@@ -298,6 +337,7 @@ mod tests {
             name: n.to_string().into(),
             type_name: "".into(),
             primary_key: pk,
+            comment: None,
         };
         let mut m = GridModel::default();
         let cell = |s: &str| Some(SharedString::from(s.to_string()));
@@ -312,12 +352,12 @@ mod tests {
     fn change_set_uses_primary_key_or_whole_row() {
         let mut m = model(true);
         m.set_value(1, 1, Some("b".into()));
-        m.set_value(0, 1, Some("a".into())); // 改回原值不算修改
+        m.set_value(0, 1, Some("a".into())); // setting the original value is not a change
         m.select((0, 0), false);
         m.delete_selected_rows();
         let r = m.insert_row();
         m.set_value(r, 1, Some("c".into()));
-        m.insert_row(); // 空的新增行不插入
+        m.insert_row(); // an empty inserted row is not inserted
         assert_eq!(m.row_state(0), RowState::Deleted);
         assert_eq!(m.row_state(1), RowState::Edited);
         let cs = m.change_set();
@@ -348,12 +388,38 @@ mod tests {
         m.select_rows(1, false);
         assert_eq!(m.selected_values(), [vec![Some("2".into()), None]]);
 
-        // 从 (1, 1) 粘贴两行：第二行超出已有行数，追加为新增行
+        // Pasting two rows at (1, 1): the second is past the end, so it is appended
         m.select((1, 1), false);
         m.paste("x\ny\n");
         assert_eq!(m.value(1, 1), Some(&Some("x".into())));
         assert_eq!(m.row_count(), 3);
         assert_eq!(m.value(2, 1), Some(&Some("y".into())));
         assert_eq!(m.value(2, 0), None);
+    }
+
+    #[test]
+    fn leaving_a_dirty_row_is_detectable_and_a_column_selects() {
+        let mut m = model(true);
+        assert!(!m.row_dirty(0));
+        m.set_value(0, 1, Some("z".into()));
+        assert!(m.row_dirty(0));
+        assert!(!m.row_dirty(1));
+        m.select_column(1, false);
+        assert_eq!(m.selection(), (0..=1, 1..=1));
+        m.select_column(0, true);
+        assert_eq!(m.selection(), (0..=1, 0..=1));
+    }
+
+    #[test]
+    fn projection_drops_hidden_columns() {
+        let m = model(true);
+        let rows = vec![vec![Some("1".into()), Some("a".into())]];
+        let (columns, rows) = GridModel::project(&m.columns, &rows, &["id".into()].into());
+        assert_eq!(columns[0].name.as_ref(), "name");
+        assert_eq!(rows, [vec![Some("a".into())]]);
+        // Hiding every column keeps them: the grid would have nothing left to unhide
+        let (columns, _) =
+            GridModel::project(&m.columns, &[], &["id".into(), "name".into()].into());
+        assert_eq!(columns.len(), 2);
     }
 }

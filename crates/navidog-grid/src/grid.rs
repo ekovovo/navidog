@@ -1,18 +1,19 @@
 //! Result grid: wraps `DataTable` with rectangular selection, in-place editing, change markers, and
 //! copy/paste (21-table-viewer.md §1, §7).
 
+use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Escape, Input, InputEvent, InputState};
 use gpui_kit::component::native_menu::NativeMenu;
 use gpui_kit::component::table::{
     Column, ColumnSort, DataTable, TableDelegate, TableEvent, TableState,
 };
-use gpui_kit::component::{Sizable as _, Size};
+use gpui_kit::component::{Sizable as _, Size, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, AppContext as _, ClipboardItem, Context, Entity, EventEmitter, FocusHandle, Focusable,
     InteractiveElement as _, IntoElement, KeyBinding, MouseButton, MouseDownEvent, MouseMoveEvent,
-    ParentElement as _, Pixels, Render, SharedString, Styled as _, Subscription, Window, actions,
-    div,
+    MouseUpEvent, ParentElement as _, Pixels, Render, SharedString, Styled as _, Subscription,
+    WeakEntity, Window, actions, div,
 };
 use navidog_core::object::Scope;
 use navidog_db::dialect::Dialect;
@@ -35,9 +36,26 @@ actions!(
         ExtendUp,
         ExtendDown,
         ExtendLeft,
-        ExtendRight
+        ExtendRight,
+        ToggleFieldType,
+        ToggleFieldComment,
+        SetRowHeight
     ]
 );
+
+/// Select every cell of one column (F-DATA-005). `index` is a data column.
+#[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+#[action(namespace = grid, no_json)]
+pub struct SelectColumn {
+    pub index: usize,
+}
+
+/// Hide or show one column by name (F-DATA-009). The viewer owns the hidden set.
+#[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+#[action(namespace = grid, no_json)]
+pub struct HideColumn {
+    pub name: SharedString,
+}
 
 /// The "Copy As" submenu.
 #[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
@@ -75,6 +93,8 @@ pub enum GridEvent {
     SortChanged(Option<(SharedString, bool)>),
     /// The change set changed (edit, insert, delete, paste)
     Changed,
+    /// The current row changed and the row we left has uncommitted changes
+    CommitRequested,
 }
 
 pub struct GridDelegate {
@@ -83,6 +103,29 @@ pub struct GridDelegate {
     sort: Option<(usize, bool)>,
     sort_changed: bool,
     rem: Pixels,
+    /// Show the field type or comment in the column header (F-DATA-013)
+    show_type: bool,
+    show_comment: bool,
+    /// The row a plain click or key move settled on. Leaving it while it is dirty commits.
+    settled: Option<usize>,
+    /// The pointer dragged the selection, so the mouse-up (not SelectCell) settles the row.
+    dragged: bool,
+    commit_requested: bool,
+}
+
+impl GridDelegate {
+    /// A plain navigation to another row commits when the row we left is dirty (F-DATA-003).
+    /// Shift-extend keeps the settled row, so a range selection does not commit halfway.
+    fn finish_navigation(&mut self, shift: bool) {
+        if shift {
+            return;
+        }
+        let row = self.model.head().0;
+        let prev = self.settled.replace(row);
+        if prev.is_some_and(|p| p != row && self.model.row_dirty(p)) {
+            self.commit_requested = true;
+        }
+    }
 }
 
 impl GridDelegate {
@@ -143,10 +186,18 @@ impl TableDelegate for GridDelegate {
         _: &mut Window,
         cx: &mut Context<TableState<Self>>,
     ) -> impl IntoElement {
-        let name = ix
-            .checked_sub(1)
-            .and_then(|c| self.model.columns.get(c))
-            .map(|c| truncated(("grid-th", ix), c.name.clone()));
+        let col = ix.checked_sub(1).and_then(|c| self.model.columns.get(c));
+        let (show_type, show_comment) = (self.show_type, self.show_comment);
+        let header = col.map(|c| {
+            let mut label = c.name.to_string();
+            if show_type && !c.type_name.is_empty() {
+                label = format!("{label}  {}", c.type_name);
+            }
+            if show_comment && let Some(comment) = &c.comment {
+                label = format!("{label}  {comment}");
+            }
+            (ix - 1, c.name.clone(), label)
+        });
         div()
             .size_full()
             .px_1()
@@ -154,7 +205,47 @@ impl TableDelegate for GridDelegate {
             .items_center()
             .overflow_hidden()
             .text_color(palette(cx).label)
-            .children(name)
+            .when_some(header, |d, (c, name, label)| {
+                d.child(truncated(("grid-th", ix), label))
+                    // A click selects the column; the sort still runs because this does not stop it
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |t, e: &MouseDownEvent, _, cx| {
+                            let shift = e.modifiers.shift;
+                            t.delegate_mut().model.select_column(c, shift);
+                            t.delegate_mut().finish_navigation(shift);
+                            cx.notify();
+                        }),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |_t, e: &MouseDownEvent, window, cx| {
+                            cx.stop_propagation();
+                            let name = name.clone();
+                            NativeMenu::new()
+                                .menu(
+                                    t!("grid.select_column").to_string(),
+                                    Box::new(SelectColumn { index: c }),
+                                )
+                                .menu_with_check(
+                                    t!("grid.show_type").to_string(),
+                                    show_type,
+                                    Box::new(ToggleFieldType),
+                                )
+                                .menu_with_check(
+                                    t!("grid.show_comment").to_string(),
+                                    show_comment,
+                                    Box::new(ToggleFieldComment),
+                                )
+                                .separator()
+                                .menu(
+                                    t!("grid.hide_column").to_string(),
+                                    Box::new(HideColumn { name }),
+                                )
+                                .show(e.position, window, cx);
+                        }),
+                    )
+            })
     }
 
     fn render_td(
@@ -221,10 +312,23 @@ impl TableDelegate for GridDelegate {
             // land on the same cell
             .on_mouse_move(cx.listener(move |t, e: &MouseMoveEvent, _, cx| {
                 if e.dragging() && t.delegate().model.head() != (r, c) {
+                    t.delegate_mut().dragged = true;
                     t.delegate_mut().model.select((r, c), true);
                     cx.notify();
                 }
             }))
+            // A drag ends here: SelectCell only fires when the press and the release are one cell
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(move |t, _: &MouseUpEvent, _, cx| {
+                    let d = t.delegate_mut();
+                    if !std::mem::take(&mut d.dragged) {
+                        return;
+                    }
+                    d.finish_navigation(false);
+                    cx.notify();
+                }),
+            )
             // No hover tooltip per cell: a hitbox per visible cell costs scrolling time
             .child(div().min_w_0().truncate().child(text))
             .into_any_element()
@@ -242,6 +346,7 @@ pub struct ResultGrid {
     table: Entity<TableState<GridDelegate>>,
     target: Option<GridTarget>,
     edit_sub: Option<Subscription>,
+    row_height: tokens::Pt,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -261,6 +366,11 @@ impl ResultGrid {
             sort: None,
             sort_changed: false,
             rem: window.rem_size(),
+            show_type: false,
+            show_comment: false,
+            settled: None,
+            dragged: false,
+            commit_requested: false,
         };
         let table = cx.new(|cx| {
             TableState::new(delegate, window, cx)
@@ -274,15 +384,20 @@ impl ResultGrid {
         let subs = vec![
             cx.subscribe_in(&table, window, Self::on_table_event),
             cx.observe(&table, |_, table, cx| {
-                let sort = table.update(cx, |t, _| {
+                let (sort, commit) = table.update(cx, |t, _| {
                     let d = t.delegate_mut();
-                    std::mem::take(&mut d.sort_changed).then(|| {
-                        d.sort
-                            .map(|(c, asc)| (d.model.columns[c].name.clone(), asc))
-                    })
+                    let sort = std::mem::take(&mut d.sort_changed).then(|| {
+                        d.sort.and_then(|(c, asc)| {
+                            d.model.columns.get(c).map(|col| (col.name.clone(), asc))
+                        })
+                    });
+                    (sort, std::mem::take(&mut d.commit_requested))
                 });
                 if let Some(sort) = sort {
                     cx.emit(GridEvent::SortChanged(sort));
+                }
+                if commit {
+                    cx.emit(GridEvent::CommitRequested);
                 }
             }),
         ];
@@ -290,6 +405,7 @@ impl ResultGrid {
             table,
             target: None,
             edit_sub: None,
+            row_height: tokens::grid::ROW_HEIGHT,
             _subscriptions: subs,
         }
     }
@@ -310,6 +426,9 @@ impl ResultGrid {
             let d = t.delegate_mut();
             d.editing = None;
             d.model.set_data(columns, rows);
+            d.settled = Some(d.model.head().0);
+            d.dragged = false;
+            d.commit_requested = false;
             t.refresh(cx);
             cx.notify();
         });
@@ -358,6 +477,7 @@ impl ResultGrid {
                         Some(c) if m.head() == (r, c) => {}
                         Some(c) => m.select((r, c), shift),
                     }
+                    t.delegate_mut().finish_navigation(shift);
                     cx.notify();
                 });
             }
@@ -404,6 +524,43 @@ impl ResultGrid {
             .menu(t!("grid.paste").to_string(), Box::new(Paste))
             .separator()
             .menu(t!("grid.delete_rows").to_string(), Box::new(DeleteRows))
+            .separator()
+            .menu(t!("grid.row_height").to_string(), Box::new(SetRowHeight))
+    }
+
+    /// Marks the current row as settled without committing, so a just-inserted row is the one
+    /// that commits when the user leaves it.
+    pub fn settle(&mut self, cx: &mut Context<Self>) {
+        self.table.update(cx, |t, _| {
+            t.delegate_mut().settled = Some(t.delegate().model.head().0);
+            t.delegate_mut().commit_requested = false;
+        });
+    }
+
+    /// Moves the current row. Leaving a dirty row asks the viewer to commit.
+    pub fn move_to_row(&mut self, row: usize, cx: &mut Context<Self>) {
+        self.table.update(cx, |t, cx| {
+            let c = t.delegate().model.head().1;
+            t.delegate_mut().model.select((row, c), false);
+            t.delegate_mut().finish_navigation(false);
+            cx.notify();
+        });
+    }
+
+    fn set_row_height(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let current = self.row_height.0.to_string();
+        let grid = cx.entity().downgrade();
+        let view = cx.new(|cx| {
+            let input = cx.new(|cx| InputState::new(window, cx).default_value(current));
+            input.update(cx, |s, cx| s.focus(window, cx));
+            RowHeight { input, grid }
+        });
+        window.open_dialog(cx, move |dialog, window, _| {
+            dialog
+                .w(tokens::dialog::SMALL_WIDTH.to_pixels(window.rem_size()))
+                .close_button(false)
+                .child(view.clone())
+        });
     }
 
     pub fn start_edit(&mut self, pos: Pos, window: &mut Window, cx: &mut Context<Self>) {
@@ -537,7 +694,9 @@ impl ResultGrid {
 
 impl Render for ResultGrid {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let row = tokens::grid::ROW_HEIGHT.to_pixels(self.table.read(cx).delegate().rem);
+        let row = self
+            .row_height
+            .to_pixels(self.table.read(cx).delegate().rem);
         div()
             .key_context(CONTEXT)
             .size_full()
@@ -568,6 +727,24 @@ impl Render for ResultGrid {
                     this.start_edit(head, window, cx);
                 }
             }))
+            .on_action(
+                cx.listener(|this, _: &SetRowHeight, window, cx| this.set_row_height(window, cx)),
+            )
+            .on_action(cx.listener(|this, _: &ToggleFieldType, _, cx| {
+                this.table.update(cx, |t, cx| {
+                    t.delegate_mut().show_type = !t.delegate().show_type;
+                    cx.notify();
+                });
+            }))
+            .on_action(cx.listener(|this, _: &ToggleFieldComment, _, cx| {
+                this.table.update(cx, |t, cx| {
+                    t.delegate_mut().show_comment = !t.delegate().show_comment;
+                    cx.notify();
+                });
+            }))
+            .on_action(cx.listener(|this, a: &SelectColumn, _, cx| {
+                this.update_model(cx, |m| m.select_column(a.index, false));
+            }))
             .on_action(cx.listener(|this, _: &Escape, window, cx| this.cancel_edit(window, cx)))
             .on_action(cx.listener(|this, _: &ExtendUp, _, cx| this.extend(-1, 0, cx)))
             .on_action(cx.listener(|this, _: &ExtendDown, _, cx| this.extend(1, 0, cx)))
@@ -578,6 +755,54 @@ impl Render for ResultGrid {
                     .with_size(Size::Size(row))
                     .stripe(true)
                     .bordered(false),
+            )
+    }
+}
+
+/// Row height dialog (F-DATA-009). The value is in points and applies to this grid only.
+struct RowHeight {
+    input: Entity<InputState>,
+    grid: WeakEntity<ResultGrid>,
+}
+
+impl Render for RowHeight {
+    fn render(&mut self, _: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        let grid = self.grid.clone();
+        let input = self.input.clone();
+        v_flex()
+            .gap(tokens::form::ROW_GAP.rems())
+            .child(t!("grid.row_height").to_string())
+            .child(Input::new(&self.input).w(tokens::form::FIELD_WIDTH_SHORT.rems()))
+            .child(
+                h_flex()
+                    .justify_end()
+                    .gap_2()
+                    .child(
+                        Button::new("row-height-cancel")
+                            .label(t!("grid.cancel").to_string())
+                            .on_click(|_, window, cx| window.close_dialog(cx)),
+                    )
+                    .child(
+                        Button::new("row-height-ok")
+                            .primary()
+                            .label(t!("grid.ok").to_string())
+                            .on_click(move |_, window, cx| {
+                                let value = input
+                                    .read(cx)
+                                    .value()
+                                    .trim()
+                                    .parse::<f32>()
+                                    .ok()
+                                    .filter(|n| *n > 0.);
+                                if let Some(n) = value {
+                                    let _ = grid.update(cx, |g, cx| {
+                                        g.row_height = tokens::Pt(n);
+                                        cx.notify();
+                                    });
+                                }
+                                window.close_dialog(cx);
+                            }),
+                    ),
             )
     }
 }

@@ -56,6 +56,7 @@ mod macos {
                 name: format!("column_{c}").into(),
                 type_name: "".into(),
                 primary_key: c == 0,
+                comment: None,
             })
             .collect();
         let rows = (0..ROWS)

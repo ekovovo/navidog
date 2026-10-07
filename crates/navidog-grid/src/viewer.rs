@@ -1,6 +1,8 @@
 //! Table viewer: paging, row count, WHERE / ORDER BY text, editing, commits and transactions
 //! (21-table-viewer.md §3–6).
 
+use std::collections::HashSet;
+
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dock::{
@@ -8,14 +10,16 @@ use gpui_kit::component::dock::{
     register_panel,
 };
 use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::native_menu::NativeMenu;
 use gpui_kit::component::{
     Disableable as _, Selectable as _, Sizable as _, WindowExt as _, h_flex, v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable,
+    App, AppContext as _, ClickEvent, Context, Entity, EventEmitter, FocusHandle, Focusable,
     InteractiveElement as _, IntoElement, KeyBinding, ParentElement as _, Render, SharedString,
-    Styled as _, Subscription, Task, WeakEntity, Window, actions, div,
+    StatefulInteractiveElement as _, Styled as _, Subscription, Task, WeakEntity, Window, actions,
+    div,
 };
 use navidog_core::object::{ObjectKind, ObjectRef, Scope};
 use navidog_core::settings::Settings;
@@ -23,11 +27,12 @@ use navidog_db::dialect::Dialect;
 use navidog_db::sessions::{ConnState, Sessions, SessionsEvent, SharedSession, run_on};
 use navidog_db::{CancelHandle, ColumnInfo, DbResult, ResultSet};
 use navidog_ui::assets::lucide;
+use navidog_ui::skin::FormRow;
 use navidog_ui::{palette, tabs, tokens};
 use rust_i18n::t;
 
-use crate::grid::{GridEvent, GridTarget, ResultGrid};
-use crate::model::GridColumn;
+use crate::grid::{GridEvent, GridTarget, HideColumn, ResultGrid};
+use crate::model::{Cell, GridColumn, GridModel};
 
 const PANEL: &str = "TableViewer";
 const CONTEXT: &str = "TableViewer";
@@ -64,6 +69,17 @@ pub struct TableViewer {
     cancel: Option<CancelHandle>,
     dialect: Option<Dialect>,
     columns: Vec<ColumnInfo>,
+    /// The loaded page before hidden columns are removed, so toggling them needs no refetch
+    raw_columns: Vec<GridColumn>,
+    raw_rows: Vec<Vec<Cell>>,
+    hidden: HashSet<String>,
+    /// Restored when a commit started by hiding a column fails, so the grid and the set still match
+    hidden_revert: Option<HashSet<String>>,
+    /// Insert a row once the commit that made room for it succeeds
+    add_after_commit: bool,
+    form: bool,
+    form_inputs: Vec<Entity<InputState>>,
+    form_for: Option<usize>,
     in_transaction: bool,
     busy: bool,
     /// The most recently executed SQL or error
@@ -290,6 +306,12 @@ impl TableViewer {
                             this.reload(false, cx);
                         }
                         GridEvent::Changed => cx.notify(),
+                        // Leaving a modified row commits it (F-DATA-003)
+                        GridEvent::CommitRequested => {
+                            if !this.busy {
+                                this.apply_changes(false, window, cx);
+                            }
+                        }
                     },
                 ),
                 cx.subscribe(
@@ -330,6 +352,14 @@ impl TableViewer {
                 cancel: None,
                 dialect: None,
                 columns: Vec::new(),
+                raw_columns: Vec::new(),
+                raw_rows: Vec::new(),
+                hidden: HashSet::new(),
+                hidden_revert: None,
+                add_after_commit: false,
+                form: false,
+                form_inputs: Vec::new(),
+                form_for: None,
                 in_transaction: false,
                 busy: false,
                 status: SharedString::default(),
@@ -448,24 +478,43 @@ impl TableViewer {
                         let pk = |name: &str| {
                             this.columns.iter().any(|c| c.name == name && c.primary_key)
                         };
-                        let columns = set
+                        let columns: Vec<GridColumn> = set
                             .columns
                             .iter()
-                            .map(|c| GridColumn {
-                                name: c.name.clone().into(),
-                                type_name: c.type_name.clone().into(),
-                                primary_key: pk(&c.name),
+                            .map(|c| {
+                                let info = this.columns.iter().find(|i| i.name == c.name);
+                                let type_name = if c.type_name.is_empty() {
+                                    info.map(|i| i.type_name.clone()).unwrap_or_default()
+                                } else {
+                                    c.type_name.clone()
+                                };
+                                GridColumn {
+                                    name: c.name.clone().into(),
+                                    type_name: type_name.into(),
+                                    primary_key: pk(&c.name),
+                                    comment: info.and_then(|i| i.comment.clone()).map(Into::into),
+                                }
                             })
                             .collect();
-                        let rows = set
+                        let rows: Vec<Vec<Cell>> = set
                             .rows
                             .into_iter()
                             .map(|r| r.into_iter().map(|v| v.map(Into::into)).collect())
                             .collect();
+                        this.raw_columns = columns.clone();
+                        this.raw_rows = rows.clone();
+                        let (columns, rows) = GridModel::project(&columns, &rows, &this.hidden);
                         this.grid.update(cx, |g, cx| g.set_data(columns, rows, cx));
+                        this.form_for = None;
+                        if std::mem::take(&mut this.add_after_commit) {
+                            this.insert_row(cx);
+                        }
                     }
                     Ok(_) => {}
-                    Err(e) => this.status = e.into(),
+                    Err(e) => {
+                        this.add_after_commit = false;
+                        this.status = e.into();
+                    }
                 }
                 cx.notify();
             });
@@ -509,8 +558,14 @@ impl TableViewer {
         let Some(session) = self.session.clone() else {
             return;
         };
+        self.flush_form(cx);
         let commit = self.commit_statements(cx);
         if commit.statements.is_empty() && !end_transaction {
+            // Nothing to send. A hide still has to reproject; an empty new row stays as it is.
+            self.add_after_commit = false;
+            if self.hidden_revert.take().is_some() {
+                self.reproject(cx);
+            }
             return;
         }
         let in_tx = self.in_transaction;
@@ -531,9 +586,14 @@ impl TableViewer {
                         if end_transaction {
                             this.in_transaction = false;
                         }
+                        this.hidden_revert = None;
                         this.reload(true, cx);
                     }
                     Err(e) => {
+                        this.add_after_commit = false;
+                        if let Some(old) = this.hidden_revert.take() {
+                            this.hidden = old;
+                        }
                         this.status = e.clone().into();
                         window.open_alert_dialog(cx, move |alert, _, _| {
                             alert
@@ -618,6 +678,208 @@ impl TableViewer {
         }
     }
 
+    fn reproject(&mut self, cx: &mut Context<Self>) {
+        let (columns, rows) = GridModel::project(&self.raw_columns, &self.raw_rows, &self.hidden);
+        self.grid.update(cx, |g, cx| g.set_data(columns, rows, cx));
+        self.form_for = None;
+    }
+
+    fn insert_row(&mut self, cx: &mut Context<Self>) {
+        self.grid.update(cx, |g, cx| {
+            let mut row = 0;
+            g.update_model(cx, |m| row = m.insert_row());
+            g.scroll_to_row(row, cx);
+            g.settle(cx);
+        });
+        self.form_for = None;
+    }
+
+    fn toggle_column(&mut self, name: String, window: &mut Window, cx: &mut Context<Self>) {
+        let visible = self
+            .raw_columns
+            .iter()
+            .filter(|c| !self.hidden.contains(c.name.as_ref()))
+            .count();
+        let mut next = self.hidden.clone();
+        if next.contains(&name) {
+            next.remove(&name);
+        } else if visible <= 1 {
+            return;
+        } else {
+            next.insert(name);
+        }
+        if self.grid.read(cx).model(cx).has_changes() {
+            self.hidden_revert = Some(std::mem::replace(&mut self.hidden, next));
+            self.apply_changes(false, window, cx);
+        } else {
+            self.hidden = next;
+            self.reproject(cx);
+        }
+    }
+
+    fn columns_menu(&self) -> NativeMenu {
+        let names: Vec<String> = if self.raw_columns.is_empty() {
+            self.columns.iter().map(|c| c.name.clone()).collect()
+        } else {
+            self.raw_columns
+                .iter()
+                .map(|c| c.name.to_string())
+                .collect()
+        };
+        names.into_iter().fold(NativeMenu::new(), |menu, name| {
+            let shown = !self.hidden.contains(&name);
+            menu.menu_with_check(
+                name.clone(),
+                shown,
+                Box::new(HideColumn { name: name.into() }),
+            )
+        })
+    }
+
+    fn flush_form(&mut self, cx: &mut Context<Self>) {
+        let Some(row) = self.form_for else {
+            return;
+        };
+        let values: Vec<String> = self
+            .form_inputs
+            .iter()
+            .map(|input| input.read(cx).value().to_string())
+            .collect();
+        for (c, text) in values.into_iter().enumerate() {
+            self.write_form_cell(row, c, text, cx);
+        }
+    }
+
+    fn write_form_cell(&mut self, row: usize, c: usize, text: String, cx: &mut Context<Self>) {
+        self.grid.update(cx, |g, cx| {
+            g.update_model(cx, |m| {
+                let old = m.value(row, c).cloned().flatten().unwrap_or_default();
+                if text != old.as_ref() {
+                    m.set_value(row, c, Some(text.into()));
+                }
+            });
+        });
+    }
+
+    fn sync_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.form {
+            return;
+        }
+        let (row, n) = {
+            let model = self.grid.read(cx).model(cx);
+            (model.head().0, model.columns.len())
+        };
+        if self.form_for == Some(row) && self.form_inputs.len() == n {
+            return;
+        }
+        self.form_inputs.clear();
+        for c in 0..n {
+            let value = self
+                .grid
+                .read(cx)
+                .model(cx)
+                .value(row, c)
+                .cloned()
+                .flatten()
+                .unwrap_or_default();
+            let input = cx.new(|cx| InputState::new(window, cx).default_value(value));
+            let row_at = row;
+            cx.subscribe_in(
+                &input,
+                window,
+                move |this, input, event: &InputEvent, _, cx| {
+                    if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
+                        let text = input.read(cx).value().to_string();
+                        this.write_form_cell(row_at, c, text, cx);
+                    }
+                },
+            )
+            .detach();
+            self.form_inputs.push(input);
+        }
+        self.form_for = Some(row);
+    }
+
+    fn form_step(&mut self, delta: isize, cx: &mut Context<Self>) {
+        self.flush_form(cx);
+        let (row, n) = {
+            let model = self.grid.read(cx).model(cx);
+            (model.head().0, model.row_count())
+        };
+        if n == 0 {
+            return;
+        }
+        let next = (row as isize + delta).clamp(0, n as isize - 1) as usize;
+        if next == row {
+            return;
+        }
+        self.grid.update(cx, |g, cx| g.move_to_row(next, cx));
+        self.form_for = None;
+    }
+
+    fn show_sql(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let pending = self.commit_statements(cx).statements.join(";\n");
+        let text = if pending.is_empty() {
+            self.status.to_string()
+        } else {
+            format!("{}\n\n{pending}", self.status)
+        };
+        window.open_dialog(cx, move |dialog, window, _| {
+            dialog
+                .w(tokens::conn_form::WIDTH.to_pixels(window.rem_size()))
+                .title(t!("viewer.show_sql").to_string())
+                .child(
+                    div()
+                        .id("sql-preview")
+                        .max_h(tokens::viewer::CELL_EDITOR_HEIGHT.rems())
+                        .overflow_y_scroll()
+                        .p_2()
+                        .child(text.clone()),
+                )
+        });
+    }
+
+    fn render_form(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let names: Vec<_> = self
+            .grid
+            .read(cx)
+            .model(cx)
+            .columns
+            .iter()
+            .map(|c| c.name.clone())
+            .collect();
+        v_flex()
+            .id("form-view")
+            .size_full()
+            .overflow_y_scroll()
+            .p_3()
+            .gap(tokens::form::ROW_GAP.rems())
+            .children(
+                self.form_inputs
+                    .iter()
+                    .zip(names)
+                    .map(|(input, name)| FormRow::new(name, Input::new(input).flex_1())),
+            )
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(
+                        Button::new("form-prev")
+                            .ghost()
+                            .small()
+                            .label(t!("viewer.prev_record").to_string())
+                            .on_click(cx.listener(|this, _, _, cx| this.form_step(-1, cx))),
+                    )
+                    .child(
+                        Button::new("form-next")
+                            .ghost()
+                            .small()
+                            .label(t!("viewer.next_record").to_string())
+                            .on_click(cx.listener(|this, _, _, cx| this.form_step(1, cx))),
+                    ),
+            )
+    }
+
     fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
         let ready = self.session.is_some() && !self.busy;
@@ -687,6 +949,32 @@ impl TableViewer {
             .child(button("import", "file-text", t!("viewer.import").to_string()).disabled(true))
             .child(button("export", "file-text", t!("viewer.export").to_string()).disabled(true))
             .child(div().flex_1())
+            .child(
+                Button::new("viewer-columns")
+                    .ghost()
+                    .small()
+                    .icon(lucide("columns-3"))
+                    .tooltip(t!("viewer.columns").to_string())
+                    .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
+                        this.columns_menu().show(event.position(), window, cx);
+                    })),
+            )
+            .child(
+                Button::new("viewer-form")
+                    .ghost()
+                    .small()
+                    .icon(lucide("list"))
+                    .tooltip(t!("viewer.form").to_string())
+                    .selected(self.form)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        if this.form {
+                            this.flush_form(cx);
+                        }
+                        this.form = !this.form;
+                        this.form_for = None;
+                        cx.notify();
+                    })),
+            )
             .child(
                 Button::new("focus-mode")
                     .ghost()
@@ -760,12 +1048,18 @@ impl TableViewer {
             .child(
                 icon_button("row-add", "plus", t!("viewer.add_row").to_string())
                     .disabled(!ready)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.grid.update(cx, |g, cx| {
-                            let mut row = 0;
-                            g.update_model(cx, |m| row = m.insert_row());
-                            g.scroll_to_row(row, cx);
-                        });
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.flush_form(cx);
+                        let dirty = {
+                            let model = this.grid.read(cx).model(cx);
+                            model.row_dirty(model.head().0)
+                        };
+                        if dirty {
+                            this.add_after_commit = true;
+                            this.apply_changes(false, window, cx);
+                        } else {
+                            this.insert_row(cx);
+                        }
                     })),
             )
             .child(
@@ -789,6 +1083,7 @@ impl TableViewer {
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.grid
                             .update(cx, |g, cx| g.update_model(cx, |m| m.discard()));
+                        this.form_for = None;
                     })),
             )
             .child(
@@ -800,6 +1095,10 @@ impl TableViewer {
                 icon_button("stop", "circle-stop", t!("viewer.stop").to_string())
                     .disabled(!self.busy || self.cancel.is_none())
                     .on_click(cx.listener(|this, _, _, _| this.stop())),
+            )
+            .child(
+                icon_button("show-sql", "code", t!("viewer.show_sql").to_string())
+                    .on_click(cx.listener(|this, _, window, cx| this.show_sql(window, cx))),
             )
             .child(
                 div()
@@ -891,7 +1190,9 @@ impl TableViewer {
 }
 
 impl Render for TableViewer {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.sync_form(window, cx);
+        let form = self.form;
         v_flex()
             .id("table-viewer")
             .key_context(CONTEXT)
@@ -901,9 +1202,18 @@ impl Render for TableViewer {
             .on_action(cx.listener(|this, _: &ApplyChanges, window, cx| {
                 this.apply_changes(false, window, cx)
             }))
+            .on_action(cx.listener(|this, action: &HideColumn, window, cx| {
+                this.toggle_column(action.name.to_string(), window, cx);
+            }))
             .child(self.render_toolbar(cx))
             .when(self.show_filter, |v| v.child(self.render_filter(cx)))
-            .child(div().flex_1().min_h_0().child(self.grid.clone()))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .when(!form, |d| d.child(self.grid.clone()))
+                    .when(form, |d| d.child(self.render_form(cx))),
+            )
             .child(self.render_bottom_bar(cx))
     }
 }
