@@ -1233,6 +1233,9 @@ impl TableViewer {
                 toggle("find-columns", self.find_columns, label).on_click(cx.listener(
                     |this, _, _, cx| {
                         this.find_columns = !this.find_columns;
+                        if this.find_columns {
+                            this.replace_mode = false;
+                        }
                         this.find_step(false, cx);
                     },
                 ))
@@ -1244,6 +1247,21 @@ impl TableViewer {
                     .ghost()
                     .label(t!("viewer.find_next").to_string())
                     .on_click(cx.listener(|this, _, _, cx| this.find_step(true, cx))),
+            )
+            .child(
+                toggle(
+                    "find-replace",
+                    self.replace_mode,
+                    t!("viewer.replace").to_string(),
+                )
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.replace_mode = !this.replace_mode;
+                    if this.replace_mode {
+                        this.find_columns = false;
+                        this.replace_input.update(cx, |s, cx| s.focus(window, cx));
+                    }
+                    cx.notify();
+                })),
             )
             .when(self.replace_mode && !self.find_columns, |bar| {
                 bar.child(Input::new(&self.replace_input).xsmall().flex_1())
