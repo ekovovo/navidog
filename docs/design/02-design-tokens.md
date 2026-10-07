@@ -75,8 +75,7 @@
 
 | token | 值 | 来源 |
 | --- | --- | --- |
-| `grid.header.height` | 28 | nib:GridViewController/NSTableHeaderView（高 28） |
-| `grid.type_header.height` | 34 | 暂定。字段名和类型要放进同一个表头单元格；`DataTable` 的表头和数据行共用行高，28 放不下两行 |
+| `grid.header.height` | 28 | nib:GridViewController/NSTableHeaderView（高 28）。显示类型时表头是两行数据行高，不再单独占一个 token |
 | `grid.row_number_width` | 20 | nib:GridViewController/行号 NSScrollView（宽 20） |
 | `grid.row.height` | 20 | 暂定，待 AX |
 | `grid.date_picker.width` | 317 | nib:NAVDateTimePicker/NSWindowRect（317 × 247） |
