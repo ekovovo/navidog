@@ -69,11 +69,30 @@ pub struct HideColumn {
     pub name: SharedString,
 }
 
+/// Right-click quick filter (F-DATA-006). `op` is `filter::Op::key`.
+#[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+#[action(namespace = grid, no_json)]
+pub struct QuickFilter {
+    pub column: SharedString,
+    pub op: SharedString,
+    pub value: SharedString,
+}
+
 /// The "Copy As" submenu.
 #[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
 #[action(namespace = grid, no_json)]
 pub struct CopyAs {
     pub format: SharedString,
+}
+
+fn menu_value(value: &str) -> String {
+    let mut chars = value.chars();
+    let short: String = chars.by_ref().take(32).collect();
+    if chars.next().is_some() {
+        format!("{short}…")
+    } else {
+        short
+    }
 }
 
 const CONTEXT: &str = "ResultGrid";
@@ -109,6 +128,12 @@ pub enum GridEvent {
     CommitRequested,
     /// The column of the focused cell, for the info pane's Fields page
     ColumnFocused(SharedString),
+    /// Append a quick-filter rule and reload
+    QuickFilter {
+        column: SharedString,
+        op: SharedString,
+        value: SharedString,
+    },
 }
 
 pub struct GridDelegate {
@@ -640,14 +665,27 @@ impl ResultGrid {
                         Some(c) => t.delegate_mut().model.select((r, c), false),
                     });
                 }
-                self.context_menu()
+                self.context_menu(cx)
                     .show(window.mouse_position(), window, cx);
             }
             _ => {}
         }
     }
 
-    fn context_menu(&self) -> NativeMenu {
+    fn filter_target(&self, cx: &App) -> Option<(SharedString, String, bool)> {
+        let m = self.model(cx);
+        if m.columns.is_empty() || m.row_count() == 0 {
+            return None;
+        }
+        let (r, c) = m.head();
+        let name = m.columns.get(c)?.name.clone();
+        match m.value(r, c) {
+            Some(Some(text)) => Some((name, text.to_string(), false)),
+            _ => Some((name, String::new(), true)),
+        }
+    }
+
+    fn context_menu(&self, cx: &App) -> NativeMenu {
         let copy_as = |key: &str| {
             Box::new(CopyAs {
                 format: key.to_string().into(),
@@ -664,13 +702,45 @@ impl ResultGrid {
             .menu(t!("grid.copy_tsv_data").to_string(), copy_as("tsv"))
             .menu(t!("grid.copy_tsv_names").to_string(), copy_as("names"))
             .menu(t!("grid.copy_tsv_both").to_string(), copy_as("both"));
+        let quick = |column: SharedString, op: &str, value: &str| {
+            Box::new(QuickFilter {
+                column,
+                op: op.to_string().into(),
+                value: value.to_string().into(),
+            }) as Box<dyn gpui_kit::Action>
+        };
         let mut menu = NativeMenu::new()
             .menu(t!("grid.set_empty").to_string(), Box::new(SetEmpty))
             .menu(t!("grid.set_null").to_string(), Box::new(SetNull))
             .separator()
             .menu(t!("grid.copy").to_string(), Box::new(Copy))
             .submenu(t!("grid.copy_as").to_string(), sub)
-            .menu(t!("grid.paste").to_string(), Box::new(Paste))
+            .menu(t!("grid.paste").to_string(), Box::new(Paste));
+        if let Some((column, value, is_null)) = self.filter_target(cx) {
+            let shown = menu_value(&value);
+            menu = menu.separator();
+            if is_null {
+                menu = menu.menu(
+                    t!("grid.filter_null", column = column).to_string(),
+                    quick(column, "is_null", ""),
+                );
+            } else {
+                menu = menu
+                    .menu(
+                        t!("grid.filter_eq", column = column, value = shown).to_string(),
+                        quick(column.clone(), "eq", &value),
+                    )
+                    .menu(
+                        t!("grid.filter_ne", column = column, value = shown).to_string(),
+                        quick(column.clone(), "ne", &value),
+                    )
+                    .menu(
+                        t!("grid.filter_contains", column = column, value = shown).to_string(),
+                        quick(column, "contains", &value),
+                    );
+            }
+        }
+        let mut menu = menu
             .separator()
             .menu(t!("grid.delete_rows").to_string(), Box::new(DeleteRows))
             .separator()
@@ -956,6 +1026,13 @@ impl Render for ResultGrid {
                 this.table.update(cx, |t, cx| {
                     t.delegate_mut().frozen = a.count;
                     t.refresh(cx);
+                });
+            }))
+            .on_action(cx.listener(|_, a: &QuickFilter, _, cx| {
+                cx.emit(GridEvent::QuickFilter {
+                    column: a.column.clone(),
+                    op: a.op.clone(),
+                    value: a.value.clone(),
                 });
             }))
             .on_action(cx.listener(|this, _: &Escape, window, cx| this.cancel_edit(window, cx)))

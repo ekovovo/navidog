@@ -30,6 +30,18 @@ grid:
   set_null:
     en: Set to NULL
     zh-CN: 设置为 NULL
+  filter_eq:
+    en: "Filter: %{column} = %{value}"
+    zh-CN: "筛选：%{column} = %{value}"
+  filter_ne:
+    en: "Filter: %{column} != %{value}"
+    zh-CN: "筛选：%{column} != %{value}"
+  filter_contains:
+    en: "Filter: %{column} contains %{value}"
+    zh-CN: "筛选：%{column} 包含 %{value}"
+  filter_null:
+    en: "Filter: %{column} is null"
+    zh-CN: "筛选：%{column} 是 null"
   delete_rows:
     en: Delete Record
     zh-CN: 删除记录
@@ -121,6 +133,114 @@ viewer:
   apply:
     en: Apply
     zh-CN: 应用
+  apply_filter:
+    en: Apply Filter & Sort
+    zh-CN: 应用筛选 & 排序
+  builder:
+    en: Builder
+    zh-CN: 创建工具
+  text:
+    en: Text
+    zh-CN: 文本
+  add_rule:
+    en: Add Criterion
+    zh-CN: 添加条件
+  add_sort:
+    en: Add Sort
+    zh-CN: 添加排序
+  group:
+    en: Group with Parentheses
+    zh-CN: 使用括号组合
+  negate:
+    en: Toggle Negate
+    zh-CN: 切换否定符
+  and:
+    en: and
+    zh-CN: and
+  or:
+    en: or
+    zh-CN: or
+  asc:
+    en: Ascending
+    zh-CN: 升序
+  desc:
+    en: Descending
+    zh-CN: 降序
+  sort_up:
+    en: Move Up
+    zh-CN: 上移
+  sort_down:
+    en: Move Down
+    zh-CN: 下移
+  op_eq:
+    en: "="
+    zh-CN: "="
+  op_ne:
+    en: "!="
+    zh-CN: "!="
+  op_lt:
+    en: "<"
+    zh-CN: "<"
+  op_le:
+    en: "<="
+    zh-CN: "<="
+  op_gt:
+    en: ">"
+    zh-CN: ">"
+  op_ge:
+    en: ">="
+    zh-CN: ">="
+  op_contains:
+    en: Contains
+    zh-CN: 包含
+  op_not_contains:
+    en: Does Not Contain
+    zh-CN: 不包含
+  op_contains_i:
+    en: Contains (Case Insensitive)
+    zh-CN: 包含（不区分大小写）
+  op_not_contains_i:
+    en: Does Not Contain (Case Insensitive)
+    zh-CN: 不包含（不区分大小写）
+  op_starts:
+    en: Starts With
+    zh-CN: 开头是
+  op_not_starts:
+    en: Does Not Start With
+    zh-CN: 开头不是
+  op_ends:
+    en: Ends With
+    zh-CN: 结尾是
+  op_not_ends:
+    en: Does Not End With
+    zh-CN: 结尾不是
+  op_is_null:
+    en: Is Null
+    zh-CN: 是 null
+  op_not_null:
+    en: Is Not Null
+    zh-CN: 不是 null
+  op_empty:
+    en: Is Empty
+    zh-CN: 是空的
+  op_not_empty:
+    en: Is Not Empty
+    zh-CN: 是非空的
+  op_between:
+    en: Between
+    zh-CN: 介于
+  op_not_between:
+    en: Not Between
+    zh-CN: 不介于
+  op_in_list:
+    en: In List
+    zh-CN: 在列表
+  op_not_in_list:
+    en: Not In List
+    zh-CN: 不在列表
+  op_custom:
+    en: "[Custom]"
+    zh-CN: "[自定义]"
   find_data:
     en: Find Data
     zh-CN: 查找数据

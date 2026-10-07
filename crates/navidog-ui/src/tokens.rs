@@ -136,6 +136,14 @@ pub mod viewer {
     pub const CELL_EDITOR_HEIGHT: Pt = Pt(120.);
 }
 
+/// Filter and sort pane (FilterAndSortManager.nib).
+pub mod filter {
+    use super::Pt;
+    pub const SEGMENTED_WIDTH: Pt = Pt(115.);
+    /// Provisional until measured with AX. Keeps a long rule list from covering the grid.
+    pub const BUILDER_MAX_HEIGHT: Pt = Pt(160.);
+}
+
 pub mod info {
     use super::Pt;
     pub const HEADER_HEIGHT: Pt = Pt(30.);

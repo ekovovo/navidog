@@ -84,6 +84,7 @@
 | `viewer.limit.width` | 212 | nib:TableViewViewController/“Limit … records per page”（212 × 24，11pt） |
 | `viewer.pager.width` | 86 | nib:TableViewViewController/分页按钮组（86 × 27，按钮间距 28） |
 | `filter.segmented.width` | 115 | nib:FilterAndSortManager/NSSegmentedControl（115 × 24） |
+| `filter.builder.max_height` | 160 | 暂定，待 AX。条件多时仍给网格留出空间 |
 
 ## 6. 信息窗格
 

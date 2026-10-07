@@ -6,6 +6,7 @@ extern crate gpui_kit as gpui;
 rust_i18n::i18n!("locales", fallback = "en");
 
 mod date;
+mod filter;
 pub mod grid;
 pub mod model;
 mod viewer;

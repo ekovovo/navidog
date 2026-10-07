@@ -16,10 +16,10 @@ use gpui_kit::component::{
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, AppContext as _, ClickEvent, Context, Entity, EventEmitter, FocusHandle, Focusable,
-    InteractiveElement as _, IntoElement, KeyBinding, ParentElement as _, Render, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Subscription, Task, WeakEntity, Window, actions,
-    div,
+    App, AppContext as _, ClickEvent, Context, ElementId, Entity, EventEmitter, FocusHandle,
+    Focusable, InteractiveElement as _, IntoElement, KeyBinding, ParentElement as _, Render,
+    SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, Task, WeakEntity,
+    Window, actions, div,
 };
 use navidog_core::object::{ObjectKind, ObjectRef, Scope};
 use navidog_core::settings::Settings;
@@ -32,12 +32,47 @@ use navidog_ui::skin::FormRow;
 use navidog_ui::{palette, tabs, tokens};
 use rust_i18n::t;
 
+use crate::filter::{self, Filter, Rule, Sort};
 use crate::grid::{GridEvent, GridTarget, HideColumn, ResultGrid, ToggleRawData, ToggleRowId};
 use crate::model::{Cell, GridColumn, GridModel};
 
 const PANEL: &str = "TableViewer";
 const CONTEXT: &str = "TableViewer";
-actions!(viewer, [ApplyChanges, ShowFind, FindNext, ShowReplace]);
+actions!(
+    viewer,
+    [ApplyChanges, ShowFind, FindNext, ShowReplace, ToggleFilter]
+);
+
+#[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+#[action(namespace = viewer, no_json)]
+struct PickField {
+    index: usize,
+    name: SharedString,
+}
+
+#[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+#[action(namespace = viewer, no_json)]
+struct PickOp {
+    index: usize,
+    op: SharedString,
+}
+
+#[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+#[action(namespace = viewer, no_json)]
+struct PickSort {
+    index: usize,
+    name: SharedString,
+}
+
+struct Draft {
+    field: String,
+    op: filter::Op,
+    value: Entity<InputState>,
+    value2: Entity<InputState>,
+    or_join: bool,
+    negate: bool,
+    _subscriptions: Vec<Subscription>,
+}
 
 pub(crate) fn init(cx: &mut App) {
     cx.bind_keys([
@@ -45,6 +80,7 @@ pub(crate) fn init(cx: &mut App) {
         KeyBinding::new("cmd-f", ShowFind, Some(CONTEXT)),
         KeyBinding::new("cmd-g", FindNext, Some(CONTEXT)),
         KeyBinding::new("alt-cmd-f", ShowReplace, Some(CONTEXT)),
+        KeyBinding::new("cmd-shift-f", ToggleFilter, Some(CONTEXT)),
     ]);
     register_panel(cx, PANEL, |ctx, window, cx| {
         let object = match ctx.info() {
@@ -68,6 +104,12 @@ pub struct TableViewer {
     order: Entity<InputState>,
     limit_input: Entity<InputState>,
     show_filter: bool,
+    /// Visual builder. Text mode keeps editing `filter` and `order` directly.
+    builder: bool,
+    rules: Vec<Draft>,
+    sorts: Vec<Sort>,
+    grouped: bool,
+    group_negate: bool,
     find_input: Entity<InputState>,
     replace_input: Entity<InputState>,
     show_find: bool,
@@ -285,11 +327,10 @@ impl TableViewer {
             let apply_on_enter = |this: &mut Self,
                                   _: &Entity<InputState>,
                                   e: &InputEvent,
-                                  _: &mut Window,
+                                  window: &mut Window,
                                   cx: &mut Context<Self>| {
                 if matches!(e, InputEvent::PressEnter { .. }) {
-                    this.page = 0;
-                    this.reload(true, cx);
+                    this.apply_filter(window, cx);
                 }
             };
             let subs = vec![
@@ -325,20 +366,37 @@ impl TableViewer {
                     window,
                     |this, _, e: &GridEvent, window, cx| match e {
                         GridEvent::SortChanged(sort) => {
-                            let text = sort
-                                .as_ref()
-                                .zip(this.dialect)
-                                .map(|((col, asc), d)| {
-                                    format!(
-                                        "{} {}",
-                                        d.quote_ident(col),
-                                        if *asc { "ASC" } else { "DESC" }
-                                    )
-                                })
-                                .unwrap_or_default();
-                            this.order.update(cx, |s, cx| s.set_value(text, window, cx));
+                            if this.builder {
+                                this.sorts = sort
+                                    .as_ref()
+                                    .map(|(col, asc)| Sort {
+                                        field: col.to_string(),
+                                        asc: *asc,
+                                    })
+                                    .into_iter()
+                                    .collect();
+                                this.write_filter_sql(window, cx);
+                            } else {
+                                let text = sort
+                                    .as_ref()
+                                    .zip(this.dialect)
+                                    .map(|((col, asc), d)| {
+                                        format!(
+                                            "{} {}",
+                                            d.quote_ident(col),
+                                            if *asc { "ASC" } else { "DESC" }
+                                        )
+                                    })
+                                    .unwrap_or_default();
+                                this.order.update(cx, |s, cx| s.set_value(text, window, cx));
+                            }
                             this.page = 0;
                             this.reload(false, cx);
+                        }
+                        GridEvent::QuickFilter { column, op, value } => {
+                            if let Some(op) = filter::Op::parse_key(op) {
+                                this.quick_filter(column, op, value, window, cx);
+                            }
                         }
                         GridEvent::Changed => cx.notify(),
                         // Leaving a modified row commits it (F-DATA-003)
@@ -384,6 +442,11 @@ impl TableViewer {
                 find_input,
                 replace_input,
                 show_filter: false,
+                builder: false,
+                rules: Vec::new(),
+                sorts: Vec::new(),
+                grouped: false,
+                group_negate: false,
                 show_find: false,
                 replace_mode: false,
                 find_columns: false,
@@ -1130,6 +1193,173 @@ impl TableViewer {
             )
     }
 
+    fn dialect(&self) -> Dialect {
+        self.dialect.unwrap_or(Dialect::Sqlite)
+    }
+
+    fn field_names(&self) -> Vec<String> {
+        if self.raw_columns.is_empty() {
+            self.columns.iter().map(|c| c.name.clone()).collect()
+        } else {
+            self.raw_columns
+                .iter()
+                .map(|c| c.name.to_string())
+                .collect()
+        }
+    }
+
+    fn make_draft(rule: Rule, window: &mut Window, cx: &mut Context<Self>) -> Draft {
+        let value = cx.new(|cx| InputState::new(window, cx).default_value(rule.value));
+        let value2 = cx.new(|cx| InputState::new(window, cx).default_value(rule.value2));
+        let on_enter = |this: &mut Self,
+                        _: &Entity<InputState>,
+                        e: &InputEvent,
+                        window: &mut Window,
+                        cx: &mut Context<Self>| {
+            if matches!(e, InputEvent::PressEnter { .. }) {
+                this.apply_filter(window, cx);
+            }
+        };
+        let _subscriptions = vec![
+            cx.subscribe_in(&value, window, on_enter),
+            cx.subscribe_in(&value2, window, on_enter),
+        ];
+        Draft {
+            field: rule.field,
+            op: rule.op,
+            value,
+            value2,
+            or_join: rule.or,
+            negate: rule.negate,
+            _subscriptions,
+        }
+    }
+
+    fn current_filter(&self, cx: &App) -> Filter {
+        Filter {
+            rules: self
+                .rules
+                .iter()
+                .map(|d| Rule {
+                    field: d.field.clone(),
+                    op: d.op,
+                    value: d.value.read(cx).value().to_string(),
+                    value2: d.value2.read(cx).value().to_string(),
+                    or: d.or_join,
+                    negate: d.negate,
+                })
+                .collect(),
+            grouped: self.grouped,
+            group_negate: self.group_negate,
+        }
+    }
+
+    fn write_filter_sql(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let dialect = self.dialect();
+        let where_text = filter::where_sql(&self.current_filter(cx), dialect);
+        let order_text = filter::order_sql(&self.sorts, dialect);
+        self.filter
+            .update(cx, |s, cx| s.set_value(where_text, window, cx));
+        self.order
+            .update(cx, |s, cx| s.set_value(order_text, window, cx));
+    }
+
+    fn apply_filter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.builder {
+            self.write_filter_sql(window, cx);
+        }
+        self.page = 0;
+        self.reload(true, cx);
+    }
+
+    fn set_builder(&mut self, on: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if on == self.builder {
+            return;
+        }
+        let dialect = self.dialect();
+        if on {
+            let where_text = self.filter.read(cx).value().to_string();
+            let order_text = self.order.read(cx).value().to_string();
+            let (Some(parsed), Some(sorts)) = (
+                filter::parse_where(&where_text, dialect),
+                filter::parse_order(&order_text, dialect),
+            ) else {
+                return;
+            };
+            let mut rules = Vec::new();
+            for rule in parsed.rules {
+                rules.push(Self::make_draft(rule, window, cx));
+            }
+            self.rules = rules;
+            self.sorts = sorts;
+            self.grouped = parsed.grouped;
+            self.group_negate = parsed.group_negate;
+        } else {
+            self.write_filter_sql(window, cx);
+        }
+        self.builder = on;
+        cx.notify();
+    }
+
+    fn quick_filter(
+        &mut self,
+        column: &str,
+        op: filter::Op,
+        value: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.show_filter = true;
+        let dialect = self.dialect();
+        let rule = Rule {
+            field: column.to_string(),
+            op,
+            value: value.to_string(),
+            value2: String::new(),
+            or: false,
+            negate: false,
+        };
+        if self.builder {
+            self.rules.push(Self::make_draft(rule, window, cx));
+            self.write_filter_sql(window, cx);
+        } else {
+            let extra = filter::where_sql(
+                &Filter {
+                    rules: vec![rule],
+                    ..Filter::default()
+                },
+                dialect,
+            );
+            let current = self.filter.read(cx).value().to_string();
+            let text = if current.trim().is_empty() {
+                extra
+            } else {
+                format!("({current}) AND {extra}")
+            };
+            self.filter
+                .update(cx, |s, cx| s.set_value(text, window, cx));
+        }
+        self.page = 0;
+        self.reload(true, cx);
+    }
+
+    fn add_rule(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let field = self.field_names().into_iter().next().unwrap_or_default();
+        self.rules.push(Self::make_draft(
+            Rule {
+                field,
+                op: filter::Op::Eq,
+                value: String::new(),
+                value2: String::new(),
+                or: false,
+                negate: false,
+            },
+            window,
+            cx,
+        ));
+        cx.notify();
+    }
+
     fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
         let ready = self.session.is_some() && !self.busy;
@@ -1248,26 +1478,325 @@ impl TableViewer {
 
     fn render_filter(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
+        let mut pane = v_flex()
+            .id("filter-pane")
+            .w_full()
+            .min_w_0()
+            .max_h(tokens::filter::BUILDER_MAX_HEIGHT.rems())
+            .overflow_y_scroll()
+            .border_b_1()
+            .border_color(p.separator)
+            .child(self.render_filter_bar(cx));
+        if self.builder {
+            for i in 0..self.rules.len() {
+                pane = pane.child(self.render_rule(i, cx));
+            }
+            pane = pane.child(self.render_rule_actions(cx));
+            for i in 0..self.sorts.len() {
+                pane = pane.child(self.render_sort(i, cx));
+            }
+            pane = pane.child(self.render_sort_actions(cx));
+        } else {
+            pane = pane.child(self.render_filter_text(cx));
+        }
+        pane
+    }
+
+    fn render_filter_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let mode = |id: &'static str, on: bool, label: String| {
+            Button::new(id).xsmall().flex_1().selected(on).label(label)
+        };
+        h_flex()
+            .h(tokens::viewer::FILTER_HEIGHT.rems())
+            .px_2()
+            .gap_2()
+            .child(
+                h_flex()
+                    .w(tokens::filter::SEGMENTED_WIDTH.rems())
+                    .gap_1()
+                    .child(
+                        mode(
+                            "filter-builder",
+                            self.builder,
+                            t!("viewer.builder").to_string(),
+                        )
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.set_builder(true, window, cx)),
+                        ),
+                    )
+                    .child(
+                        mode("filter-text", !self.builder, t!("viewer.text").to_string()).on_click(
+                            cx.listener(|this, _, window, cx| this.set_builder(false, window, cx)),
+                        ),
+                    ),
+            )
+            .when(self.builder, |bar| {
+                bar.child(
+                    Button::new("filter-group")
+                        .xsmall()
+                        .selected(self.grouped)
+                        .disabled(self.rules.len() < 2)
+                        .label(t!("viewer.group").to_string())
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.grouped = !this.grouped;
+                            if !this.grouped {
+                                this.group_negate = false;
+                            }
+                            cx.notify();
+                        })),
+                )
+                .child(
+                    Button::new("filter-group-not")
+                        .xsmall()
+                        .selected(self.group_negate)
+                        .disabled(!self.grouped)
+                        .label(t!("viewer.negate").to_string())
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.group_negate = !this.group_negate;
+                            cx.notify();
+                        })),
+                )
+            })
+            .child(div().flex_1())
+            .child(
+                Button::new("apply-filter")
+                    .xsmall()
+                    .label(t!("viewer.apply_filter").to_string())
+                    .on_click(cx.listener(|this, _, window, cx| this.apply_filter(window, cx))),
+            )
+    }
+
+    fn render_filter_text(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let p = palette(cx);
         let label = |s: &'static str| div().text_color(p.label_secondary).child(s);
         h_flex()
             .h(tokens::viewer::FILTER_HEIGHT.rems())
             .px_2()
             .gap_2()
-            .border_b_1()
-            .border_color(p.separator)
             .child(label("WHERE"))
-            .child(Input::new(&self.filter).xsmall().flex_1())
+            .child(Input::new(&self.filter).xsmall().flex_1().min_w_0())
             .child(label("ORDER BY"))
-            .child(Input::new(&self.order).xsmall().flex_1())
+            .child(Input::new(&self.order).xsmall().flex_1().min_w_0())
+    }
+
+    fn render_rule(&self, index: usize, cx: &mut Context<Self>) -> impl IntoElement {
+        let rule = &self.rules[index];
+        let field = if rule.field.is_empty() {
+            "…".to_string()
+        } else {
+            rule.field.clone()
+        };
+        h_flex()
+            .h(tokens::viewer::FILTER_HEIGHT.rems())
+            .px_2()
+            .gap_1()
+            .min_w_0()
+            .when(index > 0, |row| {
+                let or_join = rule.or_join;
+                row.child(
+                    Button::new(ElementId::Name(format!("filter-join-{index}").into()))
+                        .xsmall()
+                        .label(if or_join {
+                            t!("viewer.or").to_string()
+                        } else {
+                            t!("viewer.and").to_string()
+                        })
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if let Some(rule) = this.rules.get_mut(index) {
+                                rule.or_join = !rule.or_join;
+                                cx.notify();
+                            }
+                        })),
+                )
+            })
             .child(
-                Button::new("apply-filter")
-                    .small()
-                    .label(t!("viewer.apply").to_string())
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.page = 0;
-                        this.reload(true, cx);
+                Button::new(ElementId::Name(format!("filter-not-{index}").into()))
+                    .xsmall()
+                    .selected(rule.negate)
+                    .label(t!("viewer.negate").to_string())
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if let Some(rule) = this.rules.get_mut(index) {
+                            rule.negate = !rule.negate;
+                            cx.notify();
+                        }
                     })),
             )
+            .child(
+                Button::new(ElementId::Name(format!("filter-field-{index}").into()))
+                    .xsmall()
+                    .label(field)
+                    .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                        this.field_menu(index).show(event.position(), window, cx);
+                    })),
+            )
+            .child(
+                Button::new(ElementId::Name(format!("filter-op-{index}").into()))
+                    .xsmall()
+                    .label(rule.op.label())
+                    .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                        this.op_menu(index).show(event.position(), window, cx);
+                    })),
+            )
+            .when(rule.op.needs_value(), |row| {
+                row.child(Input::new(&rule.value).xsmall().flex_1().min_w_0())
+            })
+            .when(rule.op.needs_second(), |row| {
+                row.child(Input::new(&rule.value2).xsmall().flex_1().min_w_0())
+            })
+            .child(
+                Button::new(ElementId::Name(format!("filter-remove-{index}").into()))
+                    .ghost()
+                    .xsmall()
+                    .icon(lucide("x"))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if index < this.rules.len() {
+                            this.rules.remove(index);
+                            cx.notify();
+                        }
+                    })),
+            )
+    }
+
+    fn render_rule_actions(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        h_flex().px_2().gap_1().child(
+            Button::new("filter-add-rule")
+                .ghost()
+                .xsmall()
+                .icon(lucide("plus"))
+                .label(t!("viewer.add_rule").to_string())
+                .on_click(cx.listener(|this, _, window, cx| this.add_rule(window, cx))),
+        )
+    }
+
+    fn render_sort(&self, index: usize, cx: &mut Context<Self>) -> impl IntoElement {
+        let sort = &self.sorts[index];
+        let field = if sort.field.is_empty() {
+            "…".to_string()
+        } else {
+            sort.field.clone()
+        };
+        h_flex()
+            .h(tokens::viewer::FILTER_HEIGHT.rems())
+            .px_2()
+            .gap_1()
+            .child(
+                Button::new(ElementId::Name(format!("sort-field-{index}").into()))
+                    .xsmall()
+                    .label(field)
+                    .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                        this.sort_menu(index).show(event.position(), window, cx);
+                    })),
+            )
+            .child(
+                Button::new(ElementId::Name(format!("sort-dir-{index}").into()))
+                    .xsmall()
+                    .label(if sort.asc {
+                        t!("viewer.asc").to_string()
+                    } else {
+                        t!("viewer.desc").to_string()
+                    })
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if let Some(sort) = this.sorts.get_mut(index) {
+                            sort.asc = !sort.asc;
+                            cx.notify();
+                        }
+                    })),
+            )
+            .child(
+                Button::new(ElementId::Name(format!("sort-up-{index}").into()))
+                    .ghost()
+                    .xsmall()
+                    .disabled(index == 0)
+                    .label(t!("viewer.sort_up").to_string())
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if index > 0 && index < this.sorts.len() {
+                            this.sorts.swap(index, index - 1);
+                            cx.notify();
+                        }
+                    })),
+            )
+            .child(
+                Button::new(ElementId::Name(format!("sort-down-{index}").into()))
+                    .ghost()
+                    .xsmall()
+                    .disabled(index + 1 >= self.sorts.len())
+                    .label(t!("viewer.sort_down").to_string())
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if index + 1 < this.sorts.len() {
+                            this.sorts.swap(index, index + 1);
+                            cx.notify();
+                        }
+                    })),
+            )
+            .child(
+                Button::new(ElementId::Name(format!("sort-remove-{index}").into()))
+                    .ghost()
+                    .xsmall()
+                    .icon(lucide("x"))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if index < this.sorts.len() {
+                            this.sorts.remove(index);
+                            cx.notify();
+                        }
+                    })),
+            )
+    }
+
+    fn render_sort_actions(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        h_flex().px_2().pb_1().gap_1().child(
+            Button::new("filter-add-sort")
+                .ghost()
+                .xsmall()
+                .icon(lucide("plus"))
+                .label(t!("viewer.add_sort").to_string())
+                .on_click(cx.listener(|this, _, _, cx| {
+                    let field = this.field_names().into_iter().next().unwrap_or_default();
+                    this.sorts.push(Sort { field, asc: true });
+                    cx.notify();
+                })),
+        )
+    }
+
+    fn field_menu(&self, index: usize) -> NativeMenu {
+        self.field_names()
+            .into_iter()
+            .fold(NativeMenu::new(), |menu, name| {
+                menu.menu(
+                    name.clone(),
+                    Box::new(PickField {
+                        index,
+                        name: name.into(),
+                    }),
+                )
+            })
+    }
+
+    fn op_menu(&self, index: usize) -> NativeMenu {
+        filter::Op::choices(self.dialect())
+            .into_iter()
+            .fold(NativeMenu::new(), |menu, op| {
+                menu.menu(
+                    op.label(),
+                    Box::new(PickOp {
+                        index,
+                        op: op.key().into(),
+                    }),
+                )
+            })
+    }
+
+    fn sort_menu(&self, index: usize) -> NativeMenu {
+        self.field_names()
+            .into_iter()
+            .fold(NativeMenu::new(), |menu, name| {
+                menu.menu(
+                    name.clone(),
+                    Box::new(PickSort {
+                        index,
+                        name: name.into(),
+                    }),
+                )
+            })
     }
 
     fn render_bottom_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1477,6 +2006,31 @@ impl Render for TableViewer {
             .on_action(cx.listener(|this, _: &FindNext, _, cx| {
                 this.show_find = true;
                 this.find_step(true, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ToggleFilter, _, cx| {
+                this.show_filter = !this.show_filter;
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, a: &PickField, _, cx| {
+                if let Some(rule) = this.rules.get_mut(a.index) {
+                    rule.field = a.name.to_string();
+                    cx.notify();
+                }
+            }))
+            .on_action(cx.listener(|this, a: &PickOp, _, cx| {
+                let Some(op) = filter::Op::parse_key(&a.op) else {
+                    return;
+                };
+                if let Some(rule) = this.rules.get_mut(a.index) {
+                    rule.op = op;
+                    cx.notify();
+                }
+            }))
+            .on_action(cx.listener(|this, a: &PickSort, _, cx| {
+                if let Some(sort) = this.sorts.get_mut(a.index) {
+                    sort.field = a.name.to_string();
+                    cx.notify();
+                }
             }))
             .child(self.render_toolbar(cx))
             .when(self.show_find, |v| v.child(self.render_find(cx)))
