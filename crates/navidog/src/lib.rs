@@ -11,7 +11,7 @@ pub mod main_window;
 mod menus;
 mod opening;
 mod popout;
-mod preferences;
+pub mod preferences;
 pub mod state;
 
 use gpui_kit::component::{TitleBar, WindowExt as _};

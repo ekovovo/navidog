@@ -12,6 +12,7 @@ use gpui_kit::{
     WeakEntity, Window,
 };
 use navidog_core::object::ObjectRef;
+use navidog_core::workspace::{Selection, Workspace};
 use navidog_db::sessions::{Sessions, SessionsEvent};
 use navidog_ui::assets::lucide;
 use navidog_ui::{palette, tabs};
@@ -67,6 +68,10 @@ impl BasePanel for DdlPanel {
     }
     fn set_active(&mut self, active: bool, _: &mut Window, cx: &mut Context<Self>) {
         tabs::set_active(PanelId::from(cx.entity_id()), active, cx);
+        if active {
+            let object = self.object.clone();
+            Workspace::global(cx).update(cx, |w, cx| w.select(Selection::Object(object), cx));
+        }
     }
     fn on_removed(&mut self, _: &mut Window, cx: &mut Context<Self>) {
         let _ = tabs::removed(PanelId::from(cx.entity_id()), cx);

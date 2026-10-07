@@ -124,6 +124,14 @@
 | `conn_type.search_width` | 200 | nib:ConnectionFormConnTypeSelectionModule/NSSearchField（200 × 22） |
 | `conn_type.footer_height` | 45 | nib:ConnectionFormConnTypeSelectionModule/底部栏（高 45） |
 
+## 7.1 偏好设置
+
+| token | 值 | 来源 |
+| --- | --- | --- |
+| `preferences.width` | 640 | nib:PreferencesWindowController/NSWindowRect |
+| `preferences.height` | 480 | 同上 |
+| `preferences.nav_width` | 160 | 暂定，待 AX（左侧分类列表；nib 用自动布局，没有帧） |
+
 ## 8. 颜色
 
 Navicat 的 nib 中几乎所有颜色都是 AppKit 语义色。在 718 个 nib 中，`textBackgroundColor`、`controlTextColor`、`controlColor`、`labelColor` 各出现两千多次，`gridColor`、`separatorColor` 出现数百次。所以 navidog 的颜色 token 直接对应语义色，取值为本机 macOS 26.6 上的实测结果，格式为 `#RRGGBBAA`。

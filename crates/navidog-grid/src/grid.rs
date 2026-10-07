@@ -563,6 +563,7 @@ impl ResultGrid {
         self.table.update(cx, |t, _| {
             let map = &mut t.delegate_mut().widths;
             for (name, width) in &saved {
+                // raw-px: persisted column widths are already pixels
                 map.insert(SharedString::from(name.as_str()), px(*width));
             }
         });
@@ -882,9 +883,13 @@ impl Render for ResultGrid {
         let row = self
             .row_height
             .to_pixels(self.table.read(cx).delegate().rem);
+        // The dock clips overflow. Without a zero minimum the grid grows to the
+        // sum of its columns, so this scrollbar has nothing to scroll.
         div()
             .key_context(CONTEXT)
             .size_full()
+            .min_w_0()
+            .overflow_hidden()
             .on_action(cx.listener(|this, _: &Copy, _, cx| {
                 cx.write_to_clipboard(ClipboardItem::new_string(this.copy_text("tsv", cx)))
             }))
@@ -1018,7 +1023,10 @@ fn load_widths(target: &GridTarget, cx: &App) -> BTreeMap<SharedString, Pixels> 
         .get(&width_key(&target.scope, &target.table))
         .map(|cols| {
             cols.iter()
-                .map(|(name, width)| (SharedString::from(name.clone()), px(*width)))
+                .map(|(name, width)| {
+                    // raw-px: persisted column widths are already pixels
+                    (SharedString::from(name.clone()), px(*width))
+                })
                 .collect()
         })
         .unwrap_or_default()
@@ -1040,6 +1048,7 @@ mod tests {
     #[test]
     fn resized_widths_skip_the_marker_column() {
         let names = ["id", "name"].map(SharedString::from);
+        // raw-px: arbitrary widths; the first is the marker column and is dropped
         let saved = width_pairs(&names, &[px(20.), px(80.), px(140.)]);
         assert_eq!(saved.get("id"), Some(&80.));
         assert_eq!(saved.get("name"), Some(&140.));

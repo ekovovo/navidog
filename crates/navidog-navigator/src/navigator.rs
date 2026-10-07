@@ -275,15 +275,30 @@ struct FilterByType {
 }
 
 /// Connections being dragged onto a group (or onto the blank area, meaning top level).
+/// The ids are resolved when the drop happens: the row's drag value is captured at render,
+/// which can be older than the selection.
 #[derive(Clone)]
 struct DraggedConnections {
-    ids: Vec<String>,
-    label: SharedString,
+    row: SharedString,
+    conn: String,
+    name: SharedString,
+}
+
+impl DraggedConnections {
+    fn ids(&self, cx: &App) -> Vec<String> {
+        NavigatorPanel::drag_ids(&self.row, &self.conn, cx)
+    }
 }
 
 impl Render for DraggedConnections {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
+        let n = self.ids(cx).len();
+        let label = if n > 1 {
+            t!("nav.n_connections", n = n).to_string()
+        } else {
+            self.name.to_string()
+        };
         div()
             .px_2()
             .py_1()
@@ -292,7 +307,7 @@ impl Render for DraggedConnections {
             .border_1()
             .border_color(p.separator)
             .text_color(p.label)
-            .child(self.label.clone())
+            .child(label)
     }
 }
 
@@ -313,15 +328,29 @@ enum RenameTarget {
 }
 
 /// Objects being dragged onto a virtual group (or onto their category, meaning no group).
+/// Resolved at drop time, same as [`DraggedConnections`].
 #[derive(Clone)]
 struct DraggedObjects {
-    objects: Vec<ObjectRef>,
-    label: SharedString,
+    row: SharedString,
+    object: ObjectRef,
+    name: SharedString,
+}
+
+impl DraggedObjects {
+    fn objects(&self, cx: &App) -> Vec<ObjectRef> {
+        NavigatorPanel::drag_objects(&self.row, &self.object, cx)
+    }
 }
 
 impl Render for DraggedObjects {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
+        let n = self.objects(cx).len();
+        let label = if n > 1 {
+            t!("nav.n_objects", n = n).to_string()
+        } else {
+            self.name.to_string()
+        };
         div()
             .px_2()
             .py_1()
@@ -330,7 +359,7 @@ impl Render for DraggedObjects {
             .border_1()
             .border_color(p.separator)
             .text_color(p.label)
-            .child(self.label.clone())
+            .child(label)
     }
 }
 
@@ -467,24 +496,14 @@ impl NavigatorPanel {
                     }
                     cx.notify();
                 }),
-                // Keyboard navigation moves the tree's own selection; mirror it unless it is
-                // already the primary selection (which would drop the secondary ones)
-                cx.observe(&tree, |_, tree, cx| {
-                    let selection = tree
-                        .read(cx)
-                        .selected_item()
-                        .and_then(|i| Node::parse(&i.id))
-                        .and_then(|n| n.selection());
-                    if let Some(sel) = selection
-                        && Workspace::global(cx).read(cx).selection() != &sel
-                    {
-                        Workspace::global(cx).update(cx, |w, cx| w.select(sel, cx));
-                    }
-                }),
+                // Clicks and arrow keys write the workspace selection themselves.
+                // Do not copy TreeState's index back: its notify can arrive late and
+                // would replace a newer click with the previous row.
                 cx.subscribe(&Workspace::global(cx), |this, _, e: &WorkspaceEvent, cx| {
                     let WorkspaceEvent::SelectionChanged = e;
                     this.marked = Self::selected_ids(cx).into_iter().collect();
                     this.reveal_selection(cx);
+                    cx.notify();
                 }),
             ];
             let mut this = Self {
@@ -604,18 +623,32 @@ impl NavigatorPanel {
         }
     }
 
+    /// Double-click and Return. A closed connection opens; an object opens; anything else
+    /// expands or collapses.
     fn toggle(&mut self, node: &Node, window: &mut Window, cx: &mut Context<Self>) {
         match node {
             Node::Connection(c) if !Sessions::global(cx).read(cx).state(c).is_open() => {
                 window.dispatch_action(Box::new(OpenConnection), cx);
-                return;
             }
             Node::Object(o) => {
                 window.dispatch_action(Box::new(OpenObject { object: o.clone() }), cx);
-                return;
             }
-            Node::Placeholder(_) => return,
-            _ => {}
+            Node::Placeholder(_) => {}
+            _ => self.disclose(node, window, cx),
+        }
+    }
+
+    /// The disclosure arrow. Expands or collapses, and opens a closed connection. A table
+    /// stays closed as an editor: only the arrow shows the objects under it.
+    fn disclose(&mut self, node: &Node, window: &mut Window, cx: &mut Context<Self>) {
+        if let Node::Connection(c) = node
+            && !Sessions::global(cx).read(cx).state(c).is_open()
+        {
+            window.dispatch_action(Box::new(OpenConnection), cx);
+            return;
+        }
+        if matches!(node, Node::Placeholder(_)) {
+            return;
         }
         let id = node.id();
         if !self.expanded.remove(&id) {
@@ -623,6 +656,15 @@ impl NavigatorPanel {
             Self::ensure_children(node, false, cx);
         }
         self.rebuild(cx);
+    }
+
+    /// Return on the focused row.
+    fn open_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.tree.read(cx).selected_item().map(|i| i.id.clone()) else {
+            return;
+        };
+        let Some(node) = Node::parse(&id) else { return };
+        self.toggle(&node, window, cx);
     }
 
     fn select(node: &Node, cx: &mut App) {
@@ -701,8 +743,8 @@ impl NavigatorPanel {
         });
     }
 
-    /// Right expands the focused folder; left collapses it. Matches the tree's own left/right.
-    fn fold(&mut self, expand: bool, cx: &mut Context<Self>) {
+    /// Right expands the focused folder (a closed connection opens). Left collapses it.
+    fn fold(&mut self, expand: bool, window: &mut Window, cx: &mut Context<Self>) {
         let (id, folder) = {
             let tree = self.tree.read(cx);
             let Some(entry) = tree.selected_entry() else {
@@ -715,6 +757,12 @@ impl NavigatorPanel {
         }
         let Some(node) = Node::parse(&id) else { return };
         if expand {
+            if let Node::Connection(c) = &node
+                && !Sessions::global(cx).read(cx).state(c).is_open()
+            {
+                window.dispatch_action(Box::new(OpenConnection), cx);
+                return;
+            }
             if self.expanded.insert(id) {
                 Self::ensure_children(&node, false, cx);
                 self.rebuild(cx);
@@ -724,12 +772,14 @@ impl NavigatorPanel {
         }
     }
 
-    /// Selected connections that are dragged together with `id` (just `id` when it is not selected).
-    fn drag_ids(&self, id: &SharedString, conn: &str) -> Vec<String> {
-        if !self.marked.contains(id) {
+    /// Selected connections dragged together with `id` (just `conn` when that row is not selected).
+    /// Reads the workspace, not the cached `marked` set, so a drop sees the latest click.
+    fn drag_ids(id: &SharedString, conn: &str, cx: &App) -> Vec<String> {
+        let selected = Self::selected_ids(cx);
+        if !selected.iter().any(|s| s == id) {
             return vec![conn.to_string()];
         }
-        self.marked
+        selected
             .iter()
             .filter_map(|m| match Node::parse(m) {
                 Some(Node::Connection(c)) => Some(c),
@@ -738,12 +788,13 @@ impl NavigatorPanel {
             .collect()
     }
 
-    /// Selected objects of the same category dragged together with `o` (just `o` when it is not selected).
-    fn drag_objects(&self, id: &SharedString, o: &ObjectRef) -> Vec<ObjectRef> {
-        if !self.marked.contains(id) {
+    /// Selected objects of the same category dragged with `o` (just `o` when that row is not selected).
+    fn drag_objects(id: &SharedString, o: &ObjectRef, cx: &App) -> Vec<ObjectRef> {
+        let selected = Self::selected_ids(cx);
+        if !selected.iter().any(|s| s == id) {
             return vec![o.clone()];
         }
-        self.marked
+        selected
             .iter()
             .filter_map(|m| match Node::parse(m) {
                 Some(Node::Object(x)) if x.scope == o.scope && x.kind == o.kind => Some(x),
@@ -1318,6 +1369,8 @@ impl NavigatorPanel {
             )
             .into_any_element(),
         };
+        let disclose = node.clone();
+        let folder = entry.is_folder();
         let row = ListItem::new(ElementId::Name(id.clone()))
             .h(tokens::navigator::ROW_HEIGHT.rems())
             .pl(tokens::navigator::ROW_INSET_X.rems()
@@ -1329,37 +1382,67 @@ impl NavigatorPanel {
                     .gap_1()
                     .child(
                         div()
+                            .id(SharedString::from(format!("nav-disclose-{id}")))
                             .w(tokens::navigator::ROW_ICON.rems())
-                            .children(chevron),
+                            .h(tokens::navigator::ROW_HEIGHT.rems())
+                            .flex()
+                            .flex_none()
+                            .items_center()
+                            .justify_center()
+                            .children(chevron)
+                            .when(folder, |d| {
+                                let disclose = disclose.clone();
+                                d.on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                    cx.stop_propagation();
+                                })
+                                .on_click(cx.listener(
+                                    move |this, _, window, cx| {
+                                        cx.stop_propagation();
+                                        let Some(n) = &disclose else { return };
+                                        window.focus(&this.focus_handle, cx);
+                                        this.click_select(&n.id(), false, false, cx);
+                                        this.disclose(n, window, cx);
+                                    },
+                                ))
+                            }),
                     )
                     .child(icon)
                     .child(div().flex_1().min_w_0().overflow_hidden().child(label))
                     .when_some(color, |r, c| {
                         r.child(div().size_2().rounded_full().bg(c).mr_2())
                     }),
+            )
+            // Before the drag handler, so a drag still starts. Stops the tree from expanding
+            // on mouse down; a click on the label only selects.
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, window, cx| {
+                    cx.stop_propagation();
+                    window.focus(&this.focus_handle, cx);
+                }),
             );
         let row = match &node {
             Some(Node::Connection(c)) => {
-                let ids = self.drag_ids(&id, c);
-                let label = if ids.len() > 1 {
-                    t!("nav.n_connections", n = ids.len()).to_string().into()
-                } else {
-                    entry.item().label.clone()
-                };
-                row.on_drag(DraggedConnections { ids, label }, |d, _, _, cx| {
-                    cx.new(|_| d.clone())
-                })
+                let (row_id, conn, name) = (id.clone(), c.clone(), entry.item().label.clone());
+                row.on_drag(
+                    DraggedConnections {
+                        row: row_id,
+                        conn,
+                        name,
+                    },
+                    |d, _, _, cx| cx.new(|_| d.clone()),
+                )
             }
             Some(Node::Object(o)) => {
-                let objects = self.drag_objects(&id, o);
-                let label = if objects.len() > 1 {
-                    t!("nav.n_objects", n = objects.len()).to_string().into()
-                } else {
-                    entry.item().label.clone()
-                };
-                row.on_drag(DraggedObjects { objects, label }, |d, _, _, cx| {
-                    cx.new(|_| d.clone())
-                })
+                let (row_id, object, name) = (id.clone(), o.clone(), entry.item().label.clone());
+                row.on_drag(
+                    DraggedObjects {
+                        row: row_id,
+                        object,
+                        name,
+                    },
+                    |d, _, _, cx| cx.new(|_| d.clone()),
+                )
             }
             _ => row,
         };
@@ -1370,14 +1453,14 @@ impl NavigatorPanel {
                 row.drag_over::<DraggedObjects>(move |s, _, _, _| s.bg(p.fill))
                     .on_drop(cx.listener(move |_, d: &DraggedObjects, _, cx| {
                         cx.stop_propagation();
-                        move_objects(&d.objects, Some(&g), cx);
+                        move_objects(&d.objects(cx), Some(&g), cx);
                     }))
             }
             Some(Node::Category(..)) => row
                 .drag_over::<DraggedObjects>(move |s, _, _, _| s.bg(p.fill))
                 .on_drop(cx.listener(|_, d: &DraggedObjects, _, cx| {
                     cx.stop_propagation();
-                    move_objects(&d.objects, None, cx);
+                    move_objects(&d.objects(cx), None, cx);
                 })),
             _ => row,
         };
@@ -1397,7 +1480,7 @@ impl NavigatorPanel {
                 .drag_over::<DraggedConnections>(move |s, _, _, _| s.bg(p.fill))
                 .on_drop(cx.listener(move |_, d: &DraggedConnections, _, cx| {
                     cx.stop_propagation();
-                    move_connections(&d.ids, group.clone(), cx);
+                    move_connections(&d.ids(cx), group.clone(), cx);
                 })),
             None => row,
         };
@@ -1822,9 +1905,9 @@ impl Render for NavigatorPanel {
                     Self::context_menu(None, cx).show(e.position, window, cx);
                 }),
             )
-            .on_drop(
-                cx.listener(|_, d: &DraggedConnections, _, cx| move_connections(&d.ids, None, cx)),
-            )
+            .on_drop(cx.listener(|_, d: &DraggedConnections, _, cx| {
+                move_connections(&d.ids(cx), None, cx)
+            }))
             .child(tree_view);
         let filter = if self.view.filter_on_top {
             div().border_b_1().border_color(p.separator).child(filter)
@@ -1872,8 +1955,19 @@ impl Render for NavigatorPanel {
             .on_action(
                 cx.listener(|this, _: &NavExtendDown, _, cx| this.step_selection(true, true, cx)),
             )
-            .on_action(cx.listener(|this, _: &NavLeft, _, cx| this.fold(false, cx)))
-            .on_action(cx.listener(|this, _: &NavRight, _, cx| this.fold(true, cx)))
+            .on_action(cx.listener(|this, _: &NavLeft, window, cx| this.fold(false, window, cx)))
+            .on_action(cx.listener(|this, _: &NavRight, window, cx| this.fold(true, window, cx)))
+            // Not a key binding: Enter in the rename field must still commit. Handled only when
+            // the panel itself is focused.
+            .on_key_down(cx.listener(|this, e: &gpui_kit::KeyDownEvent, window, cx| {
+                if e.keystroke.key != "enter" || e.keystroke.modifiers.modified() {
+                    return;
+                }
+                if this.renaming.is_some() || !this.focus_handle.is_focused(window) {
+                    return;
+                }
+                this.open_selected(window, cx);
+            }))
             .on_action(cx.listener(|this, _: &Escape, window, cx| {
                 if this.renaming.is_some() {
                     this.finish_rename(false, window, cx);

@@ -224,6 +224,43 @@ fn multi_select_drag_and_rename(cx: &mut TestAppContext) {
     type_then(cx, "zzz", "escape");
     assert_eq!(group_names(cx)[1].0, "Prod");
 
+    // A single click selects. Only a double click or the disclosure arrow expands.
+    let prod = cx.update(|cx| {
+        ConnectionStore::global(cx)
+            .read(cx)
+            .groups()
+            .iter()
+            .find(|g| g.name == "Prod")
+            .unwrap()
+            .id
+            .clone()
+    });
+    let row_prod = format!("g:{prod}");
+    cx.update_window(handle, |_, window, cx| {
+        if window.try_find(row_prod.clone()).is_some() {
+            window.double_click(row_g.clone(), cx);
+            window.render_frame(cx);
+        }
+        window.click(row_g.clone(), cx);
+        window.render_frame(cx);
+        assert!(
+            window.try_find(row_prod.clone()).is_none(),
+            "a single click does not expand the group"
+        );
+        window.click_at(
+            row_g.clone(),
+            // raw-px: the disclosure chevron is the first 16pt of the row
+            point(gpui_kit::px(16.), gpui_kit::px(11.)),
+            cx,
+        );
+        window.render_frame(cx);
+        assert!(
+            window.try_find(row_prod.clone()).is_some(),
+            "the disclosure arrow expands the group"
+        );
+    })
+    .unwrap();
+
     // Quick filter: only starred connections
     cx.update(|cx| {
         ConnectionStore::global(cx).update(cx, |s, cx| s.update(&a, |c| c.starred = true, cx))

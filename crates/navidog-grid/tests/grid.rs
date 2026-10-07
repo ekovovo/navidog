@@ -4,8 +4,12 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
+use gpui_kit::component::v_flex;
 use gpui_kit::test::TestWindowExt as _;
-use gpui_kit::{AppContext as _, Entity, TestAppContext, WindowBounds, WindowOptions, size};
+use gpui_kit::{
+    AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, Styled as _,
+    TestAppContext, Window, WindowBounds, WindowOptions, div, size,
+};
 use navidog_db::dialect::Written;
 use navidog_grid::model::GridColumn;
 use navidog_grid::{GridEvent, ResultGrid};
@@ -114,6 +118,23 @@ fn select_copy_and_edit(cx: &mut TestAppContext) {
     assert_eq!(v, Some(Some("bb".into())));
 }
 
+/// The table viewer's column: a pane of fixed size and a grid slot that must not grow
+/// with the columns. Mirrors `TableViewer`'s grid slot.
+struct ViewerSlot(Entity<ResultGrid>);
+
+impl Render for ViewerSlot {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        v_flex().size_full().overflow_hidden().child(
+            div()
+                .flex_1()
+                .min_h_0()
+                .min_w_0()
+                .overflow_hidden()
+                .child(self.0.clone()),
+        )
+    }
+}
+
 #[gpui_kit::test]
 fn wide_tables_scroll_horizontally(cx: &mut TestAppContext) {
     cx.update(|cx| {
@@ -121,7 +142,7 @@ fn wide_tables_scroll_horizontally(cx: &mut TestAppContext) {
         navidog_ui::theme::init(cx);
         navidog_grid::init(cx);
     });
-    let (handle, grid): (_, Entity<ResultGrid>) = cx.update(|cx| {
+    let (handle, slot) = cx.update(|cx| {
         // raw-px: test window size
         let test_size = size(gpui_kit::px(600.), gpui_kit::px(300.));
         let bounds = gpui_kit::Bounds {
@@ -133,10 +154,12 @@ fn wide_tables_scroll_horizontally(cx: &mut TestAppContext) {
             ..Default::default()
         };
         gpui_kit::open_window(options, cx, |window, cx| {
-            cx.new(|cx| ResultGrid::new(window, cx))
+            let grid = cx.new(|cx| ResultGrid::new(window, cx));
+            cx.new(|_| ViewerSlot(grid))
         })
         .unwrap()
     });
+    let grid = cx.update(|cx| slot.read(cx).0.clone());
     let columns = (0..30).map(|i| col(&format!("c{i}"), i == 0)).collect();
     let rows = (0..5)
         .map(|r| (0..30).map(|c| Some(format!("{r}-{c}").into())).collect())

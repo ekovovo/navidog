@@ -23,7 +23,7 @@ use gpui_kit::{
 };
 use navidog_core::object::{ObjectKind, ObjectRef, Scope};
 use navidog_core::settings::Settings;
-use navidog_core::workspace::Workspace;
+use navidog_core::workspace::{Selection, Workspace};
 use navidog_db::dialect::Dialect;
 use navidog_db::sessions::{ConnState, Sessions, SessionsEvent, SharedSession, run_on};
 use navidog_db::{CancelHandle, ColumnInfo, DbResult, ResultSet};
@@ -133,8 +133,13 @@ impl BasePanel for TableViewer {
     }
     fn set_active(&mut self, active: bool, _: &mut Window, cx: &mut Context<Self>) {
         tabs::set_active(PanelId::from(cx.entity_id()), active, cx);
-        if !active {
-            Workspace::global(cx).update(cx, |w, cx| w.set_focused_column(None, cx));
+        let workspace = Workspace::global(cx);
+        if active {
+            // The info pane and the navigator follow the tab, not the last tree click.
+            let object = self.object.clone();
+            workspace.update(cx, |w, cx| w.select(Selection::Object(object), cx));
+        } else {
+            workspace.update(cx, |w, cx| w.set_focused_column(None, cx));
         }
     }
 
@@ -1452,6 +1457,8 @@ impl Render for TableViewer {
             .key_context(CONTEXT)
             .track_focus(&self.focus_handle)
             .size_full()
+            .min_w_0()
+            .overflow_hidden()
             .bg(palette(cx).control_bg)
             .on_action(cx.listener(|this, _: &ApplyChanges, window, cx| {
                 this.apply_changes(false, window, cx)
@@ -1478,6 +1485,8 @@ impl Render for TableViewer {
                 div()
                     .flex_1()
                     .min_h_0()
+                    .min_w_0()
+                    .overflow_hidden()
                     .when(!form, |d| d.child(self.grid.clone()))
                     .when(form, |d| d.child(self.render_form(cx))),
             )

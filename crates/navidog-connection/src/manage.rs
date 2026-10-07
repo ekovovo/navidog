@@ -26,6 +26,16 @@ use rust_i18n::t;
 struct ManageWindow(AnyWindowHandle);
 impl Global for ManageWindow {}
 
+/// Star column plus six fixed columns, plus the row padding. `px_3` is 0.75rem on each side
+/// (ListItem, and the header which matches it). The scrollport is the window, so this wider
+/// table is what scrolls sideways.
+fn table_width() -> gpui_kit::Rems {
+    let pt = tokens::list::ROW_HEIGHT.0
+        + tokens::manage_conn::COLUMN_WIDTH.0 * 6.
+        + 0.75 * tokens::BASE_PT * 2.;
+    tokens::Pt(pt).rems()
+}
+
 pub fn open(cx: &mut App) {
     if let Some(handle) = cx.try_global::<ManageWindow>().map(|w| w.0)
         && handle
@@ -115,7 +125,6 @@ impl Render for Manage {
             div()
                 .w(tokens::manage_conn::COLUMN_WIDTH.rems())
                 .flex_none()
-                .min_w_0()
                 .truncate()
                 .px_2()
         };
@@ -243,8 +252,15 @@ impl Render for Manage {
                         .id("manage-rows")
                         .flex_1()
                         .min_h_0()
+                        .min_w_0()
                         .overflow_scroll()
-                        .child(v_flex().min_w_full().child(header).children(body)),
+                        .child(
+                            v_flex()
+                                .w(table_width())
+                                .flex_none()
+                                .child(header)
+                                .children(body),
+                        ),
                 ),
         )
     }

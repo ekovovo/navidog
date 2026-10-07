@@ -212,9 +212,11 @@ pub mod dialog {
 
 pub mod preferences {
     use super::Pt;
-    // Provisional until measured with AX
-    pub const WIDTH: Pt = Pt(680.);
+    // nib:PreferencesWindowController/NSWindowRect
+    pub const WIDTH: Pt = Pt(640.);
     pub const HEIGHT: Pt = Pt(480.);
+    // Provisional until measured with AX (the category list; the nib uses autolayout)
+    pub const NAV_WIDTH: Pt = Pt(160.);
 }
 
 /// Manage connections window (ManageConnectionViewController.nib).

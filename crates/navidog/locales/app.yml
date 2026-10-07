@@ -221,6 +221,12 @@ prefs:
   language:
     en: Language
     zh-CN: 语言
+  main_window:
+    en: Main Window
+    zh-CN: 主窗口
+  open_tabs:
+    en: Open Tabs
+    zh-CN: 打开选项卡
   language_system:
     en: System
     zh-CN: 跟随系统
@@ -246,11 +252,11 @@ prefs:
     en: These tabs open when navidog starts. Right-click a tab and choose “Add to Startup Screen” to add one.
     zh-CN: 启动 navidog 时打开这些选项卡。右键点按选项卡并选择“添加到启动画面”即可加入。
   limit_records:
-    en: Limit records per page
-    zh-CN: 限制每页记录数
+    en: Limit records
+    zh-CN: 限制记录
   records_per_page:
-    en: Records per page
-    zh-CN: 每页记录数
+    en: records per page
+    zh-CN: 条记录（每页）
   auto_begin_transaction:
     en: Begin a transaction automatically when opening a table
     zh-CN: 打开表时自动开始事务

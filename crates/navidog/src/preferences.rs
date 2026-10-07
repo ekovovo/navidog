@@ -81,6 +81,23 @@ impl Preferences {
         }
     }
 
+    /// A Navicat-style section label ("Main Window:").
+    fn section(title: impl Into<SharedString>) -> impl IntoElement {
+        heading(SharedString::from(format!("{}:", title.into())))
+    }
+
+    /// One setting on a line: the label, then the control. Appearance and language
+    /// are popups in Navicat; a horizontal radio group is the same row without a
+    /// menu that would keep stale labels after a language change.
+    fn setting_row(label: impl Into<SharedString>, control: impl IntoElement) -> impl IntoElement {
+        h_flex()
+            .gap_3()
+            .items_center()
+            .min_w_0()
+            .child(label.into())
+            .child(control)
+    }
+
     /// Tabs (F-PREF-003): where editors open, and the startup screen.
     fn render_tabs(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let s = Settings::global(cx).clone();
@@ -92,7 +109,8 @@ impl Preferences {
             .collect();
         v_flex()
             .gap(tokens::form::ROW_GAP.rems())
-            .child(FormRow::bare(
+            .child(Self::section(t!("prefs.open_tabs").to_string()))
+            .child(
                 Checkbox::new("open-in-new-window")
                     .label(t!("prefs.open_in_new_window").to_string())
                     .checked(s.open_in_new_window)
@@ -101,12 +119,13 @@ impl Preferences {
                         Settings::update(cx, |s| s.open_in_new_window = v);
                         cx.refresh_windows();
                     }),
-            ))
-            .child(heading(t!("prefs.startup_screen").to_string()))
+            )
+            .child(Self::section(t!("prefs.startup_screen").to_string()))
             .child(form_note(t!("prefs.startup_hint").to_string(), cx))
             .children(startup.into_iter().enumerate().map(|(ix, o)| {
                 h_flex()
                     .gap_2()
+                    .min_w_0()
                     .child(
                         truncated(("startup-tab", ix), o.name.clone())
                             .flex_1()
@@ -129,26 +148,34 @@ impl Preferences {
             }))
     }
 
-    /// Records (F-PREF-005): page size and transactions of table viewers.
+    /// Records (F-PREF-005): "Limit records [n] records per page" on one line.
     fn render_records(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let s = Settings::global(cx).clone();
         v_flex()
             .gap(tokens::form::ROW_GAP.rems())
-            .child(FormRow::bare(
-                Checkbox::new("limit-records")
-                    .label(t!("prefs.limit_records").to_string())
-                    .checked(s.limit_records)
-                    .on_click(|v: &bool, _, cx| {
-                        let v = *v;
-                        Settings::update(cx, |s| s.limit_records = v);
-                        cx.refresh_windows();
-                    }),
-            ))
-            .child(FormRow::new(
-                t!("prefs.records_per_page").to_string(),
-                Input::new(&self.records_per_page).w(tokens::form::FIELD_WIDTH_SHORT.rems()),
-            ))
-            .child(FormRow::bare(
+            .child(Self::section(t!("prefs.records").to_string()))
+            .child(
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(
+                        Checkbox::new("limit-records")
+                            .label(t!("prefs.limit_records").to_string())
+                            .checked(s.limit_records)
+                            .on_click(|v: &bool, _, cx| {
+                                let v = *v;
+                                Settings::update(cx, |s| s.limit_records = v);
+                                cx.refresh_windows();
+                            }),
+                    )
+                    .child(
+                        Input::new(&self.records_per_page)
+                            .w(tokens::form::FIELD_WIDTH_SHORT.rems())
+                            .disabled(!s.limit_records),
+                    )
+                    .child(t!("prefs.records_per_page").to_string()),
+            )
+            .child(
                 Checkbox::new("auto-begin-transaction")
                     .label(t!("prefs.auto_begin_transaction").to_string())
                     .checked(s.auto_begin_transaction)
@@ -157,7 +184,7 @@ impl Preferences {
                         Settings::update(cx, |s| s.auto_begin_transaction = v);
                         cx.refresh_windows();
                     }),
-            ))
+            )
     }
 
     fn render_general(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -166,9 +193,9 @@ impl Preferences {
         let languages = [Language::System, Language::ZhCn, Language::En];
         v_flex()
             .gap(tokens::form::ROW_GAP.rems())
-            .child(FormRow::new(
-                t!("prefs.appearance").to_string(),
-                RadioGroup::vertical("appearance")
+            .child(Self::setting_row(
+                format!("{}:", t!("prefs.appearance")),
+                RadioGroup::horizontal("appearance")
                     .selected_index(appearances.iter().position(|a| *a == s.appearance))
                     .child(Radio::new("system").label(t!("prefs.appearance_system").to_string()))
                     .child(Radio::new("light").label(t!("prefs.appearance_light").to_string()))
@@ -179,9 +206,9 @@ impl Preferences {
                         navidog_ui::theme::apply_appearance(appearance.is_dark(), Some(window), cx);
                     }),
             ))
-            .child(FormRow::new(
-                t!("prefs.language").to_string(),
-                RadioGroup::vertical("language")
+            .child(Self::setting_row(
+                format!("{}:", t!("prefs.language")),
+                RadioGroup::horizontal("language")
                     .selected_index(languages.iter().position(|l| *l == s.language))
                     .child(Radio::new("lang-system").label(t!("prefs.language_system").to_string()))
                     .child(Radio::new("lang-zh").label("简体中文"))
@@ -194,17 +221,8 @@ impl Preferences {
                         cx.refresh_windows();
                     }),
             ))
-            .child(FormRow::bare(
-                Checkbox::new("auto-connect")
-                    .label(t!("prefs.auto_connect").to_string())
-                    .checked(s.auto_connect_on_startup)
-                    .on_click(|v: &bool, _, cx| {
-                        let v = *v;
-                        Settings::update(cx, |s| s.auto_connect_on_startup = v);
-                        cx.refresh_windows();
-                    }),
-            ))
-            .child(FormRow::bare(
+            .child(Self::section(t!("prefs.main_window").to_string()))
+            .child(
                 Checkbox::new("show-table-children")
                     .label(t!("prefs.show_table_children").to_string())
                     .checked(s.show_table_children)
@@ -213,72 +231,74 @@ impl Preferences {
                         Settings::update(cx, |s| s.show_table_children = v);
                         cx.refresh_windows();
                     }),
-            ))
+            )
+            .child(
+                Checkbox::new("auto-connect")
+                    .label(t!("prefs.auto_connect").to_string())
+                    .checked(s.auto_connect_on_startup)
+                    .on_click(|v: &bool, _, cx| {
+                        let v = *v;
+                        Settings::update(cx, |s| s.auto_connect_on_startup = v);
+                        cx.refresh_windows();
+                    }),
+            )
     }
 
     fn render_advanced(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
-        let dir = navidog_core::paths::config_dir();
+        let dir = navidog_core::paths::config_dir().display().to_string();
         let is_master = ConnectionStore::global(cx).read(cx).is_master();
         v_flex()
             .gap(tokens::form::ROW_GAP.rems())
-            .child(FormRow::new(
-                t!("prefs.settings_location").to_string(),
+            .child(Self::section(t!("prefs.settings_location").to_string()))
+            .child(
+                truncated("settings-location", dir)
+                    .w_full()
+                    .text_color(p.label_secondary),
+            )
+            .child(
+                Button::new("reveal")
+                    .label(t!("prefs.reveal").to_string())
+                    .on_click(|_, _, cx| {
+                        cx.reveal_path(&navidog_core::paths::config_dir());
+                    }),
+            )
+            .child(Self::section(t!("prefs.master_password").to_string()))
+            .child(div().text_color(p.label_secondary).child(if is_master {
+                t!("prefs.master_enabled").to_string()
+            } else {
+                t!("prefs.master_disabled").to_string()
+            }))
+            .child(
                 h_flex()
                     .gap_2()
                     .child(
-                        div()
-                            .text_color(p.label_secondary)
-                            .child(dir.display().to_string()),
-                    )
-                    .child(
-                        Button::new("reveal")
-                            .label(t!("prefs.reveal").to_string())
-                            .on_click(move |_, _, cx| {
-                                cx.reveal_path(&navidog_core::paths::config_dir());
-                            }),
-                    ),
-            ))
-            .child(FormRow::new(
-                t!("prefs.master_password").to_string(),
-                v_flex()
-                    .gap_1()
-                    .child(div().text_color(p.label_secondary).child(if is_master {
-                        t!("prefs.master_enabled").to_string()
-                    } else {
-                        t!("prefs.master_disabled").to_string()
-                    }))
-                    .child(
-                        h_flex()
-                            .gap_2()
-                            .child(
-                                Button::new("master-set")
-                                    .label(
-                                        if is_master {
-                                            t!("prefs.master_change")
-                                        } else {
-                                            t!("prefs.master_set")
-                                        }
-                                        .to_string(),
-                                    )
-                                    .on_click(|_, window, cx| open_master_dialog(window, cx)),
+                        Button::new("master-set")
+                            .label(
+                                if is_master {
+                                    t!("prefs.master_change")
+                                } else {
+                                    t!("prefs.master_set")
+                                }
+                                .to_string(),
                             )
-                            .when(is_master, |r| {
-                                r.child(
-                                    Button::new("master-clear")
-                                        .label(t!("prefs.master_clear").to_string())
-                                        .on_click(|_, window, cx| {
-                                            let store = ConnectionStore::global(cx);
-                                            if let Err(e) = store
-                                                .update(cx, |s, cx| s.set_master_password(None, cx))
-                                            {
-                                                window.push_notification(e.to_string(), cx);
-                                            }
-                                        }),
-                                )
-                            }),
-                    ),
-            ))
+                            .on_click(|_, window, cx| open_master_dialog(window, cx)),
+                    )
+                    .when(is_master, |r| {
+                        r.child(
+                            Button::new("master-clear")
+                                .label(t!("prefs.master_clear").to_string())
+                                .on_click(|_, window, cx| {
+                                    let store = ConnectionStore::global(cx);
+                                    if let Err(e) =
+                                        store.update(cx, |s, cx| s.set_master_password(None, cx))
+                                    {
+                                        window.push_notification(e.to_string(), cx);
+                                    }
+                                }),
+                        )
+                    }),
+            )
     }
 }
 
@@ -314,10 +334,12 @@ impl Render for Preferences {
             .child(
                 h_flex()
                     .flex_1()
+                    .min_h_0()
                     .items_stretch()
                     .child(
                         v_flex()
-                            .w(tokens::pane::NAVIGATOR_WIDTH.rems())
+                            .w(tokens::preferences::NAV_WIDTH.rems())
+                            .flex_none()
                             .py_2()
                             .border_r_1()
                             .border_color(p.separator)
@@ -342,9 +364,13 @@ impl Render for Preferences {
                     )
                     .child(
                         v_flex()
+                            .id("prefs-page")
                             .flex_1()
+                            .min_w_0()
+                            .min_h_0()
+                            .overflow_y_scroll()
                             .p(tokens::form::MARGIN.rems())
-                            .child(content),
+                            .child(div().min_w_0().w_full().child(content)),
                     ),
             )
     }

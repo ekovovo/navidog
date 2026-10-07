@@ -205,17 +205,21 @@ pub fn title(
     // The connection color (F-CONN-014), drawn as a strip under the title
     color: Option<gpui_kit::Hsla>,
 ) -> impl IntoElement {
+    // A floor keeps tabs from shrinking until they all fit. The dock's tab bar
+    // already scrolls horizontally once the strip is wider than the pane.
     h_flex()
         .id(SharedString::from(format!("tab-title-{panel:?}")))
         .gap_1()
-        .min_w_0()
+        .flex_none()
+        .min_w(tokens::tabbar::TAB_MIN_WIDTH.rems())
         .max_w(tokens::editor_tab::TITLE_MAX_WIDTH.rems())
+        .overflow_hidden()
         .when_some(color, |d, c| d.border_b_2().border_color(c))
         .children(icon.map(|i| i.size(tokens::navigator::ROW_ICON.rems())))
-        .child(crate::skin::truncated(
-            SharedString::from(format!("tab-label-{panel:?}")),
-            label,
-        ))
+        .child(
+            crate::skin::truncated(SharedString::from(format!("tab-label-{panel:?}")), label)
+                .flex_1(),
+        )
         .on_mouse_down(MouseButton::Right, move |e, window, cx| {
             cx.stop_propagation();
             context_menu(panel).show(e.position, window, cx);

@@ -218,6 +218,29 @@ mod macos {
         })
         .unwrap();
         shot_of(&mut cx, manage, "manage.png");
+        cx.update_window(manage, |_, window, cx| {
+            let delta = gpui_kit::ScrollDelta::Pixels(gpui_kit::point(
+                // raw-px: scroll the connection table sideways to show the later columns
+                gpui_kit::px(-240.),
+                gpui_kit::Pixels::ZERO,
+            ));
+            window
+                .within("manage-connections")
+                .scroll(("manage-conn", 0usize), delta, cx);
+        })
+        .unwrap();
+        shot_of(&mut cx, manage, "manage-scrolled.png");
+
+        cx.update(navidog::preferences::open);
+        cx.run_until_parked();
+        let prefs = cx
+            .update(|cx| {
+                cx.windows().into_iter().find(|w| {
+                    w.window_id() != handle.window_id() && w.window_id() != manage.window_id()
+                })
+            })
+            .unwrap();
+        shot_of(&mut cx, prefs, "preferences.png");
         let _ = std::fs::remove_dir_all(home);
     }
 

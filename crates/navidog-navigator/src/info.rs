@@ -297,7 +297,9 @@ impl InfoPanel {
                 f
             }
             other => {
-                let scope = other.scope().expect("database, schema and category have a scope");
+                let scope = other
+                    .scope()
+                    .expect("database, schema and category have a scope");
                 let mut f = vec![(
                     t!("info.database").to_string(),
                     scope.database.clone().into(),
