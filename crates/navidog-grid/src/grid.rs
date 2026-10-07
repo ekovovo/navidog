@@ -343,6 +343,15 @@ impl TableDelegate for GridDelegate {
         if self.model.row_count() > 0 && row_ix == self.model.row_count() {
             let p = palette(cx);
             let striped = row_shade(cx) == RowShade::Alternate && row_ix % 2 == 1;
+            // DataTable replaces the row background on hover. This layer is the resting color,
+            // painted after that background, so the blank row does not change under the pointer.
+            row = row.child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .bg(p.control_bg)
+                    .when(striped, |d| d.child(div().size_full().bg(p.row_alt))),
+            );
             row = row.child(gpui_kit::deferred(
                 div()
                     .absolute()
@@ -385,14 +394,15 @@ impl TableDelegate for GridDelegate {
             )
         });
         let p = palette(cx);
-        // Data columns already get a hairline from the resize handle, after the sort icon.
-        // A border on this content would sit between the type name and that icon.
+        // No border here. Header cells are padded, so a right border lands inside the cell:
+        // between the name and the sort icon on a data column, and short of the column edge
+        // on the row-number column. The column edge is the resize hairline, or the pinned
+        // column's own rule for the row-number column.
         div()
             .size_full()
             .min_w_0()
             .px_1()
             .overflow_hidden()
-            .when(col.is_none(), |d| d.border_r_1().border_color(p.grid_line))
             .when_some(header, |d, (c, name, title, kind, type_label)| {
                 let tint = type_tint(kind, cx);
                 d.child(
