@@ -1,4 +1,5 @@
-//! 驱动层：trait、tokio 运行时、内置驱动（MySQL/MariaDB、PostgreSQL、SQLite）与 SSH 隧道。
+//! Drivers: the traits, the tokio runtime, the built-in drivers (MySQL/MariaDB, PostgreSQL,
+//! SQLite) and the SSH tunnel.
 
 pub mod dialect;
 pub mod driver;
@@ -20,9 +21,10 @@ use gpui_kit::App;
 use navidog_core::registry::Source;
 
 pub use driver::*;
+pub use metadata::referenced_values_sql;
 pub use params::{ConnectParams, Secrets};
 
-/// 注册内置驱动。
+/// Register the built-in drivers.
 pub fn init(cx: &mut App) {
     let mut registry = DriverRegistry::default();
     let builtin: [Arc<dyn Driver>; 4] = [
@@ -42,8 +44,8 @@ pub fn init(cx: &mut App) {
     sessions::init(cx);
 }
 
-/// 建立会话：启用 SSH 时先开隧道，再让驱动连接隧道的本地端口。
-/// 必须在 [`runtime::spawn`] 中执行。
+/// Open a session. With SSH, open the tunnel first and connect the driver to its local port.
+/// Must run inside [`runtime::spawn`].
 pub fn connect(
     driver: Arc<dyn Driver>,
     mut params: ConnectParams,
@@ -69,7 +71,7 @@ pub fn connect(
     .boxed()
 }
 
-/// 持有隧道的会话；会话关闭时隧道随之释放。
+/// A session that owns its tunnel. Dropping the session drops the tunnel.
 struct Tunneled {
     inner: Box<dyn Session>,
     _tunnel: ssh::Tunnel,
@@ -105,7 +107,7 @@ impl Session for Tunneled {
     }
 }
 
-/// 测试连接：建立会话、执行一次心跳并关闭。
+/// Test a connection: open a session, ping once, and close it.
 pub async fn test_connection(driver: Arc<dyn Driver>, params: ConnectParams) -> DbResult<String> {
     let mut session = connect(driver, params).await?;
     session.ping().await?;

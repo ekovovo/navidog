@@ -138,6 +138,16 @@ pub struct ColumnInfo {
     pub comment: Option<String>,
 }
 
+/// One column of a foreign key and the column it references (F-DATA-012).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ForeignKey {
+    pub column: String,
+    /// Referenced schema, or the SQLite schema / MySQL database. Empty if the server omitted it.
+    pub schema: String,
+    pub table: String,
+    pub referenced: String,
+}
+
 pub trait Relational: Send {
     fn dialect(&self) -> Dialect;
     fn list_databases(&mut self) -> BoxFuture<'_, DbResult<Vec<String>>>;
@@ -183,6 +193,13 @@ pub trait Relational: Send {
         table: &'a str,
     ) -> BoxFuture<'a, DbResult<TableChildren>> {
         Box::pin(crate::metadata::table_children(self, scope, table))
+    }
+    fn foreign_keys<'a>(
+        &'a mut self,
+        scope: &'a Scope,
+        table: &'a str,
+    ) -> BoxFuture<'a, DbResult<Vec<ForeignKey>>> {
+        Box::pin(crate::metadata::foreign_keys(self, scope, table))
     }
 }
 

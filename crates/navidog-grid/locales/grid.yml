@@ -42,6 +42,21 @@ grid:
   filter_null:
     en: "Filter: %{column} is null"
     zh-CN: "筛选：%{column} 是 null"
+  fk_pick:
+    en: Foreign Key Data Selection
+    zh-CN: 外键数据选择
+  fk_all:
+    en: All
+    zh-CN: 全部
+  fk_limit:
+    en: Limit 1000
+    zh-CN: 限制 1000
+  fk_empty:
+    en: No records
+    zh-CN: 没有记录
+  fk_search:
+    en: Filter
+    zh-CN: 筛选
   delete_rows:
     en: Delete Record
     zh-CN: 删除记录

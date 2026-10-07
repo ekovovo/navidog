@@ -5,7 +5,7 @@ use navidog_core::object::{ObjectKind, Scope};
 
 use crate::dialect::Dialect;
 use crate::driver::{
-    ColumnInfo, DbError, DbResult, ObjectInfo, Relational, ResultSet, TableChildren,
+    ColumnInfo, DbError, DbResult, ForeignKey, ObjectInfo, Relational, ResultSet, TableChildren,
 };
 
 async fn query<R: Relational + ?Sized>(r: &mut R, sql: &str) -> DbResult<ResultSet> {
@@ -530,4 +530,172 @@ pub async fn table_children<R: Relational + ?Sized>(
         foreign_keys: names(foreign_keys).await?,
         triggers: names(triggers).await?,
     })
+}
+
+/// Columns of this table that reference another column. A column that appears in two keys keeps
+/// the first. The SQL is the real catalog query; nothing here invents a referenced column.
+pub async fn foreign_keys<R: Relational + ?Sized>(
+    r: &mut R,
+    scope: &Scope,
+    table: &str,
+) -> DbResult<Vec<ForeignKey>> {
+    let sql = foreign_key_sql(r.dialect(), scope, table);
+    Ok(foreign_keys_from_rows(&query(r, &sql).await?.rows))
+}
+
+pub fn foreign_key_sql(dialect: Dialect, scope: &Scope, table: &str) -> String {
+    let t = dialect.string_literal(table);
+    match dialect {
+        Dialect::MySql => {
+            let db = dialect.string_literal(&scope.database);
+            format!(
+                "SELECT COLUMN_NAME, REFERENCED_TABLE_SCHEMA, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME \
+                 FROM information_schema.KEY_COLUMN_USAGE \
+                 WHERE TABLE_SCHEMA = {db} AND TABLE_NAME = {t} AND REFERENCED_TABLE_NAME IS NOT NULL \
+                 ORDER BY CONSTRAINT_NAME, ORDINAL_POSITION"
+            )
+        }
+        Dialect::Postgres => {
+            let rel = format!(
+                "{}::regclass",
+                dialect.string_literal(&dialect.qualified(scope, table))
+            );
+            format!(
+                "SELECT a.attname, nf.nspname, cf.relname, af.attname \
+                 FROM pg_constraint c \
+                 JOIN LATERAL unnest(c.conkey, c.confkey) WITH ORDINALITY AS cols(attnum, refnum, ord) ON true \
+                 JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = cols.attnum \
+                 JOIN pg_class cf ON cf.oid = c.confrelid \
+                 JOIN pg_namespace nf ON nf.oid = cf.relnamespace \
+                 JOIN pg_attribute af ON af.attrelid = c.confrelid AND af.attnum = cols.refnum \
+                 WHERE c.contype = 'f' AND c.conrelid = {rel} \
+                 ORDER BY c.oid, cols.ord"
+            )
+        }
+        Dialect::Sqlite => {
+            let schema = dialect.string_literal(&scope.database);
+            format!(
+                "SELECT \"from\", {schema}, \"table\", \"to\" \
+                 FROM pragma_foreign_key_list({t}, {schema}) ORDER BY id, seq"
+            )
+        }
+    }
+}
+
+pub fn foreign_keys_from_rows(rows: &[Vec<Option<String>>]) -> Vec<ForeignKey> {
+    let mut out = Vec::new();
+    for row in rows {
+        let column = cell(row, 0);
+        let schema = cell(row, 1);
+        let table = cell(row, 2);
+        let referenced = cell(row, 3);
+        if column.is_empty() || table.is_empty() || referenced.is_empty() {
+            continue;
+        }
+        if out.iter().any(|key: &ForeignKey| key.column == column) {
+            continue;
+        }
+        out.push(ForeignKey {
+            column,
+            schema,
+            table,
+            referenced,
+        });
+    }
+    out
+}
+
+/// Values of the referenced column, for the picker. `limit` None loads the whole column.
+pub fn referenced_values_sql(
+    dialect: Dialect,
+    key: &ForeignKey,
+    search: &str,
+    limit: Option<u64>,
+) -> String {
+    let column = dialect.quote_ident(&key.referenced);
+    let table = if key.schema.is_empty() {
+        dialect.quote_ident(&key.table)
+    } else {
+        format!(
+            "{}.{}",
+            dialect.quote_ident(&key.schema),
+            dialect.quote_ident(&key.table)
+        )
+    };
+    let mut sql = format!("SELECT DISTINCT {column} FROM {table}");
+    if !search.is_empty() {
+        let escaped = search
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
+        sql.push_str(&format!(
+            " WHERE {column} LIKE {} ESCAPE {}",
+            dialect.string_literal(&format!("%{escaped}%")),
+            dialect.string_literal("\\")
+        ));
+    }
+    sql.push_str(" ORDER BY 1");
+    if let Some(limit) = limit {
+        sql.push_str(&format!(" LIMIT {limit}"));
+    }
+    sql
+}
+
+#[cfg(test)]
+mod tests {
+    use navidog_core::object::Scope;
+
+    use super::*;
+
+    fn scope() -> Scope {
+        Scope::new("c", "sakila", Some("public".into()))
+    }
+
+    #[test]
+    fn foreign_key_sql_reads_the_catalog() {
+        let scope = scope();
+        let mysql = foreign_key_sql(Dialect::MySql, &scope, "film_actor");
+        assert!(mysql.contains("information_schema.KEY_COLUMN_USAGE"));
+        assert!(mysql.contains("REFERENCED_COLUMN_NAME"));
+        assert!(mysql.contains("'film_actor'"));
+        assert!(mysql.contains("'sakila'"));
+
+        let pg = foreign_key_sql(Dialect::Postgres, &scope, "film_actor");
+        assert!(pg.contains("pg_constraint"));
+        assert!(pg.contains("unnest(c.conkey, c.confkey)"));
+        assert!(pg.contains("\"public\".\"film_actor\""));
+
+        let sqlite = foreign_key_sql(Dialect::Sqlite, &scope, "film_actor");
+        assert!(sqlite.contains("pragma_foreign_key_list"));
+        assert!(sqlite.contains("\"from\""));
+        assert!(sqlite.contains("\"to\""));
+    }
+
+    #[test]
+    fn rows_without_a_referenced_column_are_dropped() {
+        let rows = vec![
+            vec![
+                Some("actor_id".into()),
+                Some("sakila".into()),
+                Some("actor".into()),
+                Some("actor_id".into()),
+            ],
+            vec![
+                Some("actor_id".into()),
+                Some("other".into()),
+                Some("actor".into()),
+                Some("id".into()),
+            ],
+            vec![Some("film_id".into()), None, Some("film".into()), None],
+        ];
+        let keys = foreign_keys_from_rows(&rows);
+        assert_eq!(keys.len(), 1);
+        assert_eq!(keys[0].column, "actor_id");
+        assert_eq!(keys[0].referenced, "actor_id");
+        let sql = referenced_values_sql(Dialect::MySql, &keys[0], "a%_", Some(1000));
+        assert_eq!(
+            sql,
+            "SELECT DISTINCT `actor_id` FROM `sakila`.`actor` WHERE `actor_id` LIKE '%a\\\\%\\\\_%' ESCAPE '\\\\' ORDER BY 1 LIMIT 1000"
+        );
+    }
 }

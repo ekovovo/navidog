@@ -44,7 +44,8 @@ actions!(
         ToggleFieldComment,
         SetRowHeight,
         ToggleRawData,
-        ToggleRowId
+        ToggleRowId,
+        PickForeignKey
     ]
 );
 
@@ -134,6 +135,8 @@ pub enum GridEvent {
         op: SharedString,
         value: SharedString,
     },
+    /// Open the foreign-key value picker for the focused column
+    PickForeignKey,
 }
 
 pub struct GridDelegate {
@@ -427,6 +430,8 @@ pub struct ResultGrid {
     raw: bool,
     /// The context menu shows a check while SQLite ROWID is visible
     pub show_rowid: bool,
+    /// Local columns that reference another table (F-DATA-012)
+    foreign_keys: Vec<String>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -493,8 +498,14 @@ impl ResultGrid {
             row_height: tokens::grid::ROW_HEIGHT,
             raw: false,
             show_rowid: false,
+            foreign_keys: Vec::new(),
             _subscriptions: subs,
         }
+    }
+
+    pub fn set_foreign_keys(&mut self, columns: Vec<String>, cx: &mut Context<Self>) {
+        self.foreign_keys = columns;
+        cx.notify();
     }
 
     pub fn set_target(&mut self, target: Option<GridTarget>, cx: &mut Context<Self>) {
@@ -739,6 +750,11 @@ impl ResultGrid {
                         quick(column, "contains", &value),
                     );
             }
+        }
+        if let Some((column, _, _)) = self.filter_target(cx)
+            && self.foreign_keys.iter().any(|name| name == column.as_ref())
+        {
+            menu = menu.menu(t!("grid.fk_pick").to_string(), Box::new(PickForeignKey));
         }
         let mut menu = menu
             .separator()
@@ -1027,6 +1043,9 @@ impl Render for ResultGrid {
                     t.delegate_mut().frozen = a.count;
                     t.refresh(cx);
                 });
+            }))
+            .on_action(cx.listener(|_, _: &PickForeignKey, _, cx| {
+                cx.emit(GridEvent::PickForeignKey);
             }))
             .on_action(cx.listener(|_, a: &QuickFilter, _, cx| {
                 cx.emit(GridEvent::QuickFilter {
