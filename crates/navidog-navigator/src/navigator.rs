@@ -403,6 +403,8 @@ pub struct NavigatorPanel {
     only_starred: bool,
     /// Catalog revision the tree was built from. See `render`.
     built_revision: u64,
+    /// Last time a drag near the pane edge stepped the scroll position.
+    autoscroll_at: Option<std::time::Instant>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -528,6 +530,7 @@ impl NavigatorPanel {
                 type_filter: None,
                 only_starred: false,
                 built_revision: 0,
+                autoscroll_at: None,
                 _subscriptions: subs,
             };
             this.rebuild(cx);
@@ -766,6 +769,57 @@ impl NavigatorPanel {
                 t.scroll_to_item(i, strategy);
             }
         });
+    }
+
+    /// While a drag is inside the tree and within one row of its top or bottom, step one row that way.
+    /// Holding still keeps stepping: each step asks for another frame. `scroll_edge` is the decision.
+    fn autoscroll(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !cx.has_active_drag() {
+            return;
+        }
+        let (bounds, top, bottom, len) = {
+            let tree = self.tree.read(cx);
+            let state = tree.scroll_handle().0.borrow();
+            let bounds = state.base_handle.bounds();
+            let top = state.base_handle.top_item();
+            let bottom = state.base_handle.bottom_item();
+            drop(state);
+            let len = (0..).position(|i| tree.entry(i).is_none()).unwrap_or(0);
+            (bounds, top, bottom, len)
+        };
+        let margin = tokens::navigator::ROW_HEIGHT.to_pixels(window.rem_size());
+        let pos = window.mouse_position();
+        let Some(down) = scroll_edge(
+            pos.x.as_f32(),
+            pos.y.as_f32(),
+            bounds.left().as_f32(),
+            bounds.right().as_f32(),
+            bounds.top().as_f32(),
+            bounds.bottom().as_f32(),
+            margin.as_f32(),
+        ) else {
+            return;
+        };
+        if (!down && top == 0) || (down && bottom + 1 >= len) {
+            return;
+        }
+        let now = std::time::Instant::now();
+        if self.autoscroll_at.is_some_and(|at| {
+            now.saturating_duration_since(at) < std::time::Duration::from_millis(80)
+        }) {
+            window.request_animation_frame();
+            return;
+        }
+        self.autoscroll_at = Some(now);
+        let target = if down { bottom + 1 } else { top - 1 };
+        let strategy = if down {
+            gpui_kit::ScrollStrategy::Bottom
+        } else {
+            gpui_kit::ScrollStrategy::Top
+        };
+        self.tree
+            .update(cx, |t, _| t.scroll_to_item(target, strategy));
+        window.request_animation_frame();
     }
 
     /// Right expands the focused folder (a closed connection opens). Left collapses it.
@@ -1903,6 +1957,28 @@ impl TreeBuilder<'_> {
     }
 }
 
+/// `Some(true)` scrolls down, `Some(false)` scrolls up. A pointer outside the pane does neither.
+fn scroll_edge(
+    x: f32,
+    y: f32,
+    left: f32,
+    right: f32,
+    top: f32,
+    bottom: f32,
+    margin: f32,
+) -> Option<bool> {
+    if x < left || x > right || y < top || y > bottom || bottom <= top {
+        return None;
+    }
+    if y - top < margin {
+        Some(false)
+    } else if bottom - y < margin {
+        Some(true)
+    } else {
+        None
+    }
+}
+
 impl Render for NavigatorPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Other panes read the catalog while they render, so gpui skips its
@@ -1916,6 +1992,7 @@ impl Render for NavigatorPanel {
                 this.rebuild(cx);
             });
         }
+        self.autoscroll(window, cx);
         let p = palette(cx);
         let this = cx.entity().downgrade();
         let tree_view = tree(&self.tree, move |ix, entry, selected, window, cx| {
@@ -2134,5 +2211,31 @@ mod tests {
             ObjectKind::Table,
         );
         assert_eq!(pg.ancestors(Some(Dialect::Postgres)).len(), 3);
+    }
+
+    #[test]
+    fn pointer_near_the_pane_edge_scrolls_that_way() {
+        // Viewport x 0..100, y 100..400, one row of margin.
+        assert_eq!(
+            super::scroll_edge(10., 110., 0., 100., 100., 400., 22.),
+            Some(false)
+        );
+        assert_eq!(
+            super::scroll_edge(10., 390., 0., 100., 100., 400., 22.),
+            Some(true)
+        );
+        assert_eq!(
+            super::scroll_edge(10., 200., 0., 100., 100., 400., 22.),
+            None
+        );
+        // The object list sits to the right of the tree; a drag there must not scroll it.
+        assert_eq!(
+            super::scroll_edge(150., 110., 0., 100., 100., 400., 22.),
+            None
+        );
+        assert_eq!(
+            super::scroll_edge(10., 50., 0., 100., 100., 400., 22.),
+            None
+        );
     }
 }
