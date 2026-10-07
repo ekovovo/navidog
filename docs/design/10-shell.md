@@ -13,7 +13,7 @@
 3. `application().with_assets(NavidogAssets)`，其中 `NavidogAssets` 先查找 navidog 自有的图标，找不到再回退 gpui-kit 的 `Assets`。
 4. 在 `run` 回调中依次执行：
    1. `gpui_kit::init(cx)`；
-   2. `cx.set_app_identity(...)`，Bundle ID 为 `ci.nn.navidog`；
+   2. `cx.set_app_identity(...)`，Bundle ID 为 `ci.nn.navidog`。Dock 图标用 `crates/navidog/resources/navidog.svg`；`scripts/bundle-macos.sh` 把它做成 `navidog.icns` 放进应用包，`cargo run` 启动时用同一张图调用 `setApplicationIconImage`（gpui 在 macOS 上忽略窗口的 `icon`）；
    3. 加载 Navicat 主题，`font_size` 设为 13，外观跟随系统或使用偏好设置中固定的外观；
    4. 初始化各 crate：`navidog_core::init`、`navidog_db::init`（启动 tokio 运行时）、`navidog_connection::init`；
    5. 先 `cx.bind_keys(...)`，再 `cx.set_menus(...)`；

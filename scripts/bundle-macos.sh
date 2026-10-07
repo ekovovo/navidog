@@ -12,6 +12,11 @@ app="$out/navidog.app"
 rm -rf "$out" && mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp target/release/navidog "$app/Contents/MacOS/navidog"
 
+iconset="$out/navidog.iconset"
+swift "$PWD/scripts/raster-icon.swift" "$PWD/crates/navidog/resources/navidog.svg" "$iconset"
+iconutil -c icns "$iconset" -o "$app/Contents/Resources/navidog.icns"
+rm -rf "$iconset"
+
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -21,6 +26,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <key>CFBundleDisplayName</key><string>navidog</string>
   <key>CFBundleIdentifier</key><string>ci.nn.navidog</string>
   <key>CFBundleExecutable</key><string>navidog</string>
+  <key>CFBundleIconFile</key><string>navidog</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>${version}</string>
   <key>CFBundleVersion</key><string>${version}</string>

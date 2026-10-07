@@ -47,6 +47,7 @@ pub fn run() {
         .run(|cx| {
             init(cx);
             cx.set_app_identity("ci.nn.navidog", "navidog");
+            set_dock_icon();
             menus::bind_keys(cx);
             menus::set_menus(cx);
             register_app_actions(cx);
@@ -140,3 +141,46 @@ fn register_app_actions(cx: &mut App) {
         });
     });
 }
+
+/// Dock icon for `cargo run`. A bundled `.app` also gets this artwork from
+/// `scripts/bundle-macos.sh`; gpui ignores `WindowOptions::icon` on macOS.
+#[cfg(target_os = "macos")]
+fn set_dock_icon() {
+    use std::ffi::{c_char, c_void, CStr};
+
+    #[link(name = "objc", kind = "dylib")]
+    unsafe extern "C" {
+        fn objc_getClass(name: *const c_char) -> *mut c_void;
+        fn sel_registerName(name: *const c_char) -> *mut c_void;
+        fn objc_msgSend(receiver: *mut c_void, sel: *mut c_void, ...) -> *mut c_void;
+    }
+
+    const SVG: &[u8] = include_bytes!("../resources/navidog.svg");
+
+    unsafe {
+        let sel = |name: &CStr| sel_registerName(name.as_ptr());
+        let data = objc_msgSend(
+            objc_getClass(c"NSData".as_ptr()),
+            sel(c"dataWithBytes:length:"),
+            SVG.as_ptr(),
+            SVG.len(),
+        );
+        let image = objc_msgSend(
+            objc_msgSend(objc_getClass(c"NSImage".as_ptr()), sel(c"alloc")),
+            sel(c"initWithData:"),
+            data,
+        );
+        if image.is_null() {
+            tracing::warn!("the dock icon SVG did not load");
+            return;
+        }
+        let app = objc_msgSend(
+            objc_getClass(c"NSApplication".as_ptr()),
+            sel(c"sharedApplication"),
+        );
+        objc_msgSend(app, sel(c"setApplicationIconImage:"), image);
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn set_dock_icon() {}
