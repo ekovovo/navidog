@@ -152,21 +152,30 @@ fn set_dock_icon() {
     unsafe extern "C" {
         fn objc_getClass(name: *const c_char) -> *mut c_void;
         fn sel_registerName(name: *const c_char) -> *mut c_void;
-        fn objc_msgSend(receiver: *mut c_void, sel: *mut c_void, ...) -> *mut c_void;
+        // Not variadic: on arm64 a variadic declaration uses another ABI, so
+        // the extra arguments never arrive and AppKit throws.
+        fn objc_msgSend();
     }
 
     const SVG: &[u8] = include_bytes!("../resources/navidog.svg");
+    type Send0 = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void;
+    type Send1 = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> *mut c_void;
+    type SendBytes =
+        unsafe extern "C" fn(*mut c_void, *mut c_void, *const u8, usize) -> *mut c_void;
 
     unsafe {
         let sel = |name: &CStr| sel_registerName(name.as_ptr());
-        let data = objc_msgSend(
+        let send0: Send0 = std::mem::transmute(objc_msgSend as *const ());
+        let send1: Send1 = std::mem::transmute(objc_msgSend as *const ());
+        let send_bytes: SendBytes = std::mem::transmute(objc_msgSend as *const ());
+        let data = send_bytes(
             objc_getClass(c"NSData".as_ptr()),
             sel(c"dataWithBytes:length:"),
             SVG.as_ptr(),
             SVG.len(),
         );
-        let image = objc_msgSend(
-            objc_msgSend(objc_getClass(c"NSImage".as_ptr()), sel(c"alloc")),
+        let image = send1(
+            send0(objc_getClass(c"NSImage".as_ptr()), sel(c"alloc")),
             sel(c"initWithData:"),
             data,
         );
@@ -174,11 +183,11 @@ fn set_dock_icon() {
             tracing::warn!("the dock icon SVG did not load");
             return;
         }
-        let app = objc_msgSend(
+        let app = send0(
             objc_getClass(c"NSApplication".as_ptr()),
             sel(c"sharedApplication"),
         );
-        objc_msgSend(app, sel(c"setApplicationIconImage:"), image);
+        send1(app, sel(c"setApplicationIconImage:"), image);
     }
 }
 
