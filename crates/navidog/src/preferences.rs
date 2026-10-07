@@ -12,7 +12,7 @@ use gpui_kit::{
     Styled as _, Window, WindowBounds, WindowOptions, div,
 };
 use navidog_core::object::ObjectRef;
-use navidog_core::settings::{Appearance, Language, Settings};
+use navidog_core::settings::{Appearance, Language, RowShade, Settings};
 use navidog_core::store::ConnectionStore;
 use navidog_ui::assets::lucide;
 use navidog_ui::skin::{FormRow, form_note, heading, truncated};
@@ -58,6 +58,7 @@ enum Page {
 struct Preferences {
     page: Page,
     records_per_page: Entity<InputState>,
+    grid_font_pt: Entity<InputState>,
 }
 
 impl Preferences {
@@ -75,9 +76,22 @@ impl Preferences {
             }
         })
         .detach();
+        let font = Settings::global(cx).grid_font_pt.to_string();
+        let grid_font_pt = cx.new(|cx| InputState::new(window, cx).default_value(font));
+        cx.subscribe(&grid_font_pt, |_, input, e: &InputEvent, cx| {
+            if matches!(e, InputEvent::Change)
+                && let Ok(n) = input.read(cx).value().trim().parse::<f32>()
+                && (8. ..=72.).contains(&n)
+            {
+                Settings::update(cx, |s| s.grid_font_pt = n);
+                cx.refresh_windows();
+            }
+        })
+        .detach();
         Self {
             page: Page::General,
             records_per_page,
+            grid_font_pt,
         }
     }
 
@@ -151,6 +165,7 @@ impl Preferences {
     /// Records (F-PREF-005): "Limit records [n] records per page" on one line.
     fn render_records(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let s = Settings::global(cx).clone();
+        let shades = [RowShade::None, RowShade::Alternate, RowShade::EveryThird];
         v_flex()
             .gap(tokens::form::ROW_GAP.rems())
             .child(Self::section(t!("prefs.records").to_string()))
@@ -185,6 +200,60 @@ impl Preferences {
                         cx.refresh_windows();
                     }),
             )
+            .child(
+                Checkbox::new("sync-record")
+                    .label(t!("prefs.sync_record").to_string())
+                    .checked(s.sync_record)
+                    .on_click(|v: &bool, _, cx| {
+                        let v = *v;
+                        Settings::update(cx, |s| s.sync_record = v);
+                    }),
+            )
+            .child(Self::section(t!("prefs.grid").to_string()))
+            .child(
+                Checkbox::new("click-to-edit")
+                    .label(t!("prefs.click_to_edit").to_string())
+                    .checked(s.click_to_edit)
+                    .on_click(|v: &bool, _, cx| {
+                        let v = *v;
+                        Settings::update(cx, |s| s.click_to_edit = v);
+                    }),
+            )
+            .child(
+                Checkbox::new("use-default-grid-font")
+                    .label(t!("prefs.use_default_font").to_string())
+                    .checked(s.use_default_grid_font)
+                    .on_click(|v: &bool, _, cx| {
+                        let v = *v;
+                        Settings::update(cx, |s| s.use_default_grid_font = v);
+                        cx.refresh_windows();
+                    }),
+            )
+            .child(Self::setting_row(
+                format!("{}:", t!("prefs.font_size")),
+                Input::new(&self.grid_font_pt)
+                    .w(tokens::form::FIELD_WIDTH_SHORT.rems())
+                    .disabled(s.use_default_grid_font),
+            ))
+            .child(Self::setting_row(
+                format!("{}:", t!("prefs.row_shading")),
+                RadioGroup::horizontal("row-shade")
+                    .selected_index(shades.iter().position(|a| *a == s.row_shade))
+                    .child(Radio::new("shade-none").label(t!("prefs.shade_none").to_string()))
+                    .child(
+                        Radio::new("shade-alternate")
+                            .label(t!("prefs.shade_alternate").to_string()),
+                    )
+                    .child(
+                        Radio::new("shade-every-third")
+                            .label(t!("prefs.shade_every_third").to_string()),
+                    )
+                    .on_click(move |ix: &usize, _, cx| {
+                        let shade = shades[*ix];
+                        Settings::update(cx, |s| s.row_shade = shade);
+                        cx.refresh_windows();
+                    }),
+            ))
     }
 
     fn render_general(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -222,6 +291,16 @@ impl Preferences {
                     }),
             ))
             .child(Self::section(t!("prefs.main_window").to_string()))
+            .child(
+                Checkbox::new("show-schema-objects")
+                    .label(t!("prefs.show_schema_objects").to_string())
+                    .checked(s.show_schema_objects)
+                    .on_click(|v: &bool, _, cx| {
+                        let v = *v;
+                        Settings::update(cx, |s| s.show_schema_objects = v);
+                        cx.refresh_windows();
+                    }),
+            )
             .child(
                 Checkbox::new("show-table-children")
                     .label(t!("prefs.show_table_children").to_string())

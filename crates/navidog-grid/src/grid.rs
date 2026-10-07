@@ -18,7 +18,7 @@ use gpui_kit::{
     WeakEntity, Window, actions, div, px,
 };
 use navidog_core::object::Scope;
-use navidog_core::settings::Settings;
+use navidog_core::settings::{RowShade, Settings};
 use navidog_db::dialect::Dialect;
 use navidog_ui::skin::truncated;
 use navidog_ui::{palette, tokens};
@@ -161,6 +161,8 @@ pub struct GridDelegate {
     settled: Option<usize>,
     /// The pointer dragged the selection, so the mouse-up (not SelectCell) settles the row.
     dragged: bool,
+    /// A data-cell click should open the editor when "click to edit" is on.
+    arm_click_edit: bool,
     commit_requested: bool,
 }
 
@@ -325,6 +327,11 @@ impl TableDelegate for GridDelegate {
     ) -> impl IntoElement {
         let p = palette(cx);
         let state = self.model.row_state(r);
+        // Every third row is painted on the cells. Alternate uses DataTable's stripe;
+        // the empty filler rows below the data stay plain. ponytail: filler rows are not tinted.
+        let tint = row_shade(cx) == RowShade::EveryThird
+            && RowShade::EveryThird.paints(r)
+            && state != RowState::Deleted;
         let Some(c) = ix.checked_sub(1) else {
             let mark = match state {
                 RowState::Inserted => "*",
@@ -339,6 +346,7 @@ impl TableDelegate for GridDelegate {
                 .items_center()
                 .justify_center()
                 .text_color(p.label_secondary)
+                .when(tint, |d| d.bg(p.row_alt))
                 .child(mark)
                 .into_any_element();
         };
@@ -375,6 +383,7 @@ impl TableDelegate for GridDelegate {
             .flex()
             .items_center()
             .overflow_hidden()
+            .when(tint, |d| d.bg(p.row_alt))
             .when(state == RowState::Deleted, |d| d.bg(p.grid_deleted))
             .when(self.model.is_edited(r, c), |d| d.bg(p.grid_edited))
             .when(hit && !selected, |d| d.bg(p.selection_inactive))
@@ -383,7 +392,11 @@ impl TableDelegate for GridDelegate {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |t, e: &MouseDownEvent, _, cx| {
-                    t.delegate_mut().model.select((r, c), e.modifiers.shift);
+                    let d = t.delegate_mut();
+                    d.model.select((r, c), e.modifiers.shift);
+                    d.arm_click_edit = !e.modifiers.shift
+                        && cx.has_global::<Settings>()
+                        && Settings::global(cx).click_to_edit;
                     cx.notify();
                 }),
             )
@@ -391,8 +404,10 @@ impl TableDelegate for GridDelegate {
             // land on the same cell
             .on_mouse_move(cx.listener(move |t, e: &MouseMoveEvent, _, cx| {
                 if e.dragging() && t.delegate().model.head() != (r, c) {
-                    t.delegate_mut().dragged = true;
-                    t.delegate_mut().model.select((r, c), true);
+                    let d = t.delegate_mut();
+                    d.dragged = true;
+                    d.arm_click_edit = false;
+                    d.model.select((r, c), true);
                     cx.notify();
                 }
             }))
@@ -404,6 +419,7 @@ impl TableDelegate for GridDelegate {
                     if !std::mem::take(&mut d.dragged) {
                         return;
                     }
+                    d.arm_click_edit = false;
                     d.finish_navigation(false);
                     cx.notify();
                 }),
@@ -460,6 +476,7 @@ impl ResultGrid {
             widths: BTreeMap::new(),
             settled: None,
             dragged: false,
+            arm_click_edit: false,
             commit_requested: false,
         };
         let table = cx.new(|cx| {
@@ -649,11 +666,13 @@ impl ResultGrid {
                         .is_some_and(|(pos, _)| *pos == (r, ix - 1));
                 // Clicking the cell being edited moves the caret; it does not commit.
                 if editing_here {
+                    self.table
+                        .update(cx, |t, _| t.delegate_mut().arm_click_edit = false);
                     return;
                 }
                 self.commit_edit(window, cx);
                 let shift = window.modifiers().shift;
-                self.table.update(cx, |t, cx| {
+                let (arm, committing) = self.table.update(cx, |t, cx| {
                     let m = &mut t.delegate_mut().model;
                     match ix.checked_sub(1) {
                         None => m.select_rows(r, shift),
@@ -661,10 +680,18 @@ impl ResultGrid {
                         Some(c) if m.head() == (r, c) => {}
                         Some(c) => m.select((r, c), shift),
                     }
-                    t.delegate_mut().finish_navigation(shift);
+                    let d = t.delegate_mut();
+                    d.finish_navigation(shift);
+                    let arm = std::mem::take(&mut d.arm_click_edit);
+                    let committing = d.commit_requested;
                     cx.notify();
+                    (arm, committing)
                 });
                 self.focus_column(cx);
+                // A click that leaves a dirty row commits first; editing waits for the reload.
+                if arm && ix > 0 && !committing {
+                    self.start_edit((r, ix - 1), window, cx);
+                }
             }
             TableEvent::DoubleClickedCell(r, ix) if ix > 0 => {
                 self.start_edit((r, ix - 1), window, cx)
@@ -984,6 +1011,8 @@ impl Render for ResultGrid {
         let row = self
             .row_height
             .to_pixels(self.table.read(cx).delegate().rem);
+        let font_pt = grid_font_pt(cx);
+        let alternate = row_shade(cx) == RowShade::Alternate;
         // The dock clips overflow. Without a zero minimum the grid grows to the
         // sum of its columns, so this scrollbar has nothing to scroll.
         div()
@@ -991,6 +1020,7 @@ impl Render for ResultGrid {
             .size_full()
             .min_w_0()
             .overflow_hidden()
+            .when_some(font_pt, |d, pt| d.text_size(tokens::Pt(pt).rems()))
             .on_action(cx.listener(|this, _: &Copy, _, cx| {
                 cx.write_to_clipboard(ClipboardItem::new_string(this.copy_text("tsv", cx)))
             }))
@@ -1062,7 +1092,7 @@ impl Render for ResultGrid {
             .child(
                 DataTable::new(&self.table)
                     .with_size(Size::Size(row))
-                    .stripe(true)
+                    .stripe(alternate)
                     .bordered(false),
             )
     }
@@ -1114,6 +1144,23 @@ impl Render for RowHeight {
                     ),
             )
     }
+}
+
+fn row_shade(cx: &App) -> RowShade {
+    if cx.has_global::<Settings>() {
+        Settings::global(cx).row_shade
+    } else {
+        RowShade::Alternate
+    }
+}
+
+/// Point size when the grid is not using the interface font. `None` keeps the default.
+fn grid_font_pt(cx: &App) -> Option<f32> {
+    if !cx.has_global::<Settings>() {
+        return None;
+    }
+    let s = Settings::global(cx);
+    (!s.use_default_grid_font).then_some(s.grid_font_pt)
 }
 
 fn width_key(scope: &Scope, table: &str) -> String {

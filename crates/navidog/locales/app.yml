@@ -248,6 +248,9 @@ prefs:
   auto_connect:
     en: Open connections marked “Auto connect” on startup
     zh-CN: 启动时打开勾选了“自动连接”的连接
+  show_schema_objects:
+    en: Show objects under schema in navigation pane
+    zh-CN: 显示模式下的对象
   show_table_children:
     en: Show objects under tables
     zh-CN: 显示表下的对象
@@ -275,6 +278,33 @@ prefs:
   auto_begin_transaction:
     en: Begin a transaction automatically when opening a table
     zh-CN: 打开表时自动开始事务
+  sync_record:
+    en: Synchronize record after modifying
+    zh-CN: 修改后同步记录
+  click_to_edit:
+    en: Click a cell to edit
+    zh-CN: 点击以触发编辑
+  grid:
+    en: Grid
+    zh-CN: 网格
+  use_default_font:
+    en: Use default font
+    zh-CN: 使用默认字体
+  font_size:
+    en: Font Size
+    zh-CN: 字体大小
+  row_shading:
+    en: Row Shading
+    zh-CN: 行底纹
+  shade_none:
+    en: None
+    zh-CN: 无
+  shade_alternate:
+    en: Alternate Rows
+    zh-CN: 交替行
+  shade_every_third:
+    en: Every Third Row
+    zh-CN: 每三行
   settings_location:
     en: Settings Location
     zh-CN: 设置位置

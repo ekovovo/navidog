@@ -246,6 +246,40 @@ impl GridModel {
         self.raw.clear();
     }
 
+    /// Folds a successful commit into the loaded page when "synchronize after modifying" is off.
+    /// Unfilled insert columns become NULL; generated values show up only on the next refresh.
+    pub fn accept_committed(&mut self) {
+        for (&(r, c), v) in &self.edits {
+            if let Some(cell) = self.rows.get_mut(r).and_then(|row| row.get_mut(c)) {
+                *cell = v.clone();
+            }
+        }
+        let mut gone: Vec<usize> = self.deleted.iter().copied().collect();
+        gone.sort_unstable_by(|a, b| b.cmp(a));
+        for r in gone {
+            if r < self.rows.len() {
+                self.rows.remove(r);
+            }
+        }
+        for row in self.new_rows.drain(..) {
+            if row.iter().any(Option::is_some) {
+                self.rows
+                    .push(row.into_iter().map(|cell| cell.flatten()).collect());
+            }
+        }
+        self.edits.clear();
+        self.deleted.clear();
+        self.raw.clear();
+        if self.row_count() == 0 {
+            self.head = (0, 0);
+            self.anchor = (0, 0);
+        } else if self.head.0 >= self.row_count() {
+            let r = self.row_count() - 1;
+            self.head.0 = r;
+            self.anchor.0 = r;
+        }
+    }
+
     pub fn has_primary_key(&self) -> bool {
         self.columns.iter().any(|c| c.primary_key)
     }
@@ -642,6 +676,28 @@ mod tests {
         m.set_value(1, 0, Some("3".into()));
         let key = &m.change_set().updates[0].key;
         assert_eq!(key, &RowKey(vec![v("id", Some("2")), v("name", None)]));
+    }
+
+    #[test]
+    fn accept_committed_keeps_saved_rows_and_drops_empty_inserts() {
+        let mut m = model(true);
+        m.set_value(1, 1, Some("b".into()));
+        m.select((0, 0), false);
+        m.delete_selected_rows();
+        let r = m.insert_row();
+        m.set_value(r, 1, Some("c".into()));
+        m.insert_row();
+        m.accept_committed();
+        assert!(!m.has_changes());
+        assert_eq!(m.row_count(), 2);
+        let text = |m: &GridModel, r, c| {
+            m.value(r, c)
+                .and_then(|cell| cell.as_deref())
+                .map(|s| s.to_string())
+        };
+        assert_eq!(text(&m, 0, 0), Some("2".into()));
+        assert_eq!(text(&m, 0, 1), Some("b".into()));
+        assert_eq!(text(&m, 1, 1), Some("c".into()));
     }
 
     #[test]

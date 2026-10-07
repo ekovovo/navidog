@@ -803,8 +803,20 @@ impl TableViewer {
                         if end_transaction {
                             this.in_transaction = false;
                         }
-                        this.hidden_revert = None;
-                        this.reload(true, cx);
+                        // Hiding a column while dirty still reloads so the projection matches.
+                        let reproject = this.hidden_revert.take().is_some();
+                        let sync = !cx.has_global::<Settings>() || Settings::global(cx).sync_record;
+                        if sync || reproject {
+                            this.reload(true, cx);
+                        } else {
+                            this.grid.update(cx, |g, cx| {
+                                g.update_model(cx, |m| m.accept_committed());
+                            });
+                            this.form_for = None;
+                            if std::mem::take(&mut this.add_after_commit) {
+                                this.insert_row(cx);
+                            }
+                        }
                     }
                     Err(e) => {
                         this.add_after_commit = false;
@@ -2440,12 +2452,25 @@ impl TableViewer {
                 div()
                     .id("viewer-status")
                     .flex_1()
+                    .min_w_0()
                     .px_2()
                     .overflow_hidden()
                     .whitespace_nowrap()
                     .text_ellipsis()
                     .text_color(p.label_secondary)
                     .child(self.status.clone()),
+            )
+            .when(
+                !self.columns.is_empty() && !self.columns.iter().any(|c| c.primary_key),
+                |bar| {
+                    bar.child(
+                        div()
+                            .flex_none()
+                            .whitespace_nowrap()
+                            .text_color(p.label_secondary)
+                            .child(t!("viewer.no_primary_key").to_string()),
+                    )
+                },
             )
             .child(div().text_color(p.label_secondary).child(records))
             .child(

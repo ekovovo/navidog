@@ -331,6 +331,9 @@ viewer:
   records:
     en: "Record %{selected} of %{count} in page %{page}"
     zh-CN: "第 %{selected} 条记录 (共 %{count} 条) 于第 %{page} 页"
+  no_primary_key:
+    en: This table has no primary key. Changes may affect multiple rows
+    zh-CN: 该表没有主键，可能影响多行
   total:
     en: "Total %{total}"
     zh-CN: "总计 %{total} 条"

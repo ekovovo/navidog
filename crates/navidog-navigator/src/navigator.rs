@@ -596,6 +596,7 @@ impl NavigatorPanel {
             query: &query,
             filtering,
             show_children: Settings::global(cx).show_table_children,
+            show_objects: Settings::global(cx).show_schema_objects,
         };
         let items = if self.view.hide_groups {
             let mut conns: Vec<_> = builder
@@ -1716,6 +1717,7 @@ struct TreeBuilder<'a> {
     query: &'a str,
     filtering: bool,
     show_children: bool,
+    show_objects: bool,
 }
 
 impl TreeBuilder<'_> {
@@ -1908,6 +1910,9 @@ impl TreeBuilder<'_> {
     }
 
     fn categories(&self, scope: &Scope, dialect: Dialect) -> Vec<TreeItem> {
+        if !self.show_objects {
+            return Vec::new();
+        }
         dialect
             .object_kinds()
             .iter()

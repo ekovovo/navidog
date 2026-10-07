@@ -50,6 +50,27 @@ impl Language {
     }
 }
 
+/// How data rows are tinted (F-PREF-005). `Alternate` matches the grid's built-in stripe.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RowShade {
+    None,
+    #[default]
+    Alternate,
+    EveryThird,
+}
+
+impl RowShade {
+    /// Whether data row `row` (0 is the first) gets the alternate background.
+    pub fn paints(self, row: usize) -> bool {
+        match self {
+            Self::None => false,
+            Self::Alternate => row % 2 == 1,
+            Self::EveryThird => row % 3 == 2,
+        }
+    }
+}
+
 fn system_prefers_chinese(lang: &str) -> bool {
     if lang.starts_with("zh") {
         return true;
@@ -78,6 +99,8 @@ pub struct Settings {
     pub language: Language,
     /// Open the connections marked "auto connect" at startup
     pub auto_connect_on_startup: bool,
+    /// General: list object categories under each database or schema in the navigator
+    pub show_schema_objects: bool,
     /// General: show fields, indexes, foreign keys and triggers under tables in the navigator
     pub show_table_children: bool,
     /// Tabs: open editors in a new window instead of a new tab
@@ -89,6 +112,15 @@ pub struct Settings {
     pub records_per_page: u64,
     /// Records: begin a transaction automatically when a table viewer opens
     pub auto_begin_transaction: bool,
+    /// Reload the page after a successful commit so generated values show up.
+    pub sync_record: bool,
+    /// A single click starts editing; otherwise a double-click or Return does.
+    pub click_to_edit: bool,
+    /// When false, the grid uses `grid_font_pt` instead of the interface font size.
+    /// ponytail: size only — there is no system font panel, so the family stays the default.
+    pub use_default_grid_font: bool,
+    pub grid_font_pt: f32,
+    pub row_shade: RowShade,
     /// Objects tab detail view: hidden property columns per object kind ("Choose Columns")
     pub object_hidden_columns: std::collections::BTreeMap<String, Vec<String>>,
     /// Table viewer column widths in pixels, keyed by scope and table then column name
@@ -104,12 +136,18 @@ impl Default for Settings {
             appearance: Appearance::System,
             language: Language::System,
             auto_connect_on_startup: true,
+            show_schema_objects: true,
             show_table_children: false,
             open_in_new_window: false,
             startup_tabs: Vec::new(),
             limit_records: true,
             records_per_page: 1000,
             auto_begin_transaction: false,
+            sync_record: true,
+            click_to_edit: false,
+            use_default_grid_font: true,
+            grid_font_pt: 13.,
+            row_shade: RowShade::Alternate,
             object_hidden_columns: Default::default(),
             column_widths: Default::default(),
             extra: Default::default(),
@@ -164,8 +202,23 @@ mod tests {
         assert_eq!(s.appearance, Appearance::Dark);
         assert_eq!(s.language, Language::System);
         assert!(s.auto_connect_on_startup);
+        assert!(s.show_schema_objects);
+        assert!(s.sync_record);
+        assert!(!s.click_to_edit);
+        assert!(s.use_default_grid_font);
+        assert_eq!(s.grid_font_pt, 13.);
+        assert_eq!(s.row_shade, RowShade::Alternate);
         let back = serde_json::to_string(&s).unwrap();
         assert!(back.contains("\"future\":1"));
+    }
+
+    #[test]
+    fn row_shade_paints_the_matching_rows() {
+        assert!(!RowShade::None.paints(1));
+        assert!(RowShade::Alternate.paints(1));
+        assert!(!RowShade::Alternate.paints(0));
+        assert!(RowShade::EveryThird.paints(2));
+        assert!(!RowShade::EveryThird.paints(1));
     }
 
     #[test]
