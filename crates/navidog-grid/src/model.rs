@@ -417,6 +417,97 @@ impl GridModel {
         (columns, rows)
     }
 
+    /// Next cell at or after `from` whose text contains `query`. Wraps around the page.
+    /// `after` starts at the following cell, so Find Next does not stay on the current hit.
+    pub fn find_cell(
+        &self,
+        query: &str,
+        from: Pos,
+        after: bool,
+        case_sensitive: bool,
+    ) -> Option<Pos> {
+        if query.is_empty() || self.columns.is_empty() || self.row_count() == 0 {
+            return None;
+        }
+        let cols = self.columns.len();
+        let start = if after {
+            let (r, c) = from;
+            if c + 1 < cols {
+                (r, c + 1)
+            } else {
+                (r.saturating_add(1), 0)
+            }
+        } else {
+            from
+        };
+        let total = self.row_count() * cols;
+        let start_i = (start.0 * cols + start.1).min(total.saturating_sub(1));
+        (0..total).find_map(|step| {
+            let i = (start_i + step) % total;
+            let pos = (i / cols, i % cols);
+            self.cell_matches(pos.0, pos.1, query, case_sensitive)
+                .then_some(pos)
+        })
+    }
+
+    /// Next column name containing `query`, wrapping around.
+    pub fn find_column_name(
+        &self,
+        query: &str,
+        from: usize,
+        after: bool,
+        case_sensitive: bool,
+    ) -> Option<usize> {
+        let n = self.columns.len();
+        if query.is_empty() || n == 0 {
+            return None;
+        }
+        let start = if after {
+            from.saturating_add(1) % n
+        } else {
+            from.min(n - 1)
+        };
+        (0..n).find_map(|step| {
+            let c = (start + step) % n;
+            contains(&self.columns[c].name, query, case_sensitive).then_some(c)
+        })
+    }
+
+    pub fn cell_matches(&self, r: usize, c: usize, query: &str, case_sensitive: bool) -> bool {
+        self.value(r, c)
+            .and_then(|v| v.as_deref())
+            .is_some_and(|s| contains(s, query, case_sensitive))
+    }
+
+    /// Replaces `query` in one cell. Returns whether the text changed.
+    pub fn replace_cell(
+        &mut self,
+        pos: Pos,
+        query: &str,
+        replacement: &str,
+        case_sensitive: bool,
+    ) -> bool {
+        let Some(Some(current)) = self.value(pos.0, pos.1).cloned() else {
+            return false;
+        };
+        let Some(next) = replace_text(&current, query, replacement, case_sensitive) else {
+            return false;
+        };
+        self.set_value(pos.0, pos.1, Some(next.into()));
+        true
+    }
+
+    /// Replaces `query` in every loaded cell. Returns how many cells changed.
+    pub fn replace_all(&mut self, query: &str, replacement: &str, case_sensitive: bool) -> usize {
+        let hits: Vec<Pos> = (0..self.row_count())
+            .flat_map(|r| (0..self.columns.len()).map(move |c| (r, c)))
+            .filter(|&(r, c)| self.cell_matches(r, c, query, case_sensitive))
+            .collect();
+        hits.into_iter()
+            .filter(|&pos| self.replace_cell(pos, query, replacement, case_sensitive))
+            .count()
+    }
+
     /// Writes tab-separated text starting at the selection's top left, appending rows past the end.
     pub fn paste(&mut self, text: &str, raw: bool) {
         let (rows, cols) = self.selection();
@@ -439,6 +530,56 @@ impl GridModel {
             }
         }
     }
+}
+
+fn contains(hay: &str, needle: &str, case_sensitive: bool) -> bool {
+    if needle.is_empty() {
+        return false;
+    }
+    if case_sensitive {
+        hay.contains(needle)
+    } else {
+        let n: Vec<char> = needle.chars().collect();
+        let h: Vec<char> = hay.chars().collect();
+        h.windows(n.len()).any(|w| {
+            w.iter()
+                .zip(&n)
+                .all(|(a, b)| a.to_lowercase().eq(b.to_lowercase()))
+        })
+    }
+}
+
+fn replace_text(
+    hay: &str,
+    needle: &str,
+    replacement: &str,
+    case_sensitive: bool,
+) -> Option<String> {
+    if needle.is_empty() || !contains(hay, needle, case_sensitive) {
+        return None;
+    }
+    if case_sensitive {
+        return Some(hay.replace(needle, replacement));
+    }
+    let h: Vec<char> = hay.chars().collect();
+    let n: Vec<char> = needle.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < h.len() {
+        let hit = i + n.len() <= h.len()
+            && h[i..i + n.len()]
+                .iter()
+                .zip(&n)
+                .all(|(a, b)| a.to_lowercase().eq(b.to_lowercase()));
+        if hit {
+            out.push_str(replacement);
+            i += n.len();
+        } else {
+            out.push(h[i]);
+            i += 1;
+        }
+    }
+    Some(out)
 }
 
 #[cfg(test)]
@@ -567,5 +708,19 @@ mod tests {
         m.set_value(0, 1, Some("O'Brien".into()));
         assert_eq!(m.raw_text(0, 1, true, Dialect::MySql), "'O''Brien'");
         assert_eq!(m.raw_text(0, 1, false, Dialect::MySql), "O'Brien");
+    }
+
+    #[test]
+    fn find_wraps_and_replace_keeps_the_change_set() {
+        let mut m = model(true);
+        assert_eq!(m.find_cell("A", (0, 0), false, false), Some((0, 1)));
+        assert_eq!(m.find_cell("nope", (0, 0), false, false), None);
+        assert_eq!(m.find_cell("a", (0, 1), true, true), Some((0, 1)));
+        assert_eq!(m.find_cell("2", (0, 1), true, true), Some((1, 0)));
+        assert_eq!(m.find_column_name("na", 0, false, false), Some(1));
+        assert!(m.replace_cell((0, 1), "a", "z", true));
+        assert_eq!(m.value(0, 1), Some(&Some("z".into())));
+        assert_eq!(m.replace_all("z", "zz", false), 1);
+        assert!(m.has_changes());
     }
 }

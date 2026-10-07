@@ -110,6 +110,8 @@ pub struct GridDelegate {
     /// String values are shown as SQL literals (F-DATA-010)
     raw: bool,
     dialect: Dialect,
+    /// Highlight cells containing this text (query, case sensitive)
+    find: Option<(SharedString, bool)>,
     /// The row a plain click or key move settled on. Leaving it while it is dirty commits.
     settled: Option<usize>,
     /// The pointer dragged the selection, so the mouse-up (not SelectCell) settles the row.
@@ -288,6 +290,10 @@ impl TableDelegate for GridDelegate {
                 .into_any_element();
         }
         let selected = self.model.is_selected(r, c);
+        let hit = self
+            .find
+            .as_ref()
+            .is_some_and(|(query, case)| self.model.cell_matches(r, c, query, *case));
         let shown = self.model.raw_text(r, c, self.raw, self.dialect);
         let (text, muted): (SharedString, bool) = match self.model.value(r, c) {
             // A cell shows one line, like Navicat; the cell editor shows the full value
@@ -306,6 +312,7 @@ impl TableDelegate for GridDelegate {
             .overflow_hidden()
             .when(state == RowState::Deleted, |d| d.bg(p.grid_deleted))
             .when(self.model.is_edited(r, c), |d| d.bg(p.grid_edited))
+            .when(hit && !selected, |d| d.bg(p.selection_inactive))
             .when(muted, |d| d.text_color(p.label_tertiary))
             .when(selected, |d| d.bg(p.selection).text_color(p.selection_text))
             .on_mouse_down(
@@ -379,6 +386,7 @@ impl ResultGrid {
             show_comment: false,
             raw: false,
             dialect: Dialect::Sqlite,
+            find: None,
             settled: None,
             dragged: false,
             commit_requested: false,
@@ -471,6 +479,25 @@ impl ResultGrid {
             cx.notify();
         });
         cx.emit(GridEvent::Changed);
+    }
+
+    /// Highlights cells that contain `query`. `None` clears the highlight.
+    pub fn set_find(&mut self, query: Option<(SharedString, bool)>, cx: &mut Context<Self>) {
+        self.table.update(cx, |t, cx| {
+            t.delegate_mut().find = query;
+            cx.notify();
+        });
+    }
+
+    /// Selects a cell and scrolls it into view. Leaving a dirty row still commits.
+    pub fn go_to(&mut self, pos: Pos, cx: &mut Context<Self>) {
+        self.table.update(cx, |t, cx| {
+            t.delegate_mut().model.select(pos, false);
+            t.delegate_mut().finish_navigation(false);
+            t.set_selected_cell(pos.0, pos.1 + 1, cx);
+            cx.notify();
+        });
+        self.scroll_to_row(pos.0, cx);
     }
 
     pub fn scroll_to_row(&self, row: usize, cx: &mut App) {

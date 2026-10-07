@@ -106,6 +106,30 @@ viewer:
   apply:
     en: Apply
     zh-CN: 应用
+  find_data:
+    en: Find Data
+    zh-CN: 查找数据
+  find_columns:
+    en: Find Column
+    zh-CN: 查找列
+  find_next:
+    en: Find Next
+    zh-CN: 查找下一个
+  replace:
+    en: Replace
+    zh-CN: 替换
+  replace_all:
+    en: Replace All
+    zh-CN: 全部替换
+  find_case:
+    en: Match Case
+    zh-CN: 大小写符合
+  find_highlight:
+    en: Highlight
+    zh-CN: 高亮显示符合的单元格
+  find_incremental:
+    en: Incremental
+    zh-CN: 递增搜索
   where_hint:
     en: "WHERE condition, e.g. id > 10"
     zh-CN: "WHERE 条件，例如 id > 10"

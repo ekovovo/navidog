@@ -36,10 +36,15 @@ use crate::model::{Cell, GridColumn, GridModel};
 
 const PANEL: &str = "TableViewer";
 const CONTEXT: &str = "TableViewer";
-actions!(viewer, [ApplyChanges]);
+actions!(viewer, [ApplyChanges, ShowFind, FindNext, ShowReplace]);
 
 pub(crate) fn init(cx: &mut App) {
-    cx.bind_keys([KeyBinding::new("cmd-s", ApplyChanges, Some(CONTEXT))]);
+    cx.bind_keys([
+        KeyBinding::new("cmd-s", ApplyChanges, Some(CONTEXT)),
+        KeyBinding::new("cmd-f", ShowFind, Some(CONTEXT)),
+        KeyBinding::new("cmd-g", FindNext, Some(CONTEXT)),
+        KeyBinding::new("alt-cmd-f", ShowReplace, Some(CONTEXT)),
+    ]);
     register_panel(cx, PANEL, |ctx, window, cx| {
         let object = match ctx.info() {
             PanelInfo::Panel(v) => serde_json::from_value::<ObjectRef>(v.clone()).ok(),
@@ -62,6 +67,14 @@ pub struct TableViewer {
     order: Entity<InputState>,
     limit_input: Entity<InputState>,
     show_filter: bool,
+    find_input: Entity<InputState>,
+    replace_input: Entity<InputState>,
+    show_find: bool,
+    replace_mode: bool,
+    find_columns: bool,
+    find_case: bool,
+    find_highlight: bool,
+    find_incremental: bool,
     limit: Option<u64>,
     page: u64,
     total: Option<u64>,
@@ -256,6 +269,8 @@ impl TableViewer {
                 InputState::new(window, cx)
                     .default_value(Settings::global(cx).records_per_page.to_string())
             });
+            let find_input = cx.new(|cx| InputState::new(window, cx));
+            let replace_input = cx.new(|cx| InputState::new(window, cx));
             let apply_on_enter = |this: &mut Self,
                                   _: &Entity<InputState>,
                                   e: &InputEvent,
@@ -267,6 +282,13 @@ impl TableViewer {
                 }
             };
             let subs = vec![
+                cx.subscribe_in(&find_input, window, |this, _, e: &InputEvent, _, cx| {
+                    if matches!(e, InputEvent::Change) && this.find_incremental {
+                        this.find_step(false, cx);
+                    } else if matches!(e, InputEvent::Change) {
+                        this.sync_highlight(cx);
+                    }
+                }),
                 cx.subscribe_in(&filter, window, apply_on_enter),
                 cx.subscribe_in(&order, window, apply_on_enter),
                 cx.subscribe_in(
@@ -343,7 +365,15 @@ impl TableViewer {
                 filter,
                 order,
                 limit_input,
+                find_input,
+                replace_input,
                 show_filter: false,
+                show_find: false,
+                replace_mode: false,
+                find_columns: false,
+                find_case: false,
+                find_highlight: true,
+                find_incremental: false,
                 limit: {
                     let s = Settings::global(cx);
                     s.limit_records.then_some(s.records_per_page.max(1))
@@ -895,6 +925,170 @@ impl TableViewer {
             )
     }
 
+    fn open_find(&mut self, replace: bool, window: &mut Window, cx: &mut Context<Self>) {
+        self.show_find = true;
+        self.replace_mode = replace;
+        self.find_input.update(cx, |s, cx| s.focus(window, cx));
+        self.sync_highlight(cx);
+        cx.notify();
+    }
+
+    fn sync_highlight(&mut self, cx: &mut Context<Self>) {
+        let query = self.find_input.read(cx).value().to_string();
+        let on = self.show_find && self.find_highlight && !self.find_columns && !query.is_empty();
+        let case = self.find_case;
+        self.grid.update(cx, |g, cx| {
+            g.set_find(on.then(|| (query.into(), case)), cx);
+        });
+    }
+
+    fn find_step(&mut self, after: bool, cx: &mut Context<Self>) {
+        let query = self.find_input.read(cx).value().to_string();
+        if query.is_empty() {
+            self.sync_highlight(cx);
+            return;
+        }
+        let case = self.find_case;
+        let head = self.grid.read(cx).model(cx).head();
+        if self.find_columns {
+            let hit = self
+                .grid
+                .read(cx)
+                .model(cx)
+                .find_column_name(&query, head.1, after, case);
+            if let Some(c) = hit {
+                self.grid.update(cx, |g, cx| {
+                    g.update_model(cx, |m| m.select_column(c, false))
+                });
+            }
+        } else if let Some(pos) = self
+            .grid
+            .read(cx)
+            .model(cx)
+            .find_cell(&query, head, after, case)
+        {
+            self.grid.update(cx, |g, cx| g.go_to(pos, cx));
+        }
+        self.sync_highlight(cx);
+    }
+
+    fn replace_current(&mut self, cx: &mut Context<Self>) {
+        if self.find_columns {
+            return;
+        }
+        let query = self.find_input.read(cx).value().to_string();
+        let replacement = self.replace_input.read(cx).value().to_string();
+        let case = self.find_case;
+        let head = self.grid.read(cx).model(cx).head();
+        let replaced = self.grid.update(cx, |g, cx| {
+            let mut ok = false;
+            g.update_model(cx, |m| {
+                ok = m.replace_cell(head, &query, &replacement, case)
+            });
+            ok
+        });
+        self.find_step(replaced, cx);
+    }
+
+    fn replace_every(&mut self, cx: &mut Context<Self>) {
+        if self.find_columns {
+            return;
+        }
+        let query = self.find_input.read(cx).value().to_string();
+        let replacement = self.replace_input.read(cx).value().to_string();
+        let case = self.find_case;
+        self.grid.update(cx, |g, cx| {
+            g.update_model(cx, |m| {
+                m.replace_all(&query, &replacement, case);
+            });
+        });
+        self.sync_highlight(cx);
+    }
+
+    fn render_find(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let p = palette(cx);
+        let toggle = |id: &'static str, on: bool, label: String| {
+            Button::new(id).xsmall().ghost().selected(on).label(label)
+        };
+        h_flex()
+            .h(tokens::viewer::FILTER_HEIGHT.rems())
+            .px_2()
+            .gap_1()
+            .border_b_1()
+            .border_color(p.separator)
+            .child({
+                let label = if self.find_columns {
+                    t!("viewer.find_columns").to_string()
+                } else {
+                    t!("viewer.find_data").to_string()
+                };
+                toggle("find-columns", self.find_columns, label).on_click(cx.listener(
+                    |this, _, _, cx| {
+                        this.find_columns = !this.find_columns;
+                        this.find_step(false, cx);
+                    },
+                ))
+            })
+            .child(Input::new(&self.find_input).xsmall().flex_1())
+            .child(
+                Button::new("find-next")
+                    .xsmall()
+                    .ghost()
+                    .label(t!("viewer.find_next").to_string())
+                    .on_click(cx.listener(|this, _, _, cx| this.find_step(true, cx))),
+            )
+            .when(self.replace_mode && !self.find_columns, |bar| {
+                bar.child(Input::new(&self.replace_input).xsmall().flex_1())
+                    .child(
+                        Button::new("replace-one")
+                            .xsmall()
+                            .ghost()
+                            .label(t!("viewer.replace").to_string())
+                            .on_click(cx.listener(|this, _, _, cx| this.replace_current(cx))),
+                    )
+                    .child(
+                        Button::new("replace-all")
+                            .xsmall()
+                            .ghost()
+                            .label(t!("viewer.replace_all").to_string())
+                            .on_click(cx.listener(|this, _, _, cx| this.replace_every(cx))),
+                    )
+            })
+            .child(
+                toggle(
+                    "find-case",
+                    self.find_case,
+                    t!("viewer.find_case").to_string(),
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.find_case = !this.find_case;
+                    this.sync_highlight(cx);
+                })),
+            )
+            .child(
+                toggle(
+                    "find-highlight",
+                    self.find_highlight,
+                    t!("viewer.find_highlight").to_string(),
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.find_highlight = !this.find_highlight;
+                    this.sync_highlight(cx);
+                })),
+            )
+            .child(
+                toggle(
+                    "find-incremental",
+                    self.find_incremental,
+                    t!("viewer.find_incremental").to_string(),
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.find_incremental = !this.find_incremental;
+                    cx.notify();
+                })),
+            )
+    }
+
     fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
         let ready = self.session.is_some() && !self.busy;
@@ -1230,7 +1424,18 @@ impl Render for TableViewer {
                 this.toggle_column(action.name.to_string(), window, cx);
             }))
             .on_action(cx.listener(|this, _: &ToggleRawData, _, cx| this.toggle_raw(cx)))
+            .on_action(
+                cx.listener(|this, _: &ShowFind, window, cx| this.open_find(false, window, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &ShowReplace, window, cx| this.open_find(true, window, cx)),
+            )
+            .on_action(cx.listener(|this, _: &FindNext, _, cx| {
+                this.show_find = true;
+                this.find_step(true, cx);
+            }))
             .child(self.render_toolbar(cx))
+            .when(self.show_find, |v| v.child(self.render_find(cx)))
             .when(self.show_filter, |v| v.child(self.render_filter(cx)))
             .child(
                 div()
