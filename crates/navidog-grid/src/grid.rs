@@ -245,18 +245,24 @@ fn type_glyph(kind: TypeKind) -> gpui_kit::component::Icon {
     }
 }
 
-/// One span-1 group per column while types are shown, so the header is two rows
-/// (name, then type) each as tall as a data row. `None` keeps a single header row.
-/// Labels are column indexes; `render_group_th` is not told the index otherwise.
-fn type_groups(show_type: bool, count: usize) -> Option<Vec<ColumnGroup>> {
-    if !show_type {
+/// Header groups while types are shown. `None` keeps a single header row.
+/// The label is the first column index.
+///
+/// The marker and frozen columns stay pinned, one group each. Every scrolling
+/// column shares one group: a flex item per column drifts away from the
+/// virtualized type row by the time you scroll to the right edge.
+fn type_groups(show_type: bool, count: usize, frozen: usize) -> Option<Vec<ColumnGroup>> {
+    if !show_type || count == 0 {
         return None;
     }
-    Some(
-        (0..count)
-            .map(|ix| ColumnGroup::new(ix.to_string(), 1))
-            .collect(),
-    )
+    let pinned = (1 + frozen).min(count);
+    let mut groups: Vec<_> = (0..pinned)
+        .map(|ix| ColumnGroup::new(ix.to_string(), 1))
+        .collect();
+    if pinned < count {
+        groups.push(ColumnGroup::new(pinned.to_string(), count - pinned));
+    }
+    Some(groups)
 }
 
 fn header_type(col: &GridColumn, show_comment: bool) -> String {
@@ -361,53 +367,47 @@ impl TableDelegate for GridDelegate {
     }
 
     fn group_headers(&self, cx: &App) -> Option<Vec<Vec<ColumnGroup>>> {
-        type_groups(self.show_type, self.columns_count(cx)).map(|row| vec![row])
+        type_groups(self.show_type, self.columns_count(cx), self.frozen).map(|row| vec![row])
     }
 
     fn render_group_th(
         &mut self,
         label: &SharedString,
-        _col_span: usize,
+        col_span: usize,
         width: Pixels,
         _: &mut Window,
         cx: &mut Context<TableState<Self>>,
     ) -> impl IntoElement {
-        let ix = label.parse::<usize>().unwrap_or(usize::MAX);
-        let data = ix
-            .checked_sub(1)
-            .and_then(|c| self.model.columns.get(c).map(|col| (c, col.name.clone())));
+        let start = label.parse::<usize>().unwrap_or(0);
         let (show_type, show_comment) = (self.show_type, self.show_comment);
         let p = palette(cx);
         let head = cx.theme().tokens.table_head;
-        let rule = data.is_some();
-        // This element is the column width, so the rule sits on the column edge.
-        // The type row below uses the resize hairline instead of a border.
-        div()
-            .w(width)
-            .h_full()
-            .flex_shrink_0()
-            .min_w_0()
-            .overflow_hidden()
-            .relative()
-            .when(rule, |d| d.border_r_1().border_color(p.grid_line))
-            // ponytail: DataTable paints border_b on the header row after the cell, and the
-            // delegate cannot turn it off. This strip is the header color, so the name row and
-            // the type row read as one cell. If the border moves off the row's bottom edge,
-            // the line shows through.
-            .child(gpui_kit::deferred(
+        // Names are absolutely placed at the column offsets. A flex child per column
+        // is what drifted away from the type row at the right edge.
+        let mut x = px(0.); // raw-px: names start at the left edge of this group
+        let mut names = Vec::new();
+        for step in 0..col_span {
+            let ix = start + step;
+            let Some(c) = ix.checked_sub(1) else {
+                x += self.width(tokens::grid::ROW_NUMBER_WIDTH);
+                continue;
+            };
+            let Some(name) = self.model.columns.get(c).map(|col| col.name.clone()) else {
+                break;
+            };
+            let w = self.column_width(&name);
+            names.push(
                 div()
                     .absolute()
-                    .bottom(px(-1.)) // raw-px: the row border sits on the bottom pixel
-                    .left_0()
-                    // Data columns overlap their own rule so the seam does not punch a hole in it.
-                    // The row-number column stops short of the pinned hairline.
-                    .right(if rule { px(-1.) } else { px(1.) }) // raw-px: one pixel of border
-                    .h(px(2.)) // raw-px: that border plus one pixel of bleed
-                    .bg(head)
-                    .when(rule, |d| d.border_r_1().border_color(p.grid_line)),
-            ))
-            .when_some(data, |d, (c, name)| {
-                d.flex()
+                    .left(x)
+                    .top_0()
+                    .bottom_0()
+                    .w(w)
+                    .min_w_0()
+                    .overflow_hidden()
+                    .border_r_1()
+                    .border_color(p.grid_line)
+                    .flex()
                     .flex_row()
                     .items_center()
                     .px_1()
@@ -418,6 +418,19 @@ impl TableDelegate for GridDelegate {
                                 .line_height(tokens::Pt(15.).rems()),
                         ),
                     )
+                    // ponytail: DataTable paints border_b on the header row after the cell.
+                    // This strip is the header color, so the name and the type read as one cell.
+                    .child(gpui_kit::deferred(
+                        div()
+                            .absolute()
+                            .bottom(px(-1.)) // raw-px: the row border sits on the bottom pixel
+                            .left_0()
+                            .right(px(-1.)) // raw-px: overlap the column rule so the seam does not break it
+                            .h(px(2.)) // raw-px: that border plus one pixel of bleed
+                            .bg(head)
+                            .border_r_1()
+                            .border_color(p.grid_line),
+                    ))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |t, e: &MouseDownEvent, _, cx| {
@@ -434,7 +447,28 @@ impl TableDelegate for GridDelegate {
                             column_menu(c, name.clone(), show_type, show_comment)
                                 .show(e.position, window, cx);
                         }),
-                    )
+                    ),
+            );
+            x += w;
+        }
+        div()
+            .w(width)
+            .h_full()
+            .flex_shrink_0()
+            .relative()
+            .children(names)
+            .when(start == 0, |this| {
+                // The row-number column has no name. Cover its seam without painting
+                // over the pinned hairline.
+                this.child(gpui_kit::deferred(
+                    div()
+                        .absolute()
+                        .bottom(px(-1.)) // raw-px: the row border sits on the bottom pixel
+                        .left_0()
+                        .right(px(1.)) // raw-px: leave the pinned hairline
+                        .h(px(2.)) // raw-px: that border plus one pixel of bleed
+                        .bg(head),
+                ))
             })
     }
 
@@ -1514,12 +1548,17 @@ mod tests {
     }
 
     #[test]
-    fn type_header_is_one_group_per_column() {
-        let groups = type_groups(true, 3).expect("types on");
+    fn scrolling_columns_share_one_header_group() {
+        let groups = type_groups(true, 5, 1).expect("types on");
         assert_eq!(groups.len(), 3);
-        assert_eq!(groups.iter().map(|g| g.span).sum::<usize>(), 3);
-        assert_eq!(groups[0].label.to_string(), "0");
+        assert_eq!(groups[0].span, 1);
+        assert_eq!(groups[1].span, 1);
+        assert_eq!(groups[2].span, 3);
         assert_eq!(groups[2].label.to_string(), "2");
-        assert!(type_groups(false, 3).is_none());
+        assert_eq!(groups.iter().map(|g| g.span).sum::<usize>(), 5);
+        let scrolling = type_groups(true, 4, 0).expect("types on");
+        assert_eq!(scrolling.len(), 2);
+        assert_eq!(scrolling[1].span, 3);
+        assert!(type_groups(false, 4, 0).is_none());
     }
 }
