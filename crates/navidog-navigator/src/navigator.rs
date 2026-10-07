@@ -1743,30 +1743,32 @@ impl TreeBuilder<'_> {
             .into_iter()
             .map(|child| {
                 let folder = Node::TableFolder(table.clone(), child);
-                let names = match child {
+                let loaded = match child {
                     Child::Fields => match self.catalog.columns(&table.scope, &table.name) {
                         Some(Load::Ready(cols)) => {
-                            Some(cols.iter().map(|c| c.name.clone()).collect())
+                            Ok(cols.iter().map(|c| c.name.clone()).collect())
                         }
-                        _ => None,
+                        Some(Load::Failed(e)) => Err(e.to_string()),
+                        _ => Err(t!("nav.loading").to_string()),
                     },
                     _ => match self.catalog.table_children(&table.scope, &table.name) {
-                        Some(Load::Ready(c)) => Some(match child {
+                        Some(Load::Ready(c)) => Ok(match child {
                             Child::Indexes => c.indexes.clone(),
                             Child::ForeignKeys => c.foreign_keys.clone(),
                             _ => c.triggers.clone(),
                         }),
-                        _ => None,
+                        Some(Load::Failed(e)) => Err(e.to_string()),
+                        _ => Err(t!("nav.loading").to_string()),
                     },
                 };
-                let items = match names {
-                    Some(names) => names
+                let items = match loaded {
+                    Ok(names) => names
                         .into_iter()
                         .map(|n: String| {
                             TreeItem::new(Node::TableItem(table.clone(), child, n.clone()).id(), n)
                         })
                         .collect(),
-                    None => Self::placeholder(&folder, t!("nav.loading").to_string()),
+                    Err(message) => Self::placeholder(&folder, message),
                 };
                 self.item(
                     folder,

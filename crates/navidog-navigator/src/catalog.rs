@@ -83,6 +83,7 @@ impl Catalog {
 
     fn load<K, T>(
         &mut self,
+        slot_name: &'static str,
         key: K,
         slot: Slot<K, T>,
         job: Option<JoinHandle<DbResult<T>>>,
@@ -98,7 +99,9 @@ impl Catalog {
         let Some(job) = job else { return };
         self.generation_clock = self.generation_clock.wrapping_add(1);
         let generation = self.generation_clock;
-        let task_key = format!("{key:?}");
+        // Columns and table children use the same `(scope, table)` key. The task map
+        // drops the previous task, which cancels it, so the slot name has to be part of the id.
+        let task_key = format!("{slot_name}:{key:?}");
         self.generation.insert(task_key.clone(), generation);
         slot(self).insert(key.clone(), Load::Loading);
         self.bump();
@@ -131,6 +134,7 @@ impl Catalog {
             .read(cx)
             .run_rel(conn, Some(db), |r| r.list_schemas());
         self.load(
+            "schemas",
             (conn.to_string(), database),
             |c| &mut c.schemas,
             job,
@@ -152,7 +156,14 @@ impl Catalog {
             Some(&scope.database),
             move |r| Box::pin(async move { r.list_objects(&s, kind).await }),
         );
-        self.load((scope.clone(), kind), |c| &mut c.objects, job, force, cx);
+        self.load(
+            "objects",
+            (scope.clone(), kind),
+            |c| &mut c.objects,
+            job,
+            force,
+            cx,
+        );
     }
 
     pub fn ensure_ddl(&mut self, obj: &ObjectRef, force: bool, cx: &mut Context<Self>) {
@@ -162,7 +173,7 @@ impl Catalog {
             Some(&obj.scope.database),
             move |r| Box::pin(async move { r.object_ddl(&o.scope, o.kind, &o.name).await }),
         );
-        self.load(obj.clone(), |c| &mut c.ddl, job, force, cx);
+        self.load("ddl", obj.clone(), |c| &mut c.ddl, job, force, cx);
     }
 
     pub fn ensure_columns(
@@ -179,6 +190,7 @@ impl Catalog {
             move |r| Box::pin(async move { r.table_columns(&s, &t).await }),
         );
         self.load(
+            "columns",
             (scope.clone(), table.to_string()),
             |c| &mut c.columns,
             job,
@@ -201,6 +213,7 @@ impl Catalog {
             move |r| Box::pin(async move { r.table_children(&s, &t).await }),
         );
         self.load(
+            "children",
             (scope.clone(), table.to_string()),
             |c| &mut c.children,
             job,
@@ -252,4 +265,79 @@ pub(crate) fn init(cx: &mut App) {
         Catalog::default()
     });
     cx.set_global(GlobalCatalog(catalog));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use navidog_db::runtime;
+
+    fn column(name: &str) -> ColumnInfo {
+        ColumnInfo {
+            name: name.into(),
+            type_name: "int".into(),
+            nullable: false,
+            primary_key: true,
+            default: None,
+            comment: None,
+        }
+    }
+
+    /// Fields and the other table children share a `(scope, table)` key. Both loads must finish.
+    #[gpui_kit::test]
+    fn fields_and_children_of_one_table_both_finish(cx: &mut gpui_kit::TestAppContext) {
+        let catalog = cx.new(|_| Catalog::default());
+        let scope = Scope::new("c", "db", None);
+        let columns = runtime::spawn(async { Ok(vec![column("id")]) });
+        let children = runtime::spawn(async {
+            Ok(TableChildren {
+                indexes: vec!["idx".into()],
+                ..TableChildren::default()
+            })
+        });
+        catalog.update(cx, |cat, cx| {
+            cat.load(
+                "columns",
+                (scope.clone(), "actor".into()),
+                |c| &mut c.columns,
+                Some(columns),
+                true,
+                cx,
+            );
+            cat.load(
+                "children",
+                (scope.clone(), "actor".into()),
+                |c| &mut c.children,
+                Some(children),
+                true,
+                cx,
+            );
+        });
+        for _ in 0..50 {
+            cx.run_until_parked();
+            let done = catalog.read_with(cx, |cat, _| {
+                matches!(cat.columns(&scope, "actor"), Some(Load::Ready(_)))
+                    && matches!(cat.table_children(&scope, "actor"), Some(Load::Ready(_)))
+            });
+            if done {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let state = catalog.read_with(cx, |cat, _| {
+            (
+                format!(
+                    "{:?}",
+                    cat.columns(&scope, "actor")
+                        .map(|l| matches!(l, Load::Ready(_)))
+                ),
+                format!(
+                    "{:?}",
+                    cat.table_children(&scope, "actor")
+                        .map(|l| matches!(l, Load::Ready(_)))
+                ),
+            )
+        });
+        panic!("fields and children did not both finish: {state:?}");
+    }
 }
