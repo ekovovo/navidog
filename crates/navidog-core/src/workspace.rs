@@ -50,6 +50,8 @@ pub struct Workspace {
     /// Other selected nodes besides the primary one (⌘- or ⇧-click in the navigator)
     also: Vec<Selection>,
     status: SharedString,
+    /// Column focused in the table viewer. The info pane's Fields page shows this column.
+    focused_column: Option<String>,
 }
 
 impl EventEmitter<WorkspaceEvent> for Workspace {}
@@ -98,6 +100,17 @@ impl Workspace {
     pub fn set_status(&mut self, status: impl Into<SharedString>, cx: &mut Context<Self>) {
         self.status = status.into();
         cx.notify();
+    }
+
+    pub fn focused_column(&self) -> Option<&str> {
+        self.focused_column.as_deref()
+    }
+
+    pub fn set_focused_column(&mut self, column: Option<String>, cx: &mut Context<Self>) {
+        if self.focused_column != column {
+            self.focused_column = column;
+            cx.notify();
+        }
     }
 }
 

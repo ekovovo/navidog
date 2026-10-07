@@ -23,6 +23,7 @@ use gpui_kit::{
 };
 use navidog_core::object::{ObjectKind, ObjectRef, Scope};
 use navidog_core::settings::Settings;
+use navidog_core::workspace::Workspace;
 use navidog_db::dialect::Dialect;
 use navidog_db::sessions::{ConnState, Sessions, SessionsEvent, SharedSession, run_on};
 use navidog_db::{CancelHandle, ColumnInfo, DbResult, ResultSet};
@@ -132,6 +133,9 @@ impl BasePanel for TableViewer {
     }
     fn set_active(&mut self, active: bool, _: &mut Window, cx: &mut Context<Self>) {
         tabs::set_active(PanelId::from(cx.entity_id()), active, cx);
+        if !active {
+            Workspace::global(cx).update(cx, |w, cx| w.set_focused_column(None, cx));
+        }
     }
 
     fn on_removed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -337,6 +341,11 @@ impl TableViewer {
                             if !this.busy {
                                 this.apply_changes(false, window, cx);
                             }
+                        }
+                        GridEvent::ColumnFocused(name) => {
+                            let name = name.to_string();
+                            Workspace::global(cx)
+                                .update(cx, |w, cx| w.set_focused_column(Some(name), cx));
                         }
                     },
                 ),

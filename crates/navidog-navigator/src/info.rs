@@ -16,6 +16,7 @@ use gpui_kit::{
 use navidog_core::object::{ObjectKind, ObjectRef};
 use navidog_core::store::ConnectionStore;
 use navidog_core::workspace::{Selection, Workspace};
+use navidog_db::ColumnInfo;
 use navidog_db::sessions::{ConnState, Sessions};
 use navidog_ui::assets::lucide;
 use navidog_ui::skin::{heading, truncated};
@@ -82,6 +83,18 @@ impl Panel for InfoPanel {
     fn title_bar(&self, _: &App) -> bool {
         false
     }
+}
+
+/// The info pane shows the column focused in the table viewer, or every column when that
+/// name is not on this table.
+fn visible_columns<'a>(cols: &'a [ColumnInfo], focus: Option<&str>) -> Vec<&'a ColumnInfo> {
+    if let Some(name) = focus {
+        let hit: Vec<_> = cols.iter().filter(|c| c.name == name).collect();
+        if !hit.is_empty() {
+            return hit;
+        }
+    }
+    cols.iter().collect()
 }
 
 fn selected_object(cx: &App) -> Option<ObjectRef> {
@@ -284,7 +297,7 @@ impl InfoPanel {
                 f
             }
             other => {
-                let scope = other.scope().expect("数据库、模式、分类都有作用域");
+                let scope = other.scope().expect("database, schema and category have a scope");
                 let mut f = vec![(
                     t!("info.database").to_string(),
                     scope.database.clone().into(),
@@ -334,36 +347,46 @@ impl InfoPanel {
             return self.message(t!("info.nothing_selected").to_string(), cx);
         };
         match Catalog::global(cx).read(cx).columns(&obj.scope, &obj.name) {
-            Some(Load::Ready(cols)) => v_flex()
-                .p(tokens::info::INSET.rems())
-                .gap(tokens::info::ROW_GAP.rems())
-                .children(cols.iter().map(|c| {
-                    let mut tags = vec![c.type_name.clone()];
-                    if c.primary_key {
-                        tags.push(t!("info.primary_key").to_string());
-                    }
-                    if c.nullable {
-                        tags.push(t!("info.nullable").to_string());
-                    }
-                    if let Some(d) = &c.default {
-                        tags.push(format!("{}: {d}", t!("info.default")));
-                    }
-                    let id = SharedString::from(format!("info-field-{}", c.name));
-                    v_flex()
-                        .min_w_0()
-                        .child(truncated(id.clone(), c.name.clone()).text_color(p.label))
-                        .child(
-                            truncated(SharedString::from(format!("{id}-tags")), tags.join("  ·  "))
+            Some(Load::Ready(cols)) => {
+                let focus = Workspace::global(cx)
+                    .read(cx)
+                    .focused_column()
+                    .map(str::to_string);
+                let shown = visible_columns(cols, focus.as_deref());
+                v_flex()
+                    .p(tokens::info::INSET.rems())
+                    .gap(tokens::info::ROW_GAP.rems())
+                    .children(shown.iter().map(|c| {
+                        let mut tags = vec![c.type_name.clone()];
+                        if c.primary_key {
+                            tags.push(t!("info.primary_key").to_string());
+                        }
+                        if c.nullable {
+                            tags.push(t!("info.nullable").to_string());
+                        }
+                        if let Some(d) = &c.default {
+                            tags.push(format!("{}: {d}", t!("info.default")));
+                        }
+                        let id = SharedString::from(format!("info-field-{}", c.name));
+                        v_flex()
+                            .min_w_0()
+                            .child(truncated(id.clone(), c.name.clone()).text_color(p.label))
+                            .child(
+                                truncated(
+                                    SharedString::from(format!("{id}-tags")),
+                                    tags.join("  ·  "),
+                                )
                                 .text_size(tokens::font::SIZE_SMALL.rems())
                                 .text_color(p.label_secondary),
-                        )
-                        .children(c.comment.clone().map(|m| {
-                            truncated(SharedString::from(format!("{id}-comment")), m)
-                                .text_size(tokens::font::SIZE_SMALL.rems())
-                                .text_color(p.label_tertiary)
-                        }))
-                }))
-                .into_any_element(),
+                            )
+                            .children(c.comment.clone().map(|m| {
+                                truncated(SharedString::from(format!("{id}-comment")), m)
+                                    .text_size(tokens::font::SIZE_SMALL.rems())
+                                    .text_color(p.label_tertiary)
+                            }))
+                    }))
+                    .into_any_element()
+            }
             Some(Load::Failed(e)) => self.message(e.to_string(), cx),
             _ => self.message(t!("nav.loading").to_string(), cx),
         }
@@ -567,5 +590,35 @@ impl Render for Share {
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     ),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn col(name: &str) -> ColumnInfo {
+        ColumnInfo {
+            name: name.into(),
+            type_name: "int".into(),
+            nullable: true,
+            primary_key: false,
+            default: None,
+            comment: None,
+        }
+    }
+
+    #[test]
+    fn fields_page_follows_the_focused_column() {
+        let cols = [col("id"), col("name")];
+        assert_eq!(
+            visible_columns(&cols, Some("name"))
+                .iter()
+                .map(|c| c.name.as_str())
+                .collect::<Vec<_>>(),
+            ["name"]
+        );
+        assert_eq!(visible_columns(&cols, None).len(), 2);
+        assert_eq!(visible_columns(&cols, Some("missing")).len(), 2);
     }
 }

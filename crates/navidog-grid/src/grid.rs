@@ -107,6 +107,8 @@ pub enum GridEvent {
     Changed,
     /// The current row changed and the row we left has uncommitted changes
     CommitRequested,
+    /// The column of the focused cell, for the info pane's Fields page
+    ColumnFocused(SharedString),
 }
 
 pub struct GridDelegate {
@@ -610,6 +612,7 @@ impl ResultGrid {
                     t.delegate_mut().finish_navigation(shift);
                     cx.notify();
                 });
+                self.focus_column(cx);
             }
             TableEvent::DoubleClickedCell(r, ix) if ix > 0 => {
                 self.start_edit((r, ix - 1), window, cx)
@@ -815,6 +818,18 @@ impl ResultGrid {
             m.select(next, true);
             t.set_selected_cell(next.0, next.1 + 1, cx);
         });
+        self.focus_column(cx);
+    }
+
+    fn focus_column(&mut self, cx: &mut Context<Self>) {
+        let name = {
+            let m = self.model(cx);
+            let c = m.head().1;
+            m.columns.get(c).map(|col| col.name.clone())
+        };
+        if let Some(name) = name {
+            cx.emit(GridEvent::ColumnFocused(name));
+        }
     }
 
     fn copy_text(&self, format: &str, cx: &App) -> String {
@@ -915,6 +930,7 @@ impl Render for ResultGrid {
             }))
             .on_action(cx.listener(|this, a: &SelectColumn, _, cx| {
                 this.update_model(cx, |m| m.select_column(a.index, false));
+                this.focus_column(cx);
             }))
             .on_action(cx.listener(|this, a: &FreezeColumns, _, cx| {
                 this.table.update(cx, |t, cx| {
