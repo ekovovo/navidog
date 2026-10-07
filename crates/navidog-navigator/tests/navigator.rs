@@ -122,6 +122,26 @@ fn multi_select_drag_and_rename(cx: &mut TestAppContext) {
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
         window.click(row_a.clone(), cx);
+    })
+    .unwrap();
+    cx.update_window(handle, |_, window, cx| window.press("shift-down", cx))
+        .unwrap();
+    cx.run_until_parked();
+    assert_eq!(
+        selections(cx),
+        [
+            Selection::Connection(b.clone()),
+            Selection::Connection(a.clone())
+        ]
+    );
+    // A plain arrow replaces the range; B is the last row, so up returns to A alone
+    cx.update_window(handle, |_, window, cx| window.press("up", cx))
+        .unwrap();
+    cx.run_until_parked();
+    assert_eq!(selections(cx), [Selection::Connection(a.clone())]);
+
+    cx.update_window(handle, |_, window, cx| {
+        window.click(row_a.clone(), cx);
         cmd_click(window, &row_b, cx);
     })
     .unwrap();

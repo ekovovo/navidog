@@ -37,6 +37,20 @@ use crate::selection::{self, Click};
 const PANEL: &str = "NavigatorPanel";
 const SEP: char = '\u{1f}';
 
+// Arrow keys are handled here: a row click focuses the panel, not the tree, so the tree's own
+// bindings never see them. Shift extends the visible range; left and right fold the focused row.
+gpui_kit::actions!(
+    nav_keys,
+    [
+        NavUp,
+        NavDown,
+        NavLeft,
+        NavRight,
+        NavExtendUp,
+        NavExtendDown
+    ]
+);
+
 struct ActiveNavigator(WeakEntity<NavigatorPanel>);
 impl Global for ActiveNavigator {}
 
@@ -44,6 +58,12 @@ pub(crate) fn init(cx: &mut App) {
     cx.bind_keys([
         gpui_kit::KeyBinding::new("delete", DeleteSelected, Some("Navigator")),
         gpui_kit::KeyBinding::new("cmd-backspace", DeleteSelected, Some("Navigator")),
+        gpui_kit::KeyBinding::new("up", NavUp, Some("Navigator")),
+        gpui_kit::KeyBinding::new("down", NavDown, Some("Navigator")),
+        gpui_kit::KeyBinding::new("left", NavLeft, Some("Navigator")),
+        gpui_kit::KeyBinding::new("right", NavRight, Some("Navigator")),
+        gpui_kit::KeyBinding::new("shift-up", NavExtendUp, Some("Navigator")),
+        gpui_kit::KeyBinding::new("shift-down", NavExtendDown, Some("Navigator")),
     ]);
     register_panel(cx, PANEL, |_, window, cx| {
         panel_handle(NavigatorPanel::shared(window, cx))
@@ -639,6 +659,69 @@ impl NavigatorPanel {
         let primary = selections.next().unwrap_or_default();
         let also = selections.collect();
         Workspace::global(cx).update(cx, |w, cx| w.select_many(primary, also, cx));
+    }
+
+    /// Moves the focused row. `extend` keeps the anchor and selects every visible row between them.
+    fn step_selection(&mut self, down: bool, extend: bool, cx: &mut Context<Self>) {
+        let (len, ix) = {
+            let tree = self.tree.read(cx);
+            let len = (0..).position(|i| tree.entry(i).is_none()).unwrap_or(0);
+            (len, tree.selected_index())
+        };
+        if len == 0 {
+            return;
+        }
+        let next = match ix {
+            None => Some(0),
+            Some(ix) if down => (ix + 1 < len).then_some(ix + 1),
+            Some(ix) => ix.checked_sub(1),
+        };
+        let Some(next) = next else { return };
+        let id = self
+            .tree
+            .read(cx)
+            .entry(next)
+            .expect("next is in range")
+            .item()
+            .id
+            .clone();
+        if extend && self.anchor.is_none() {
+            self.anchor = self.tree.read(cx).selected_item().map(|i| i.id.clone());
+        }
+        self.click_select(&id, false, extend, cx);
+        let strategy = if down {
+            gpui_kit::ScrollStrategy::Bottom
+        } else {
+            gpui_kit::ScrollStrategy::Top
+        };
+        self.tree.update(cx, |t, _| {
+            if let Some(i) = t.selected_index() {
+                t.scroll_to_item(i, strategy);
+            }
+        });
+    }
+
+    /// Right expands the focused folder; left collapses it. Matches the tree's own left/right.
+    fn fold(&mut self, expand: bool, cx: &mut Context<Self>) {
+        let (id, folder) = {
+            let tree = self.tree.read(cx);
+            let Some(entry) = tree.selected_entry() else {
+                return;
+            };
+            (entry.item().id.clone(), entry.is_folder())
+        };
+        if !folder {
+            return;
+        }
+        let Some(node) = Node::parse(&id) else { return };
+        if expand {
+            if self.expanded.insert(id) {
+                Self::ensure_children(&node, false, cx);
+                self.rebuild(cx);
+            }
+        } else if self.expanded.remove(&id) {
+            self.rebuild(cx);
+        }
     }
 
     /// Selected connections that are dragged together with `id` (just `id` when it is not selected).
@@ -1781,6 +1864,16 @@ impl Render for NavigatorPanel {
                     };
                 window.dispatch_action(action, cx);
             })
+            .on_action(cx.listener(|this, _: &NavUp, _, cx| this.step_selection(false, false, cx)))
+            .on_action(cx.listener(|this, _: &NavDown, _, cx| this.step_selection(true, false, cx)))
+            .on_action(
+                cx.listener(|this, _: &NavExtendUp, _, cx| this.step_selection(false, true, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &NavExtendDown, _, cx| this.step_selection(true, true, cx)),
+            )
+            .on_action(cx.listener(|this, _: &NavLeft, _, cx| this.fold(false, cx)))
+            .on_action(cx.listener(|this, _: &NavRight, _, cx| this.fold(true, cx)))
             .on_action(cx.listener(|this, _: &Escape, window, cx| {
                 if this.renaming.is_some() {
                     this.finish_rename(false, window, cx);
