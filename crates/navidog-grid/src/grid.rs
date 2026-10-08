@@ -3,12 +3,11 @@
 
 use std::collections::BTreeMap;
 
-use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Escape, Input, InputEvent, InputState};
 use gpui_kit::component::native_menu::NativeMenu;
 use gpui_kit::component::table::{
-    Column, ColumnGroup, ColumnSort, DataTable, TableDelegate, TableEvent, TableState,
+    Column, ColumnSort, DataTable, TableDelegate, TableEvent, TableState,
 };
 use gpui_kit::component::{Sizable as _, Size, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -185,17 +184,8 @@ impl GridDelegate {
 }
 
 impl GridDelegate {
-    /// Whole pixels: DataTable lays the header out as a flex row (each cell rounded) and the
-    /// body at summed offsets. With fractional widths the two drift apart column by column.
     fn width(&self, pt: tokens::Pt) -> Pixels {
-        pt.to_pixels(self.rem).round()
-    }
-
-    fn column_width(&self, name: &SharedString) -> Pixels {
-        self.widths
-            .get(name)
-            .map(Pixels::round)
-            .unwrap_or_else(|| self.width(tokens::grid::COLUMN_WIDTH))
+        pt.to_pixels(self.rem)
     }
 
     /// Width of the pinned columns. DataTable draws a hairline at this edge on every real row.
@@ -205,7 +195,11 @@ impl GridDelegate {
             if ix >= self.frozen {
                 break;
             }
-            span += self.column_width(&col.name);
+            span += self
+                .widths
+                .get(&col.name)
+                .copied()
+                .unwrap_or_else(|| self.width(tokens::grid::COLUMN_WIDTH));
         }
         span
     }
@@ -234,84 +228,6 @@ fn type_glyph(kind: TypeKind) -> gpui_kit::component::Icon {
         TypeKind::Json => lucide("braces"),
         TypeKind::Other => lucide("square"),
     }
-}
-
-/// `deferred`, but clipped like an ordinary child: paints after the row borders DataTable draws,
-/// without spilling over the pinned columns or past the grid once the header scrolls.
-/// Paint only; deferred hit areas are not clipped, so keep mouse handlers out of it.
-fn clipped(child: impl IntoElement) -> Clipped {
-    Clipped(Some(child.into_any_element()))
-}
-
-struct Clipped(Option<gpui_kit::AnyElement>);
-
-impl IntoElement for Clipped {
-    type Element = Self;
-
-    fn into_element(self) -> Self {
-        self
-    }
-}
-
-impl gpui_kit::Element for Clipped {
-    type RequestLayoutState = ();
-    type PrepaintState = ();
-
-    fn id(&self) -> Option<gpui_kit::ElementId> {
-        None
-    }
-
-    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
-        None
-    }
-
-    fn request_layout(
-        &mut self,
-        _: Option<&gpui_kit::GlobalElementId>,
-        _: Option<&gpui_kit::InspectorElementId>,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> (gpui_kit::LayoutId, ()) {
-        let child = self.0.as_mut().expect("laid out once");
-        (child.request_layout(window, cx), ())
-    }
-
-    fn prepaint(
-        &mut self,
-        _: Option<&gpui_kit::GlobalElementId>,
-        _: Option<&gpui_kit::InspectorElementId>,
-        _: gpui_kit::Bounds<Pixels>,
-        _: &mut (),
-        window: &mut Window,
-        _: &mut App,
-    ) {
-        if let Some(child) = self.0.take() {
-            let (offset, mask) = (window.element_offset(), window.content_mask());
-            window.defer_draw(child, offset, 0, Some(mask));
-        }
-    }
-
-    fn paint(
-        &mut self,
-        _: Option<&gpui_kit::GlobalElementId>,
-        _: Option<&gpui_kit::InspectorElementId>,
-        _: gpui_kit::Bounds<Pixels>,
-        _: &mut (),
-        _: &mut (),
-        _: &mut Window,
-        _: &mut App,
-    ) {
-    }
-}
-
-/// One group per column while types are shown, so the name is a header row above the type.
-/// `None` keeps a single header row. The label is the column index.
-fn type_groups(show_type: bool, count: usize) -> Option<Vec<ColumnGroup>> {
-    show_type.then(|| {
-        (0..count)
-            .map(|ix| ColumnGroup::new(ix.to_string(), 1))
-            .collect()
-    })
 }
 
 fn header_type(col: &GridColumn, show_comment: bool) -> String {
@@ -384,8 +300,13 @@ impl TableDelegate for GridDelegate {
             Some((c, false)) if c + 1 == ix => ColumnSort::Descending,
             _ => ColumnSort::Default,
         };
+        let width = self
+            .widths
+            .get(&col.name)
+            .copied()
+            .unwrap_or_else(|| self.width(tokens::grid::COLUMN_WIDTH));
         let mut column = Column::new(SharedString::from(ix.to_string()), col.name.clone())
-            .width(self.column_width(&col.name))
+            .width(width)
             .sort(sort)
             .movable(false)
             .p_0();
@@ -410,102 +331,6 @@ impl TableDelegate for GridDelegate {
         self.sort_changed = true;
     }
 
-    fn group_headers(&self, cx: &App) -> Option<Vec<Vec<ColumnGroup>>> {
-        type_groups(self.show_type, self.columns_count(cx)).map(|row| vec![row])
-    }
-
-    fn render_group_th(
-        &mut self,
-        label: &SharedString,
-        _col_span: usize,
-        width: Pixels,
-        _: &mut Window,
-        cx: &mut Context<TableState<Self>>,
-    ) -> impl IntoElement {
-        let ix = label.parse::<usize>().unwrap_or(0);
-        let data = ix
-            .checked_sub(1)
-            .and_then(|c| self.model.columns.get(c).map(|col| (c, col.name.clone())));
-        let (show_type, show_comment) = (self.show_type, self.show_comment);
-        let p = palette(cx);
-        let head = cx.theme().tokens.table_head;
-        // ponytail: DataTable paints border_b under the name row after this cell and cannot turn
-        // it off. Overlays painted later hide it, so name and type read as one cell.
-        // Upgrade path: a DataTable option for the header row border.
-        // Each overlay is the cell plus the row border under it.
-        let over = || div().absolute().top_0().bottom(px(-1.)); // raw-px: down over the row border
-        div()
-            .w(width)
-            .h_full()
-            .flex_shrink_0()
-            .relative()
-            .px_1()
-            .flex()
-            .items_center()
-            .child(clipped(over().left_0().right_0().map(|d| {
-                if data.is_some() {
-                    // The right edge is the column rule; only the bottom strip hides the border
-                    d.border_r_1().border_color(p.grid_line).child(
-                        div()
-                            .absolute()
-                            .bottom_0()
-                            .left_0()
-                            .right_0()
-                            .h(px(2.)) // raw-px: the 1px row border plus one pixel of bleed
-                            .bg(head),
-                    )
-                } else {
-                    d.bg(head)
-                }
-            })))
-            .when(ix == self.frozen, |d| {
-                // The pinned rule DataTable draws down the frozen block is translucent, and the
-                // overlay above covered it. Draw it once more, built the way DataTable builds it.
-                d.child(clipped(
-                    over()
-                        .right_0()
-                        .w_0()
-                        .border_r_1()
-                        .border_color(cx.theme().border),
-                ))
-            })
-            .when(ix == self.model.columns.len(), |d| {
-                // Past the last column the row stretches to the viewport, border included
-                d.child(clipped(
-                    over()
-                        .left(width)
-                        .w(px(10_000.)) // raw-px: clipped to the header viewport
-                        .bg(head),
-                ))
-            })
-            .when_some(data, |d, (c, name)| {
-                d.child(
-                    div().w_full().min_w_0().child(
-                        truncated(("grid-th", ix), name.to_string())
-                            .text_color(p.label)
-                            .line_height(tokens::Pt(15.).rems()),
-                    ),
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |t, e: &MouseDownEvent, _, cx| {
-                        let shift = e.modifiers.shift;
-                        t.delegate_mut().model.select_column(c, shift);
-                        t.delegate_mut().finish_navigation(shift);
-                        cx.notify();
-                    }),
-                )
-                .on_mouse_down(
-                    MouseButton::Right,
-                    cx.listener(move |_t, e: &MouseDownEvent, window, cx| {
-                        cx.stop_propagation();
-                        column_menu(c, name.clone(), show_type, show_comment)
-                            .show(e.position, window, cx);
-                    }),
-                )
-            })
-    }
-
     fn render_tr(
         &mut self,
         row_ix: usize,
@@ -527,7 +352,7 @@ impl TableDelegate for GridDelegate {
                     .bg(p.control_bg)
                     .when(striped, |d| d.child(div().size_full().bg(p.row_alt))),
             );
-            row = row.child(clipped(
+            row = row.child(gpui_kit::deferred(
                 div()
                     .absolute()
                     .left(self.pinned_span() - px(2.)) // raw-px: pinned hairline plus antialiasing
@@ -580,34 +405,35 @@ impl TableDelegate for GridDelegate {
             .overflow_hidden()
             .when_some(header, |d, (c, name, title, kind, type_label)| {
                 let tint = type_tint(kind, cx);
-                // Types on: the name is the group row above. This leaf row is only the type.
-                d.when(!show_type, |d| {
-                    d.child(
-                        h_flex().size_full().min_w_0().items_center().child(
+                d.child(
+                    v_flex()
+                        .size_full()
+                        .min_w_0()
+                        .justify_center()
+                        .child(
                             truncated(("grid-th", ix), title)
                                 .text_color(p.label)
                                 .line_height(tokens::Pt(15.).rems()),
-                        ),
-                    )
-                })
-                .when(show_type && !type_label.is_empty(), |d| {
-                    d.child(
-                        h_flex()
-                            .size_full()
-                            .min_w_0()
-                            .items_center()
-                            .gap(tokens::Pt(3.).rems())
-                            .text_size(tokens::font::SIZE_SMALL.rems())
-                            .line_height(tokens::Pt(13.).rems())
-                            .text_color(tint)
-                            .child(
-                                type_glyph(kind)
-                                    .size(tokens::font::SIZE_SMALL.rems())
-                                    .text_color(tint),
+                        )
+                        .when(show_type && !type_label.is_empty(), |d| {
+                            d.child(
+                                h_flex()
+                                    .w_full()
+                                    .min_w_0()
+                                    .items_center()
+                                    .gap(tokens::Pt(3.).rems())
+                                    .text_size(tokens::font::SIZE_SMALL.rems())
+                                    .line_height(tokens::Pt(13.).rems())
+                                    .text_color(tint)
+                                    .child(
+                                        type_glyph(kind)
+                                            .size(tokens::font::SIZE_SMALL.rems())
+                                            .text_color(tint),
+                                    )
+                                    .child(truncated(("grid-type", ix), type_label)),
                             )
-                            .child(truncated(("grid-type", ix), type_label)),
-                    )
-                })
+                        }),
+                )
                 // A click selects the column; the sort icon still runs on its own hit target
                 .on_mouse_down(
                     MouseButton::Left,
@@ -950,14 +776,12 @@ impl ResultGrid {
             .map(|c| c.name.clone())
             .collect();
         let saved = width_pairs(&names, reported);
-        self.table.update(cx, |t, cx| {
+        self.table.update(cx, |t, _| {
             let map = &mut t.delegate_mut().widths;
             for (name, width) in &saved {
                 // raw-px: persisted column widths are already pixels
                 map.insert(SharedString::from(name.as_str()), px(*width));
             }
-            // The drag left fractional widths in the table; take the rounded ones back
-            t.refresh(cx);
         });
         if cx.has_global::<Settings>() {
             let key = width_key(&target.scope, &target.table);
@@ -1353,8 +1177,13 @@ impl ResultGrid {
 impl Render for ResultGrid {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let rem = self.table.read(cx).delegate().rem;
-        // Name row and type row are each this tall when types are shown. Data rows use it too.
         let row = self.row_height.to_pixels(rem);
+        // The header and the body share one row height. Two lines need the taller one.
+        let row = if self.table.read(cx).delegate().show_type {
+            row.max(tokens::grid::TYPE_HEADER_HEIGHT.to_pixels(rem))
+        } else {
+            row
+        };
         let font_pt = grid_font_pt(cx);
         let alternate = row_shade(cx) == RowShade::Alternate;
         // The dock clips overflow. Without a zero minimum the grid grows to the
@@ -1534,13 +1363,12 @@ fn load_widths(target: &GridTarget, cx: &App) -> BTreeMap<SharedString, Pixels> 
         .unwrap_or_default()
 }
 
-/// `reported` is every column including the marker at index 0. Widths are whole pixels
-/// (see `GridDelegate::width`).
+/// `reported` is every column including the marker at index 0.
 fn width_pairs(names: &[SharedString], reported: &[Pixels]) -> BTreeMap<String, f32> {
     names
         .iter()
         .zip(reported.iter().skip(1))
-        .map(|(name, width)| (name.to_string(), width.as_f32().round()))
+        .map(|(name, width)| (name.to_string(), width.as_f32()))
         .collect()
 }
 
@@ -1551,19 +1379,10 @@ mod tests {
     #[test]
     fn resized_widths_skip_the_marker_column() {
         let names = ["id", "name"].map(SharedString::from);
-        // raw-px: arbitrary widths, a drag leaves fractions; the first is the marker and is dropped
-        let saved = width_pairs(&names, &[px(20.), px(80.4), px(140.)]);
+        // raw-px: arbitrary widths; the first is the marker column and is dropped
+        let saved = width_pairs(&names, &[px(20.), px(80.), px(140.)]);
         assert_eq!(saved.get("id"), Some(&80.));
         assert_eq!(saved.get("name"), Some(&140.));
         assert_eq!(saved.len(), 2);
-    }
-
-    #[test]
-    fn type_header_is_one_group_per_column() {
-        let groups = type_groups(true, 4).expect("types on");
-        let labels: Vec<_> = groups.iter().map(|g| g.label.to_string()).collect();
-        assert_eq!(labels, ["0", "1", "2", "3"]);
-        assert!(groups.iter().all(|g| g.span == 1));
-        assert!(type_groups(false, 4).is_none());
     }
 }
