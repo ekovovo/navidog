@@ -47,5 +47,5 @@ strip = "symbols"
 lto = "fat"
 # opt-level = 3
 # lto = "thin"
-opt-level = "z"
-panic = "abort"
+opt-level = "s"
+# panic = "abort"
