@@ -45,7 +45,7 @@ fn input(window: &mut Window, cx: &mut App, value: String) -> Entity<InputState>
 pub(crate) fn add_favorite(object: ObjectRef, window: &mut Window, cx: &mut App) {
     let name = input(window, cx, object.name.clone());
     let id = input(window, cx, String::new());
-    name.update(cx, |s, cx| s.focus(window, cx));
+    let focus = name.clone();
     window.open_dialog(cx, move |dialog, window, _| {
         let (name, id, object) = (name.clone(), id.clone(), object.clone());
         let (name_field, id_field) = (name.clone(), id.clone());
@@ -55,14 +55,22 @@ pub(crate) fn add_favorite(object: ObjectRef, window: &mut Window, cx: &mut App)
             .child(
                 v_flex()
                     .gap(tokens::form::ROW_GAP.rems())
-                    .child(FormRow::new(
-                        t!("fav.name").to_string(),
-                        Input::new(&name_field),
-                    ))
-                    .child(FormRow::new(
-                        t!("fav.id").to_string(),
-                        Input::new(&id_field).w(tokens::form::FIELD_WIDTH_SHORT.rems()),
-                    )),
+                    .w_full()
+                    .min_w_0()
+                    .child(
+                        FormRow::new(
+                            t!("fav.name").to_string(),
+                            Input::new(&name_field).w_full().min_w_0(),
+                        )
+                        .hug_label(),
+                    )
+                    .child(
+                        FormRow::new(
+                            t!("fav.id").to_string(),
+                            Input::new(&id_field).w(tokens::form::FIELD_WIDTH_SHORT.rems()),
+                        )
+                        .hug_label(),
+                    ),
             )
             .footer(footer(move |_, cx| {
                 let label = name.read(cx).value().trim().to_string();
@@ -80,6 +88,9 @@ pub(crate) fn add_favorite(object: ObjectRef, window: &mut Window, cx: &mut App)
                 Favorites::global(cx).update(cx, |f, cx| f.add(object, label, id, cx));
                 true
             }))
+    });
+    window.defer(cx, move |window, cx| {
+        focus.update(cx, |state, cx| state.focus(window, cx));
     });
 }
 

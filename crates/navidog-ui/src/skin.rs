@@ -143,6 +143,7 @@ pub struct FormRow {
     label: Option<SharedString>,
     control: AnyElement,
     compact: bool,
+    hug: bool,
     label_width: tokens::Pt,
 }
 
@@ -152,6 +153,7 @@ impl FormRow {
             label: Some(label.into()),
             control: control.into_any_element(),
             compact: false,
+            hug: false,
             label_width: tokens::form::LABEL_COLUMN,
         }
     }
@@ -162,8 +164,16 @@ impl FormRow {
             label: None,
             control: control.into_any_element(),
             compact: false,
+            hug: false,
             label_width: tokens::form::LABEL_COLUMN,
         }
+    }
+
+    /// Size the label to its text instead of the connection form's label column.
+    /// Small dialogs use this so a short label does not push the field to the right.
+    pub fn hug_label(mut self) -> Self {
+        self.hug = true;
+        self
     }
 
     /// Compact row (22pt) used on the Advanced page.
@@ -181,18 +191,24 @@ impl RenderOnce for FormRow {
         } else {
             tokens::form::ROW_HEIGHT
         };
+        let hug = self.hug;
         h_flex()
             .min_h(height.rems())
             .gap(tokens::form::LABEL_GAP.rems())
-            .child(
-                div()
-                    .flex_none()
-                    .w(self.label_width.rems())
-                    .text_right()
-                    .text_color(p.label)
-                    .line_height(tokens::form::LABEL_HEIGHT.rems())
-                    .children(self.label.map(|l| SharedString::from(format!("{l}:")))),
-            )
+            .when(hug, |row| row.w_full().min_w_0())
+            // A hugged row with no label (a checkbox, an error) starts at the left edge.
+            // The connection form keeps an empty column so those rows line up with the fields.
+            .when(!hug || self.label.is_some(), |row| {
+                row.child(
+                    div()
+                        .flex_none()
+                        .when(!hug, |d| d.w(self.label_width.rems()))
+                        .text_right()
+                        .text_color(p.label)
+                        .line_height(tokens::form::LABEL_HEIGHT.rems())
+                        .children(self.label.map(|l| SharedString::from(format!("{l}:")))),
+                )
+            })
             .child(div().flex_1().min_w_0().child(self.control))
     }
 }

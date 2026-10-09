@@ -2,11 +2,11 @@
 //! The active profile is what the form edits and what opening connects with.
 
 use gpui_kit::component::WindowExt as _;
-use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::v_flex;
 use gpui_kit::{
     App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, SharedString,
-    Styled as _, Window,
+    Styled as _, Subscription, Window,
 };
 use navidog_core::store::ConnectionStore;
 use navidog_db::sessions::Sessions;
@@ -79,20 +79,43 @@ pub fn delete(id: String, window: &mut Window, cx: &mut App) {
 pub fn new(id: String, window: &mut Window, cx: &mut App) {
     let view = cx.new(|cx| {
         let input = cx.new(|cx| InputState::new(window, cx));
-        input.update(cx, |s, cx| s.focus(window, cx));
-        NewProfile { id, input }
+        let _sub = cx.subscribe_in(
+            &input,
+            window,
+            |this: &mut NewProfile, _, e: &InputEvent, window, cx| {
+                if matches!(e, InputEvent::PressEnter { shift: false, .. }) {
+                    this.confirm(window, cx);
+                }
+            },
+        );
+        NewProfile { id, input, _sub }
     });
-    window.open_dialog(cx, move |dialog, window, _| {
-        dialog
-            .w(tokens::dialog::SMALL_WIDTH.to_pixels(window.rem_size()))
-            .close_button(false)
-            .child(view.clone())
+    let input = view.read(cx).input.clone();
+    window.open_dialog(cx, {
+        let view = view.clone();
+        move |dialog, window, _| {
+            dialog
+                .w(tokens::dialog::SMALL_WIDTH.to_pixels(window.rem_size()))
+                .close_button(false)
+                .on_ok({
+                    let view = view.clone();
+                    move |_, window, cx| {
+                        view.update(cx, |this, cx| this.confirm(window, cx));
+                        false
+                    }
+                })
+                .child(view.clone())
+        }
+    });
+    window.defer(cx, move |window, cx| {
+        input.update(cx, |state, cx| state.focus(window, cx));
     });
 }
 
 struct NewProfile {
     id: String,
     input: Entity<InputState>,
+    _sub: Subscription,
 }
 
 impl NewProfile {
@@ -115,14 +138,20 @@ impl NewProfile {
 impl Render for NewProfile {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
+            .w_full()
+            .min_w_0()
             .gap(tokens::form::ROW_GAP.rems())
             .child(heading(t!("conn.new_profile").to_string()))
-            .child(FormRow::new(
-                t!("conn.profile_name").to_string(),
-                Input::new(&self.input)
-                    .id("profile-name")
-                    .w(tokens::form::FIELD_WIDTH.rems()),
-            ))
+            .child(
+                FormRow::new(
+                    t!("conn.profile_name").to_string(),
+                    Input::new(&self.input)
+                        .id("profile-name")
+                        .w_full()
+                        .min_w_0(),
+                )
+                .hug_label(),
+            )
             .child(footer(
                 t!("conn.ok").to_string(),
                 cx.listener(|this, _, window, cx| this.confirm(window, cx)),

@@ -1,16 +1,17 @@
-//! 打开连接前解析秘密字段：主密码已设置则先解锁；未保存的密码弹框询问（F-CONN-020）。
+//! Resolves secret fields before opening a connection: unlock the master password
+//! first when one is set, and ask for any password that was not saved (F-CONN-020).
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
-use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, SharedString,
-    Styled as _, Window, div,
+    Styled as _, Subscription, Window, div,
 };
 use navidog_core::connection::{Connection, SecretField};
 use navidog_core::store::{ConnectionStore, StoreError};
@@ -21,7 +22,7 @@ use rust_i18n::t;
 
 type Then = Rc<RefCell<Option<Box<dyn FnOnce(Secrets, &mut Window, &mut App)>>>>;
 
-/// 主密码连续解锁失败次数达到上限后，本次运行不再提示（规格第 7 节）。
+/// After this many failed unlocks in one run, stop asking (spec §7).
 const MAX_UNLOCK_FAILURES: u8 = 3;
 
 pub fn resolve(
@@ -75,17 +76,34 @@ fn resolve_inner(id: String, then: Then, window: &mut Window, cx: &mut App) {
         return;
     }
     let view = cx.new(|cx| AskPassword::new(conn, missing, secrets, then, window, cx));
-    window.open_dialog(cx, move |dialog, window, _| {
-        dialog
-            .w(tokens::dialog::SMALL_WIDTH.to_pixels(window.rem_size()))
-            .close_button(false)
-            .child(view.clone())
+    let first = view.read(cx).inputs.first().map(|(_, input)| input.clone());
+    window.open_dialog(cx, {
+        let view = view.clone();
+        move |dialog, window, _| {
+            dialog
+                .w(tokens::dialog::SMALL_WIDTH.to_pixels(window.rem_size()))
+                .close_button(false)
+                .on_ok({
+                    let view = view.clone();
+                    move |_, window, cx| {
+                        view.update(cx, |this, cx| this.confirm(window, cx));
+                        false
+                    }
+                })
+                .child(view.clone())
+        }
     });
+    if let Some(input) = first {
+        window.defer(cx, move |window, cx| {
+            input.update(cx, |state, cx| state.focus(window, cx));
+        });
+    }
 }
 
 fn needed_fields(conn: &Connection) -> Vec<SecretField> {
     let mut fields = Vec::new();
-    // SQLite 只在加密数据库时需要密码，M1 不支持加密，保存过才读取
+    // SQLite only needs a password for an encrypted database. M1 does not support
+    // that, so the field is read only when one was saved.
     if conn.supports_network() || conn.general.password.is_some() {
         fields.push(SecretField::Password);
     }
@@ -122,6 +140,7 @@ struct AskPassword {
     secrets: Secrets,
     save: bool,
     then: Then,
+    _subs: Vec<Subscription>,
 }
 
 impl AskPassword {
@@ -137,15 +156,27 @@ impl AskPassword {
             .into_iter()
             .map(|f| (f, cx.new(|cx| InputState::new(window, cx).masked(true))))
             .collect();
-        if let Some((_, first)) = inputs.first() {
-            first.update(cx, |s, cx| s.focus(window, cx));
-        }
+        let _subs = inputs
+            .iter()
+            .map(|(_, input)| {
+                cx.subscribe_in(
+                    input,
+                    window,
+                    |this: &mut Self, _, e: &InputEvent, window, cx| {
+                        if matches!(e, InputEvent::PressEnter { shift: false, .. }) {
+                            this.confirm(window, cx);
+                        }
+                    },
+                )
+            })
+            .collect();
         Self {
             conn,
             inputs,
             secrets,
             save: false,
             then,
+            _subs,
         }
     }
 
@@ -182,23 +213,25 @@ impl Render for AskPassword {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let title = t!("conn.ask_password_title", name = self.conn.name).to_string();
         v_flex()
+            .w_full()
+            .min_w_0()
             .gap(tokens::form::ROW_GAP.rems())
             .child(heading(title))
             .children(self.inputs.iter().map(|(f, input)| {
-                FormRow::new(
-                    crate::secret_label(*f),
-                    Input::new(input).w(tokens::form::FIELD_WIDTH.rems()),
-                )
+                FormRow::new(crate::secret_label(*f), field(input)).hug_label()
             }))
-            .child(FormRow::bare(
-                Checkbox::new("save")
-                    .label(t!("conn.save_password").to_string())
-                    .checked(self.save)
-                    .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                        this.save = *checked;
-                        cx.notify();
-                    })),
-            ))
+            .child(
+                FormRow::bare(
+                    Checkbox::new("save")
+                        .label(t!("conn.save_password").to_string())
+                        .checked(self.save)
+                        .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                            this.save = *checked;
+                            cx.notify();
+                        })),
+                )
+                .hug_label(),
+            )
             .child(footer(
                 t!("conn.ok").to_string(),
                 cx.listener(|this, _, window, cx| this.confirm(window, cx)),
@@ -206,7 +239,7 @@ impl Render for AskPassword {
     }
 }
 
-/// 对话框底部：右侧“取消”“确定”。
+/// Dialog footer: Cancel and the primary button, aligned to the right.
 pub(crate) fn footer(
     ok: String,
     on_ok: impl Fn(&gpui_kit::ClickEvent, &mut Window, &mut App) + 'static,
@@ -228,25 +261,60 @@ struct Unlock {
     input: Entity<InputState>,
     error: Option<SharedString>,
     then: Then,
+    _sub: Subscription,
 }
 
 fn open_unlock(id: String, then: Then, window: &mut Window, cx: &mut App) {
     let view = cx.new(|cx| {
         let input = cx.new(|cx| InputState::new(window, cx).masked(true));
-        input.update(cx, |s, cx| s.focus(window, cx));
+        let _sub = cx.subscribe_in(
+            &input,
+            window,
+            |this: &mut Unlock, _, e: &InputEvent, window, cx| {
+                // A single-line input propagates Enter. The dialog also binds Enter
+                // to Confirm, which closes unless `on_ok` handles it. This covers
+                // the key while the field itself is focused.
+                if matches!(e, InputEvent::PressEnter { shift: false, .. }) {
+                    this.confirm(window, cx);
+                }
+            },
+        );
         Unlock {
             id,
             input,
             error: None,
             then,
+            _sub,
         }
     });
-    window.open_dialog(cx, move |dialog, window, _| {
-        dialog
-            .w(tokens::dialog::SMALL_WIDTH.to_pixels(window.rem_size()))
-            .close_button(false)
-            .child(view.clone())
+    let input = view.read(cx).input.clone();
+    window.open_dialog(cx, {
+        let view = view.clone();
+        move |dialog, window, _| {
+            dialog
+                .w(tokens::dialog::SMALL_WIDTH.to_pixels(window.rem_size()))
+                .close_button(false)
+                .on_ok({
+                    let view = view.clone();
+                    move |_, window, cx| {
+                        view.update(cx, |this, cx| this.confirm(window, cx));
+                        // `confirm` closes the dialog on success. Returning true here
+                        // would close it again and could dismiss whatever opened next.
+                        false
+                    }
+                })
+                .child(view.clone())
+        }
     });
+    // `open_dialog` focuses the dialog itself, so a focus call before that does not stick.
+    window.defer(cx, move |window, cx| {
+        input.update(cx, |state, cx| state.focus(window, cx));
+    });
+}
+
+/// A field that fills the dialog instead of the connection form's fixed 300pt width.
+fn field(input: &Entity<InputState>) -> impl IntoElement {
+    Input::new(input).w_full().min_w_0()
 }
 
 impl Unlock {
@@ -276,6 +344,8 @@ impl Render for Unlock {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
         v_flex()
+            .w_full()
+            .min_w_0()
             .gap(tokens::form::ROW_GAP.rems())
             .child(heading(t!("conn.unlock_title").to_string()))
             .child(
@@ -283,12 +353,12 @@ impl Render for Unlock {
                     .text_color(p.label_secondary)
                     .child(t!("conn.unlock_prompt").to_string()),
             )
-            .child(FormRow::new(
-                t!("conn.master_password").to_string(),
-                Input::new(&self.input).w(tokens::form::FIELD_WIDTH.rems()),
-            ))
+            .child(
+                FormRow::new(t!("conn.master_password").to_string(), field(&self.input))
+                    .hug_label(),
+            )
             .when_some(self.error.clone(), |this, e| {
-                this.child(FormRow::bare(div().text_color(p.danger).child(e)))
+                this.child(FormRow::bare(div().text_color(p.danger).child(e)).hug_label())
             })
             .child(footer(
                 t!("conn.unlock").to_string(),
