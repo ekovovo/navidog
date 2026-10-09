@@ -276,7 +276,7 @@ pub struct Palette {
     pub separator: Hsla,
     pub grid: Hsla,
     pub row_alt: Hsla,
-    /// The row that contains the selection. Same values as the old hover wash (provisional).
+    /// The row that contains the selection, while the pointer is not hovering (provisional).
     pub row_selected: Hsla,
     pub accent: Hsla,
     pub selection: Hsla,

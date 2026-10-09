@@ -212,19 +212,6 @@ impl GridDelegate {
         pt.to_pixels(self.rem)
     }
 
-    /// Selected rows use one opaque color. Other rows are `control_bg`, with the stripe
-    /// painted on top so a translucent alt color cannot let the row hover show through.
-    fn row_shaded(&self, r: usize, state: RowState, cx: &App) -> bool {
-        if state == RowState::Deleted || self.row_selected(r, state) {
-            return false;
-        }
-        match row_shade(cx) {
-            RowShade::Alternate => r % 2 == 1,
-            RowShade::EveryThird => RowShade::EveryThird.paints(r) && state != RowState::Deleted,
-            RowShade::None => false,
-        }
-    }
-
     fn row_selected(&self, r: usize, state: RowState) -> bool {
         self.model.selection().0.contains(&r) && state != RowState::Deleted
     }
@@ -488,6 +475,18 @@ impl TableDelegate for GridDelegate {
                     .bg(p.control_bg)
                     .when(striped, |d| d.child(div().size_full().bg(p.row_alt))),
             ));
+        } else if row_ix < self.model.row_count() {
+            let state = self.model.row_state(row_ix);
+            let p = palette(cx);
+            // Applied before DataTable's hover, so a hover replaces the whole row, empty tail included.
+            if self.row_selected(row_ix, state) {
+                row = row.bg(p.row_selected);
+            } else if row_shade(cx) == RowShade::EveryThird
+                && RowShade::EveryThird.paints(row_ix)
+                && state != RowState::Deleted
+            {
+                row = row.bg(p.row_alt);
+            }
         }
         row
     }
@@ -620,16 +619,6 @@ impl TableDelegate for GridDelegate {
                 .into_any_element();
         }
         let state = self.model.row_state(r);
-        // Opaque paper first, stripe as a layer on top. A translucent alt color must not be
-        // the only fill, or DataTable's row hover shows through even rows and not odd ones.
-        // ponytail: filler rows under the scrollbar are not tinted.
-        let selected_row = self.row_selected(r, state);
-        let shaded = self.row_shaded(r, state, cx);
-        let fill = if selected_row {
-            p.row_selected
-        } else {
-            p.control_bg
-        };
         let Some(c) = ix.checked_sub(1) else {
             let mark = match state {
                 RowState::Inserted => "*",
@@ -646,10 +635,6 @@ impl TableDelegate for GridDelegate {
                 .border_r_1()
                 .border_color(p.grid_line)
                 .text_color(p.label_secondary)
-                .bg(fill)
-                .when(shaded, |d| {
-                    d.child(div().absolute().inset_0().bg(p.row_alt))
-                })
                 .when(state == RowState::Inserted, |d| d.bg(p.grid_inserted))
                 .when(state == RowState::Deleted, |d| d.bg(p.grid_deleted))
                 .child(mark)
@@ -689,10 +674,6 @@ impl TableDelegate for GridDelegate {
             .items_center()
             .overflow_hidden()
             .when(numeric, |d| d.justify_end())
-            .bg(fill)
-            .when(shaded, |d| {
-                d.child(div().absolute().inset_0().bg(p.row_alt))
-            })
             .when(state == RowState::Inserted, |d| d.bg(p.grid_inserted))
             .when(state == RowState::Deleted, |d| d.bg(p.grid_deleted))
             .when(
@@ -704,7 +685,8 @@ impl TableDelegate for GridDelegate {
             .when(selected, |d| d.bg(p.selection).text_color(p.selection_text));
         if let Some(input) = editing {
             let font = grid_text_size(cx);
-            // Paper color, not the selection fill: the input's own highlight has to stay visible.
+            // Transparent, so the selected-row color shows through. The text selection
+            // uses the theme color, which is darker than that row.
             // xsmall fits the row; text_size puts the grid font back (it is applied
             // after Input's own size style).
             return div()
@@ -714,7 +696,6 @@ impl TableDelegate for GridDelegate {
                 .items_center()
                 .overflow_hidden()
                 .when(numeric, |d| d.justify_end())
-                .bg(p.control_bg)
                 .border_1()
                 .border_color(p.accent)
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())

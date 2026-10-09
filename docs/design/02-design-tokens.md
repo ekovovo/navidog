@@ -161,7 +161,7 @@ Navicat 的 nib 中几乎所有颜色都是 AppKit 语义色。在 718 个 nib �
 | `color.selection` | appkit:selectedContentBackgroundColor | `#0064e1ff` | `#0059d1ff` |
 | `color.selection_inactive` | appkit:unemphasizedSelectedContentBackgroundColor | `#dcdcdcff` | `#464646ff` |
 | `color.selection_text` | appkit:alternateSelectedControlTextColor | `#ffffffff` | `#ffffffff` |
-| `color.text_selection` | appkit:selectedTextBackgroundColor | `#b3d7ffff` | `#3f638bff` |
+| `color.text_selection` | 暂定。要比选中行 `#d4e4f7` / `#243e5c` 更饱和，否则编辑格里的文字选区看不清。写在 `selection.background` | `#4c8fe6ff` | `#8ebfffff` |
 | `color.focus_ring` | appkit:keyboardFocusIndicatorColor | `#0067f47f` | `#1aa9ff7f` |
 | `color.link` | appkit:linkColor | `#0068daff` | `#419cffff` |
 | `color.find_highlight` | appkit:findHighlightColor | `#ffff00ff` | `#ffff00ff` |
@@ -182,7 +182,7 @@ Navicat 的 nib 中几乎所有颜色都是 AppKit 语义色。在 718 个 nib �
 | `color.grid_deleted` | 暂定，待实测（待删除的行） | `#ffd9d9ff` | `#5c2424ff` |
 | `color.grid_inserted` | 深色截图里的新增行，暂定 | `#f0ddf6ff` | `#4a2960ff` |
 | `color.grid_line` | 深色截图里的列分割线，暂定；`themes/navicat.json` 的 `table.row.border` 用同一色 | `#c8c8c8ff` | `#3a3a3aff` |
-| `table.hover.background` | 暂定。gpui-kit 默认浅色是 `#f5f5f5`，盖在它自己的隔行色 `#fafafa` 上。网格不再用悬停变色；这个键留给 DataTable，单元格用不透明底色盖住它 | `#e6e6e8ff` | `#333333ff` |
+| `table.hover.background` | 暂定。gpui-kit 默认浅色是 `#f5f5f5`，盖在它自己的隔行色 `#fafafa` 上。网格整行用这个悬停色，包括最后一列右边的空白 | `#e6e6e8ff` | `#333333ff` |
 | `color.grid_row_selected` | 暂定。要比白底和交替底纹 `#f4f5f5` 都更显眼，所以用浅蓝，不用悬停灰 | `#d4e4f7ff` | `#243e5cff` |
 | `color.chrome_active` | 深色截图里选中的选项卡和表查看器工具栏按钮，暂定；`tab.active.background` 用同一色。深色 `table.head.background` 为 `#2b2b2bff`，浅色为 `#f6f6f6ff` | `#d5e0eeff` | `#546886ff` |
 | `color.icon_blue` | 工具栏和导航图标，暂定 | `#007affff` | `#5eb0f6ff` |
