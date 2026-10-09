@@ -72,12 +72,18 @@ grid:
   hide_column:
     en: Hide Column
     zh-CN: 隐藏列
+  copy_field_name:
+    en: Copy Field Name
+    zh-CN: 复制字段名称
   freeze:
     en: Freeze up to This Column
     zh-CN: 冻结到此列
-  unfreeze:
-    en: Unfreeze
-    zh-CN: 取消冻结
+  freeze_column:
+    en: Freeze Column
+    zh-CN: 冻结列
+  unfreeze_all:
+    en: Unfreeze All Columns
+    zh-CN: 解除所有冻结列
   rowid:
     en: Show or Hide ROWID
     zh-CN: 显示或隐藏 ROWID
@@ -113,8 +119,8 @@ viewer:
     en: Discard
     zh-CN: 放弃
   filter:
-    en: Filter
-    zh-CN: 筛选
+    en: Filter & Sort
+    zh-CN: 筛选与排序
   sort:
     en: Sort
     zh-CN: 排序

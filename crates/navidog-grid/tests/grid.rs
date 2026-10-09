@@ -7,8 +7,9 @@ use std::rc::Rc;
 use gpui_kit::component::v_flex;
 use gpui_kit::test::{ClickOptions, TestWindowExt as _};
 use gpui_kit::{
-    AppContext as _, Context, Entity, FocusHandle, InteractiveElement as _, IntoElement,
-    MouseButton, ParentElement as _, Render, Styled as _, TestAppContext, Window, WindowBounds,
+    AppContext as _, Context, ElementId, Entity, FocusHandle, InputEvent as _,
+    InteractiveElement as _, IntoElement, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, ParentElement as _, Render, Styled as _, TestAppContext, Window, WindowBounds,
     WindowOptions, div, size,
 };
 use navidog_db::dialect::Written;
@@ -141,6 +142,56 @@ fn select_copy_and_edit(cx: &mut TestAppContext) {
     .unwrap();
     let v = cx.update(|cx| grid.read(cx).model(cx).value(1, 1).cloned());
     assert_eq!(v, Some(Some("QZ".into())));
+
+    // A drag that starts in the editor must not extend the selection onto another cell.
+    cx.update_window(handle, |_, window, cx| {
+        window.press("enter", cx);
+        window.render_frame(cx);
+        let rem = window.rem_size();
+        let col = tokens::grid::COLUMN_WIDTH.to_pixels(rem);
+        // The editor is the name column: past the marker and the id column.
+        let x = tokens::grid::ROW_NUMBER_WIDTH.to_pixels(rem) + col + col / 2.;
+        let row1 = window
+            .find(ElementId::NamedInteger("row".into(), 1))
+            .bounds();
+        let row0 = window
+            .find(ElementId::NamedInteger("row".into(), 0))
+            .bounds();
+        let origin = gpui_kit::point(row1.origin.x + x, row1.center().y);
+        let elsewhere = gpui_kit::point(row0.origin.x + x, row0.center().y);
+        let down = MouseDownEvent {
+            button: MouseButton::Left,
+            position: origin,
+            modifiers: Modifiers::none(),
+            click_count: 1,
+            first_mouse: false,
+        };
+        window.dispatch_event(down.to_platform_input(), cx);
+        let move_event = MouseMoveEvent {
+            position: elsewhere,
+            pressed_button: Some(MouseButton::Left),
+            modifiers: Modifiers::none(),
+        };
+        window.dispatch_event(move_event.to_platform_input(), cx);
+        let up = MouseUpEvent {
+            button: MouseButton::Left,
+            position: elsewhere,
+            modifiers: Modifiers::none(),
+            click_count: 1,
+        };
+        window.dispatch_event(up.to_platform_input(), cx);
+        window.render_frame(cx);
+        window.input("!", cx);
+        window.press("enter", cx);
+        window.render_frame(cx);
+    })
+    .unwrap();
+    let (head, value) = cx.update(|cx| {
+        let m = grid.read(cx).model(cx);
+        (m.head(), m.value(1, 1).cloned())
+    });
+    assert_eq!(head, (1, 1));
+    assert_eq!(value, Some(Some("QZ!".into())));
 }
 
 /// The table viewer's column: a pane of fixed size and a grid slot that must not grow

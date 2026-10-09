@@ -120,6 +120,8 @@ pub struct TableViewer {
     /// Cell editor under the grid. `None` hides it (F-DATA-011).
     editor: Option<Kind>,
     editor_input: Entity<TextareaState>,
+    /// JSON tab. Separate from `editor_input` so it can use the JSON highlighter.
+    json_input: Entity<EditorState>,
     /// Row and column the editor text was loaded from.
     editor_cell: Option<(usize, usize)>,
     editor_note: SharedString,
@@ -340,7 +342,12 @@ impl TableViewer {
             });
             let find_input = cx.new(|cx| InputState::new(window, cx));
             let replace_input = cx.new(|cx| InputState::new(window, cx));
-            let editor_input = cx.new(|cx| TextareaState::new(window, cx).auto_grow(3, 8));
+            let editor_input = cx.new(|cx| TextareaState::new(window, cx));
+            let json_input = cx.new(|cx| {
+                EditorState::new(window, cx)
+                    .language("json")
+                    .line_number(false)
+            });
             let apply_on_enter = |this: &mut Self,
                                   _: &Entity<InputState>,
                                   e: &InputEvent,
@@ -461,6 +468,7 @@ impl TableViewer {
                 find_input,
                 replace_input,
                 editor_input,
+                json_input,
                 show_filter: false,
                 builder: false,
                 rules: Vec::new(),
@@ -1400,8 +1408,13 @@ impl TableViewer {
             Kind::Json => pretty_json(&text).unwrap_or(text.clone()),
             _ => text.clone(),
         };
-        self.editor_input
-            .update(cx, |s, cx| s.set_value(shown, window, cx));
+        if kind == Kind::Json {
+            self.json_input
+                .update(cx, |s, cx| s.set_value(shown, window, cx));
+        } else {
+            self.editor_input
+                .update(cx, |s, cx| s.set_value(shown, window, cx));
+        }
         self.image = editor::sniff_image(text.as_bytes())
             .map(|format| Arc::new(Image::from_bytes(format, text.into_bytes())));
     }
@@ -1420,7 +1433,11 @@ impl TableViewer {
         let Some((r, c, _, _)) = self.focused_cell(cx) else {
             return;
         };
-        let raw = self.editor_input.read(cx).value().to_string();
+        let raw = if self.editor == Some(Kind::Json) {
+            self.json_input.read(cx).value().to_string()
+        } else {
+            self.editor_input.read(cx).value().to_string()
+        };
         let text = match self.editor {
             Some(Kind::Hex) => match decode_hex(&raw) {
                 Some(text) => text,
@@ -1439,11 +1456,11 @@ impl TableViewer {
     }
 
     fn format_json(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let raw = self.editor_input.read(cx).value().to_string();
+        let raw = self.json_input.read(cx).value().to_string();
         match pretty_json(&raw) {
             Some(pretty) => {
                 self.editor_note = SharedString::default();
-                self.editor_input
+                self.json_input
                     .update(cx, |s, cx| s.set_value(pretty, window, cx));
             }
             None => self.editor_note = t!("viewer.editor_json_invalid").into(),
@@ -1781,18 +1798,6 @@ impl TableViewer {
                         this.show_filter = !this.show_filter;
                         cx.notify();
                     })),
-            )
-            .child(
-                button(
-                    "toggle-sort",
-                    "arrow-up-down",
-                    t!("viewer.sort").to_string(),
-                )
-                .selected(self.show_filter)
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.show_filter = !this.show_filter;
-                    cx.notify();
-                })),
             )
             .child(
                 button("viewer-find", "search", t!("viewer.find").to_string())
@@ -2212,12 +2217,17 @@ impl TableViewer {
         let (_, _, text, type_name) = self
             .focused_cell(cx)
             .unwrap_or_else(|| (0, 0, String::new(), String::new()));
+        // Tabs and the button row sit in this chrome; the text area takes the rest and
+        // scrolls inside itself. The pane can shrink so a short window keeps the bottom bar.
+        let chrome = tokens::viewer::FILTER_HEIGHT.rems() * 2.;
         v_flex()
             .id("cell-editor")
             .w_full()
             .min_w_0()
-            .max_h(tokens::viewer::CELL_EDITOR_HEIGHT.rems() * 2.)
-            .overflow_y_scroll()
+            .h(tokens::viewer::CELL_EDITOR_HEIGHT.rems() + chrome)
+            .min_h(chrome)
+            .flex_shrink(1.)
+            .overflow_hidden()
             .border_t_1()
             .border_color(p.separator)
             .px_2()
@@ -2275,8 +2285,16 @@ impl TableViewer {
                 matches!(kind, Kind::Text | Kind::Hex | Kind::Web | Kind::Json),
                 |pane| {
                     pane.child(
-                        Textarea::new(&self.editor_input)
-                            .h(tokens::viewer::CELL_EDITOR_HEIGHT.rems()),
+                        div()
+                            .flex_1()
+                            .min_h_0()
+                            .overflow_hidden()
+                            .when(kind == Kind::Json, |slot| {
+                                slot.child(Editor::new(&self.json_input).size_full())
+                            })
+                            .when(kind != Kind::Json, |slot| {
+                                slot.child(Textarea::new(&self.editor_input).size_full())
+                            }),
                     )
                     .child(
                         h_flex()

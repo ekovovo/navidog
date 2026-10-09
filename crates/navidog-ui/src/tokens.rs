@@ -276,6 +276,8 @@ pub struct Palette {
     pub separator: Hsla,
     pub grid: Hsla,
     pub row_alt: Hsla,
+    /// The row that contains the selection. Same values as the old hover wash (provisional).
+    pub row_selected: Hsla,
     pub accent: Hsla,
     pub selection: Hsla,
     pub selection_inactive: Hsla,
@@ -319,6 +321,7 @@ pub fn light_palette() -> Palette {
         separator: c(0x00000019),
         grid: c(0xe6e6e6ff),
         row_alt: c(0xf4f5f5ff),
+        row_selected: c(0xe6e6e8ff),
         accent: c(0x007affff),
         selection: c(0x0064e1ff),
         selection_inactive: c(0xdcdcdcff),
@@ -353,6 +356,7 @@ pub fn dark_palette() -> Palette {
         separator: c(0xffffff19),
         grid: c(0x1a1a1aff),
         row_alt: c(0xffffff0c),
+        row_selected: c(0x333333ff),
         accent: c(0x007affff),
         selection: c(0x0059d1ff),
         selection_inactive: c(0x464646ff),
@@ -388,7 +392,7 @@ pub fn icon_color(icon: &str, cx: &App) -> Option<Hsla> {
         "square-terminal" | "database-backup" | "arrow-up-down" | "check" => p.icon_green,
         "funnel" | "square-function" | "file-code" | "key-round" | "rotate-ccw" => p.icon_orange,
         "eye" | "layers" | "git-commit-horizontal" => p.icon_teal,
-        "user" | "zap" | "folder" | "folder-open" => p.icon_yellow,
+        "user" | "zap" | "folder" | "folder-open" | "key" => p.icon_yellow,
         "shapes" | "calendar-clock" | "chart-pie" => p.icon_purple,
         _ => return None,
     })

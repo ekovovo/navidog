@@ -60,6 +60,49 @@ impl GridModel {
         self.head = self.anchor;
     }
 
+    /// Moves one data column. Cells, edits, the raw-SQL flags and the selection follow it.
+    pub fn move_column(&mut self, from: usize, to: usize) {
+        let n = self.columns.len();
+        if from == to || from >= n || to >= n {
+            return;
+        }
+        let mut order: Vec<usize> = (0..n).collect();
+        let ix = order.remove(from);
+        order.insert(to, ix);
+        self.reorder(&order);
+    }
+
+    /// `order[new_index]` is the old column index.
+    pub fn reorder(&mut self, order: &[usize]) {
+        if order.len() != self.columns.len() || (0..order.len()).any(|i| !order.contains(&i)) {
+            return;
+        }
+        self.columns = order.iter().map(|&i| self.columns[i].clone()).collect();
+        for row in &mut self.rows {
+            let next = permute_cells(row, order);
+            *row = next;
+        }
+        for row in &mut self.new_rows {
+            let next: Vec<Option<Cell>> = order
+                .iter()
+                .map(|&i| row.get(i).cloned().flatten())
+                .collect();
+            *row = next;
+        }
+        let edits = std::mem::take(&mut self.edits);
+        self.edits = edits
+            .into_iter()
+            .filter_map(|((r, c), v)| remap_col(c, order).map(|nc| ((r, nc), v)))
+            .collect();
+        let raw = std::mem::take(&mut self.raw);
+        self.raw = raw
+            .into_iter()
+            .filter_map(|(r, c)| remap_col(c, order).map(|nc| (r, nc)))
+            .collect();
+        self.anchor.1 = remap_col(self.anchor.1, order).unwrap_or(0);
+        self.head.1 = remap_col(self.head.1, order).unwrap_or(0);
+    }
+
     pub fn row_count(&self) -> usize {
         self.rows.len() + self.new_rows.len()
     }
@@ -538,6 +581,133 @@ impl GridModel {
     }
 }
 
+fn permute_cells(row: &[Cell], order: &[usize]) -> Vec<Cell> {
+    order
+        .iter()
+        .map(|&i| row.get(i).cloned().flatten())
+        .collect()
+}
+
+fn remap_col(old: usize, order: &[usize]) -> Option<usize> {
+    order.iter().position(|&i| i == old)
+}
+
+/// Column order for one open grid. `home` is the order with freeze-induced moves undone.
+/// `frozen` is the frozen names, left to right. Display order pulls frozen names to the front.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ColumnLayout {
+    home: Vec<SharedString>,
+    frozen: Vec<SharedString>,
+}
+
+impl ColumnLayout {
+    pub fn clear(&mut self) {
+        self.home.clear();
+        self.frozen.clear();
+    }
+
+    pub fn is_frozen(&self, name: &str) -> bool {
+        self.frozen.iter().any(|n| n.as_ref() == name)
+    }
+
+    pub fn any_frozen(&self) -> bool {
+        !self.frozen.is_empty()
+    }
+
+    /// How many of `columns` are frozen. They occupy the left of the display order.
+    pub fn pinned(&self, columns: &[GridColumn]) -> usize {
+        self.frozen
+            .iter()
+            .filter(|n| columns.iter().any(|c| &c.name == *n))
+            .count()
+    }
+
+    /// Remembers new names at the end of `home`. Names that are absent this page stay put,
+    /// so hiding a column and showing it again puts it back.
+    pub fn sync(&mut self, present: &[SharedString]) {
+        for name in present {
+            if !self.home.iter().any(|n| n == name) {
+                self.home.push(name.clone());
+            }
+        }
+    }
+
+    pub fn display_names(&self, present: &[SharedString]) -> Vec<SharedString> {
+        let has = |n: &SharedString| present.iter().any(|p| p == n);
+        let mut out = Vec::with_capacity(present.len());
+        for name in &self.frozen {
+            if has(name) && !out.iter().any(|n| n == name) {
+                out.push(name.clone());
+            }
+        }
+        for name in &self.home {
+            if has(name) && !self.is_frozen(name) && !out.iter().any(|n| n == name) {
+                out.push(name.clone());
+            }
+        }
+        for name in present {
+            if !out.iter().any(|n| n == name) {
+                out.push(name.clone());
+            }
+        }
+        out
+    }
+
+    /// `from` and `to` are indexes in [`Self::display_names`]. A frozen column only
+    /// reorders `frozen`; any other column only reorders the unfrozen slots of `home`.
+    pub fn drag(&mut self, present: &[SharedString], from: usize, to: usize) {
+        let mut display = self.display_names(present);
+        if from >= display.len() || to >= display.len() || from == to {
+            return;
+        }
+        let name = display.remove(from);
+        let frozen = self.is_frozen(&name);
+        display.insert(to, name);
+        if frozen {
+            let prefix: Vec<_> = display.into_iter().filter(|n| self.is_frozen(n)).collect();
+            rewrite(&mut self.frozen, &prefix);
+        } else {
+            let rest: Vec<_> = display.into_iter().filter(|n| !self.is_frozen(n)).collect();
+            rewrite(&mut self.home, &rest);
+        }
+    }
+
+    /// Inserts `name` just after the frozen columns. Already frozen, or an unknown name, is a no-op.
+    pub fn freeze_column(&mut self, present: &[SharedString], name: &SharedString) -> bool {
+        if self.is_frozen(name) || !present.iter().any(|n| n == name) {
+            return false;
+        }
+        self.frozen.push(name.clone());
+        true
+    }
+
+    /// Freezes the display prefix through `index` without moving columns.
+    pub fn freeze_through(&mut self, present: &[SharedString], index: usize) {
+        let display = self.display_names(present);
+        if display.is_empty() {
+            return;
+        }
+        let end = index.min(display.len() - 1);
+        self.frozen = display[..=end].to_vec();
+    }
+
+    pub fn unfreeze_all(&mut self) {
+        self.frozen.clear();
+    }
+}
+
+/// Replaces the slots that appear in `order` with `order`, and leaves the others where they are.
+fn rewrite(slots: &mut [SharedString], order: &[SharedString]) {
+    let mut it = order.iter();
+    for slot in slots.iter_mut() {
+        if order.iter().any(|n| n == slot)
+            && let Some(next) = it.next()
+        {
+            *slot = next.clone();
+        }
+    }
+}
+
 fn contains(hay: &str, needle: &str, case_sensitive: bool) -> bool {
     if needle.is_empty() {
         return false;
@@ -771,5 +941,54 @@ mod tests {
         m.set_value(0, 0, Some("9".into()));
         assert!(m.change_set().updates.is_empty());
         assert_eq!(m.value(0, 0), Some(&Some("1".into())));
+    }
+
+    #[test]
+    fn move_column_moves_cells_edits_and_selection() {
+        let mut m = model(true);
+        m.set_value(0, 1, Some("z".into()));
+        m.set_raw(1, 1, Some("NOW()".into()));
+        m.select((1, 1), false);
+        m.move_column(1, 0);
+        assert_eq!(m.columns[0].name.as_ref(), "name");
+        assert_eq!(m.columns[1].name.as_ref(), "id");
+        assert_eq!(m.value(0, 0).and_then(|c| c.as_deref()), Some("z"));
+        assert_eq!(m.value(0, 1).and_then(|c| c.as_deref()), Some("1"));
+        assert!(m.raw.contains(&(1, 0)));
+        assert_eq!(m.head(), (1, 0));
+    }
+
+    fn names(list: &[&str]) -> Vec<SharedString> {
+        list.iter()
+            .map(|s| SharedString::from(s.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn freeze_column_moves_to_the_end_of_the_frozen_prefix_and_unfreeze_restores_home() {
+        let present = names(&["a", "b", "c", "d"]);
+        let mut layout = ColumnLayout::default();
+        layout.sync(&present);
+        assert!(layout.freeze_column(&present, &present[2]));
+        assert_eq!(layout.display_names(&present), names(&["c", "a", "b", "d"]));
+        assert!(layout.freeze_column(&present, &present[0]));
+        assert_eq!(layout.display_names(&present), names(&["c", "a", "b", "d"]));
+        assert!(!layout.freeze_column(&present, &present[2]));
+        layout.unfreeze_all();
+        assert_eq!(layout.display_names(&present), present);
+    }
+
+    #[test]
+    fn freeze_through_does_not_move_columns() {
+        let present = names(&["a", "b", "c", "d"]);
+        let mut layout = ColumnLayout::default();
+        layout.sync(&present);
+        layout.freeze_through(&present, 1);
+        assert_eq!(layout.display_names(&present), present);
+        assert!(layout.is_frozen("a") && layout.is_frozen("b"));
+        assert!(!layout.is_frozen("c"));
+        layout.unfreeze_all();
+        assert_eq!(layout.display_names(&present), present);
+        assert!(!layout.any_frozen());
     }
 }

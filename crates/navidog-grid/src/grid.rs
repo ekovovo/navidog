@@ -15,7 +15,7 @@ use gpui_kit::{
     App, AppContext as _, ClipboardItem, Context, Entity, EventEmitter, FocusHandle, Focusable,
     InteractiveElement as _, IntoElement, KeyBinding, MouseButton, MouseDownEvent, MouseMoveEvent,
     MouseUpEvent, ParentElement as _, Pixels, Render, SharedString, Styled as _, Subscription,
-    WeakEntity, Window, actions, div, px,
+    TextAlign, WeakEntity, Window, actions, div, px,
 };
 use navidog_core::object::Scope;
 use navidog_core::settings::{RowShade, Settings};
@@ -26,7 +26,7 @@ use navidog_ui::{palette, tokens};
 use navidog_util::sql_type::{TypeKind, type_kind};
 use rust_i18n::t;
 
-use crate::model::{Cell, GridColumn, GridModel, Pos, RowState};
+use crate::model::{Cell, ColumnLayout, GridColumn, GridModel, Pos, RowState};
 
 actions!(
     grid,
@@ -58,11 +58,30 @@ pub struct SelectColumn {
     pub index: usize,
 }
 
-/// Freeze this many data columns on the left (F-DATA-009). Zero clears the freeze.
+/// Freeze the display prefix through this data column, without moving columns (F-DATA-009).
 #[derive(Clone, PartialEq, Eq, Debug, gpui_kit::Action)]
 #[action(namespace = grid, no_json)]
-pub struct FreezeColumns {
-    pub count: usize,
+pub struct FreezeThrough {
+    pub index: usize,
+}
+
+/// Move this data column to the end of the frozen prefix and freeze it (F-DATA-009).
+#[derive(Clone, PartialEq, Eq, Debug, gpui_kit::Action)]
+#[action(namespace = grid, no_json)]
+pub struct FreezeColumn {
+    pub index: usize,
+}
+
+/// Clear the freeze and undo the moves it caused (F-DATA-009).
+#[derive(Clone, PartialEq, Eq, Debug, gpui_kit::Action)]
+#[action(namespace = grid, no_json)]
+pub struct UnfreezeAll;
+
+/// Copy one column's name (the column-header "Copy Field Name" item).
+#[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+#[action(namespace = grid, no_json)]
+pub struct CopyFieldName {
+    pub name: SharedString,
 }
 
 /// Hide or show one column by name (F-DATA-009). The viewer owns the hidden set.
@@ -155,8 +174,8 @@ pub struct GridDelegate {
     dialect: Dialect,
     /// Highlight cells containing this text (query, case sensitive)
     find: Option<(SharedString, bool)>,
-    /// Data columns fixed on the left, after the marker column
-    frozen: usize,
+    /// Display order and which columns are frozen (F-DATA-009)
+    layout: ColumnLayout,
     /// Resized widths by column name, so a refresh does not snap back to the default
     widths: BTreeMap<SharedString, Pixels>,
     /// The row a plain click or key move settled on. Leaving it while it is dirty commits.
@@ -188,11 +207,63 @@ impl GridDelegate {
         pt.to_pixels(self.rem)
     }
 
+    /// Resting color of a data row. Selected rows share one color; other rows keep the stripe.
+    fn row_background(&self, r: usize, state: RowState, cx: &App) -> gpui_kit::Hsla {
+        let p = palette(cx);
+        if self.model.selection().0.contains(&r) && state != RowState::Deleted {
+            return p.row_selected;
+        }
+        let shaded = match row_shade(cx) {
+            RowShade::Alternate => r % 2 == 1,
+            RowShade::EveryThird => RowShade::EveryThird.paints(r) && state != RowState::Deleted,
+            RowShade::None => false,
+        };
+        if shaded { p.row_alt } else { p.control_bg }
+    }
+
+    fn names(&self) -> Vec<SharedString> {
+        self.model.columns.iter().map(|c| c.name.clone()).collect()
+    }
+
+    /// Puts the live page into `desired` order. Edits and the selection move with the columns.
+    fn apply_display(&mut self, desired: &[SharedString]) {
+        let current = self.names();
+        if current == desired {
+            return;
+        }
+        let sort_name = self
+            .sort
+            .and_then(|(i, asc)| current.get(i).map(|n| (n.clone(), asc)));
+        let edit_name = self
+            .editing
+            .as_ref()
+            .and_then(|(pos, _)| current.get(pos.1).cloned());
+        let order: Vec<usize> = desired
+            .iter()
+            .filter_map(|n| current.iter().position(|c| c == n))
+            .collect();
+        self.model.reorder(&order);
+        self.sort = sort_name.and_then(|(name, asc)| {
+            self.model
+                .columns
+                .iter()
+                .position(|c| c.name == name)
+                .map(|i| (i, asc))
+        });
+        if let Some(name) = edit_name
+            && let Some((pos, _)) = &mut self.editing
+            && let Some(i) = self.model.columns.iter().position(|c| c.name == name)
+        {
+            pos.1 = i;
+        }
+    }
+
     /// Width of the pinned columns. DataTable draws a hairline at this edge on every real row.
     fn pinned_span(&self) -> Pixels {
         let mut span = self.width(tokens::grid::ROW_NUMBER_WIDTH);
+        let pinned = self.layout.pinned(&self.model.columns);
         for (ix, col) in self.model.columns.iter().enumerate() {
-            if ix >= self.frozen {
+            if ix >= pinned {
                 break;
             }
             span += self
@@ -242,11 +313,22 @@ fn header_type(col: &GridColumn, show_comment: bool) -> String {
     label
 }
 
-fn column_menu(col: usize, name: SharedString, show_type: bool, show_comment: bool) -> NativeMenu {
+fn column_menu(
+    col: usize,
+    name: SharedString,
+    show_type: bool,
+    show_comment: bool,
+    frozen: bool,
+    any_frozen: bool,
+) -> NativeMenu {
     NativeMenu::new()
         .menu(
             t!("grid.select_column").to_string(),
             Box::new(SelectColumn { index: col }),
+        )
+        .menu(
+            t!("grid.copy_field_name").to_string(),
+            Box::new(CopyFieldName { name: name.clone() }),
         )
         .menu_with_check(
             t!("grid.show_type").to_string(),
@@ -265,11 +347,17 @@ fn column_menu(col: usize, name: SharedString, show_type: bool, show_comment: bo
         )
         .menu(
             t!("grid.freeze").to_string(),
-            Box::new(FreezeColumns { count: col + 1 }),
+            Box::new(FreezeThrough { index: col }),
         )
-        .menu(
-            t!("grid.unfreeze").to_string(),
-            Box::new(FreezeColumns { count: 0 }),
+        .menu_with_disabled(
+            t!("grid.freeze_column").to_string(),
+            frozen,
+            Box::new(FreezeColumn { index: col }),
+        )
+        .menu_with_disabled(
+            t!("grid.unfreeze_all").to_string(),
+            !any_frozen,
+            Box::new(UnfreezeAll),
         )
 }
 
@@ -308,12 +396,36 @@ impl TableDelegate for GridDelegate {
         let mut column = Column::new(SharedString::from(ix.to_string()), col.name.clone())
             .width(width)
             .sort(sort)
-            .movable(false)
+            .movable(true)
             .p_0();
-        if ix - 1 < self.frozen {
+        if ix - 1 < self.layout.pinned(&self.model.columns) {
             column = column.fixed_left();
         }
         column
+    }
+
+    fn move_column(
+        &mut self,
+        col_ix: usize,
+        to_ix: usize,
+        _: &mut Window,
+        cx: &mut Context<TableState<Self>>,
+    ) {
+        // Index 0 is the marker column. DataTable still swaps its groups after this
+        // returns, so a drop onto the marker is undone on the next frame.
+        if col_ix == 0 || to_ix == 0 {
+            let table = cx.entity();
+            cx.defer(move |cx| {
+                table.update(cx, |t, cx| t.refresh(cx));
+            });
+            return;
+        }
+        let from = col_ix - 1;
+        let to = to_ix - 1;
+        let present = self.names();
+        self.layout.drag(&present, from, to);
+        let desired = self.layout.display_names(&present);
+        self.apply_display(&desired);
     }
 
     fn perform_sort(
@@ -452,7 +564,14 @@ impl TableDelegate for GridDelegate {
                         // dispatches to whoever is focused.
                         let handle = t.focus_handle(cx);
                         window.focus(&handle, cx);
-                        column_menu(c, name.clone(), show_type, show_comment)
+                        let d = t.delegate();
+                        let frozen = d
+                            .model
+                            .columns
+                            .get(c)
+                            .is_some_and(|col| d.layout.is_frozen(&col.name));
+                        let any_frozen = d.layout.any_frozen();
+                        column_menu(c, name.clone(), show_type, show_comment, frozen, any_frozen)
                             .show(e.position, window, cx);
                     }),
                 )
@@ -477,11 +596,10 @@ impl TableDelegate for GridDelegate {
                 .into_any_element();
         }
         let state = self.model.row_state(r);
-        // Every third row is painted on the cells. Alternate uses DataTable's stripe;
-        // the empty filler rows below the data stay plain. ponytail: filler rows are not tinted.
-        let tint = row_shade(cx) == RowShade::EveryThird
-            && RowShade::EveryThird.paints(r)
-            && state != RowState::Deleted;
+        // Opaque, so DataTable's row hover cannot show through. A selected row uses one color
+        // on every cell; stripe and every-third only paint rows the selection misses.
+        // ponytail: filler rows under the scrollbar are not tinted.
+        let base = self.row_background(r, state, cx);
         let Some(c) = ix.checked_sub(1) else {
             let mark = match state {
                 RowState::Inserted => "*",
@@ -498,27 +616,23 @@ impl TableDelegate for GridDelegate {
                 .border_r_1()
                 .border_color(p.grid_line)
                 .text_color(p.label_secondary)
-                .when(tint, |d| d.bg(p.row_alt))
+                .bg(base)
                 .when(state == RowState::Inserted, |d| d.bg(p.grid_inserted))
                 .when(state == RowState::Deleted, |d| d.bg(p.grid_deleted))
                 .child(mark)
                 .into_any_element();
         };
-        if let Some((pos, input)) = &self.editing
-            && *pos == (r, c)
-        {
-            // The cell's click commits the edit. Stop it here so a click that
-            // only moves the caret stays inside the editor.
-            return div()
-                .size_full()
-                .border_r_1()
-                .border_color(p.grid_line)
-                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .on_mouse_up(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .child(Input::new(input).xsmall().appearance(false).size_full())
-                .into_any_element();
-        }
+        let editing = self
+            .editing
+            .as_ref()
+            .filter(|(pos, _)| *pos == (r, c))
+            .map(|(_, input)| input.clone());
         let selected = self.model.is_selected(r, c);
+        let numeric = self
+            .model
+            .columns
+            .get(c)
+            .is_some_and(|col| type_kind(&col.type_name) == TypeKind::Number);
         let hit = self
             .find
             .as_ref()
@@ -535,15 +649,14 @@ impl TableDelegate for GridDelegate {
             None if state == RowState::Inserted => ("(Default)".into(), Some(p.label_secondary)),
             None => ("".into(), None),
         };
-        div()
+        let cell = div()
             .size_full()
             .px_1()
             .flex()
             .items_center()
             .overflow_hidden()
-            .border_r_1()
-            .border_color(p.grid_line)
-            .when(tint, |d| d.bg(p.row_alt))
+            .when(numeric, |d| d.justify_end())
+            .bg(base)
             .when(state == RowState::Inserted, |d| d.bg(p.grid_inserted))
             .when(state == RowState::Deleted, |d| d.bg(p.grid_deleted))
             .when(
@@ -552,7 +665,29 @@ impl TableDelegate for GridDelegate {
             )
             .when(hit && !selected, |d| d.bg(p.selection_inactive))
             .when_some(tone.filter(|_| !selected), |d, color| d.text_color(color))
-            .when(selected, |d| d.bg(p.selection).text_color(p.selection_text))
+            .when(selected, |d| d.bg(p.selection).text_color(p.selection_text));
+        if let Some(input) = editing {
+            let font = grid_text_size(cx);
+            // Same fill as the cell had. The accent border is the only edit chrome.
+            // xsmall fits the row; text_size puts the grid font back (it is applied
+            // after Input's own size style).
+            return cell
+                .border_1()
+                .border_color(p.accent)
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_mouse_up(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .child(
+                    Input::new(&input)
+                        .xsmall()
+                        .appearance(false)
+                        .size_full()
+                        .text_size(font)
+                        .when(selected, |i| i.text_color(p.selection_text)),
+                )
+                .into_any_element();
+        }
+        cell.border_r_1()
+            .border_color(p.grid_line)
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |t, e: &MouseDownEvent, _, cx| {
@@ -567,6 +702,10 @@ impl TableDelegate for GridDelegate {
             // Dragging extends the selection; DataTable only emits SelectCell when press and release
             // land on the same cell
             .on_mouse_move(cx.listener(move |t, e: &MouseMoveEvent, _, cx| {
+                // A drag that starts in the editor selects text, not other cells.
+                if t.delegate().editing.is_some() {
+                    return;
+                }
                 if e.dragging() && t.delegate().model.head() != (r, c) {
                     let d = t.delegate_mut();
                     d.dragged = true;
@@ -636,7 +775,7 @@ impl ResultGrid {
             raw: false,
             dialect: Dialect::Sqlite,
             find: None,
-            frozen: 0,
+            layout: ColumnLayout::default(),
             widths: BTreeMap::new(),
             settled: None,
             dragged: false,
@@ -649,7 +788,7 @@ impl ResultGrid {
                 .row_header(false)
                 .row_selectable(false)
                 .col_selectable(false)
-                .col_movable(false)
+                .col_movable(true)
                 .sortable(true)
         });
         let subs = vec![
@@ -704,6 +843,8 @@ impl ResultGrid {
             let d = t.delegate_mut();
             d.dialect = dialect;
             d.widths = widths;
+            d.layout.clear();
+            d.sort = None;
             t.refresh(cx);
         });
     }
@@ -727,8 +868,35 @@ impl ResultGrid {
         self.edit_sub = None;
         self.table.update(cx, |t, cx| {
             let d = t.delegate_mut();
+            let sort_name = d
+                .sort
+                .and_then(|(i, asc)| d.model.columns.get(i).map(|c| (c.name.clone(), asc)));
+            let names: Vec<_> = columns.iter().map(|c| c.name.clone()).collect();
+            d.layout.sync(&names);
+            let desired = d.layout.display_names(&names);
+            let order: Vec<usize> = desired
+                .iter()
+                .filter_map(|n| names.iter().position(|c| c == n))
+                .collect();
+            let columns: Vec<_> = order.iter().map(|&i| columns[i].clone()).collect();
+            let rows: Vec<_> = rows
+                .into_iter()
+                .map(|row| {
+                    order
+                        .iter()
+                        .map(|&i| row.get(i).cloned().flatten())
+                        .collect()
+                })
+                .collect();
             d.editing = None;
             d.model.set_data(columns, rows);
+            d.sort = sort_name.and_then(|(name, asc)| {
+                d.model
+                    .columns
+                    .iter()
+                    .position(|c| c.name == name)
+                    .map(|i| (i, asc))
+            });
             d.settled = Some(d.model.head().0);
             d.dragged = false;
             d.commit_requested = false;
@@ -1040,7 +1208,15 @@ impl ResultGrid {
             crate::date::open(pos, kind, &text, cx.entity().downgrade(), window, cx);
             return;
         }
+        let numeric = self
+            .model(cx)
+            .columns
+            .get(pos.1)
+            .is_some_and(|col| type_kind(&col.type_name) == TypeKind::Number);
         let input = cx.new(|cx| InputState::new(window, cx).default_value(text));
+        if numeric {
+            input.update(cx, |s, cx| s.set_text_align(TextAlign::Right, cx));
+        }
         self.edit_sub = Some(cx.subscribe_in(
             &input,
             window,
@@ -1245,9 +1421,38 @@ impl Render for ResultGrid {
                 this.update_model(cx, |m| m.select_column(a.index, false));
                 this.focus_column(cx);
             }))
-            .on_action(cx.listener(|this, a: &FreezeColumns, _, cx| {
+            .on_action(cx.listener(|_, a: &CopyFieldName, _, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(a.name.to_string()));
+            }))
+            .on_action(cx.listener(|this, a: &FreezeThrough, _, cx| {
                 this.table.update(cx, |t, cx| {
-                    t.delegate_mut().frozen = a.count;
+                    let d = t.delegate_mut();
+                    let present = d.names();
+                    d.layout.freeze_through(&present, a.index);
+                    t.refresh(cx);
+                });
+            }))
+            .on_action(cx.listener(|this, a: &FreezeColumn, _, cx| {
+                this.table.update(cx, |t, cx| {
+                    let d = t.delegate_mut();
+                    let Some(name) = d.model.columns.get(a.index).map(|c| c.name.clone()) else {
+                        return;
+                    };
+                    let present = d.names();
+                    if d.layout.freeze_column(&present, &name) {
+                        let desired = d.layout.display_names(&present);
+                        d.apply_display(&desired);
+                    }
+                    t.refresh(cx);
+                });
+            }))
+            .on_action(cx.listener(|this, _: &UnfreezeAll, _, cx| {
+                this.table.update(cx, |t, cx| {
+                    let d = t.delegate_mut();
+                    d.layout.unfreeze_all();
+                    let present = d.names();
+                    let desired = d.layout.display_names(&present);
+                    d.apply_display(&desired);
                     t.refresh(cx);
                 });
             }))
@@ -1332,6 +1537,11 @@ fn row_shade(cx: &App) -> RowShade {
     } else {
         RowShade::Alternate
     }
+}
+
+/// Grid font: the preference, or the interface size when "use default font" is on.
+fn grid_text_size(cx: &App) -> gpui_kit::Rems {
+    tokens::Pt(grid_font_pt(cx).unwrap_or(tokens::font::SIZE_BODY.value())).rems()
 }
 
 /// Point size when the grid is not using the interface font. `None` keeps the default.

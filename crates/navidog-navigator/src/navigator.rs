@@ -1388,6 +1388,19 @@ impl NavigatorPanel {
             Some(Node::Category(_, k)) | Some(Node::Object(ObjectRef { kind: k, .. })) => {
                 (tinted(kind_icon(*k)), None)
             }
+            Some(Node::TableItem(table, Child::Fields, name)) => {
+                let pk = Catalog::global(cx)
+                    .read(cx)
+                    .columns(&table.scope, &table.name)
+                    .and_then(|load| match load {
+                        Load::Ready(cols) => {
+                            cols.iter().find(|c| c.name == *name).map(|c| c.primary_key)
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or(false);
+                (tinted(if pk { "key" } else { "columns-3" }), None)
+            }
             Some(Node::TableFolder(_, c)) | Some(Node::TableItem(_, c, _)) => {
                 (tinted(c.icon()), None)
             }
