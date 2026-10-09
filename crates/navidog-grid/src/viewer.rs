@@ -1154,6 +1154,14 @@ impl TableViewer {
         cx.notify();
     }
 
+    /// Menu items dispatch along the focused element. Stay on the grid when it
+    /// already has focus; otherwise focus this viewer so the item is handled.
+    fn focus_for_menu(&self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.focus_handle.contains_focused(window, cx) {
+            window.focus(&self.focus_handle, cx);
+        }
+    }
+
     fn close_find(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.show_find = false;
         self.sync_highlight(cx);
@@ -1807,6 +1815,7 @@ impl TableViewer {
                     .icon(lucide("columns-3"))
                     .tooltip(t!("viewer.columns").to_string())
                     .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
+                        this.focus_for_menu(window, cx);
                         this.columns_menu().show(event.position(), window, cx);
                     })),
             )
@@ -2012,6 +2021,7 @@ impl TableViewer {
                     .xsmall()
                     .label(field)
                     .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                        this.focus_for_menu(window, cx);
                         this.field_menu(index).show(event.position(), window, cx);
                     })),
             )
@@ -2020,6 +2030,7 @@ impl TableViewer {
                     .xsmall()
                     .label(rule.op.label())
                     .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                        this.focus_for_menu(window, cx);
                         this.op_menu(index).show(event.position(), window, cx);
                     })),
             )
@@ -2070,6 +2081,7 @@ impl TableViewer {
                     .xsmall()
                     .label(field)
                     .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                        this.focus_for_menu(window, cx);
                         this.sort_menu(index).show(event.position(), window, cx);
                     })),
             )

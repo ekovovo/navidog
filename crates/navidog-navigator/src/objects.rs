@@ -493,9 +493,12 @@ impl ObjectsPanel {
                         .small()
                         .icon(lucide("columns-3"))
                         .tooltip(t!("obj.choose_columns").to_string())
-                        .on_click(move |e, window, cx| {
+                        .on_click(cx.listener(move |this, e: &ClickEvent, window, cx| {
+                            if !this.focus_handle.contains_focused(window, cx) {
+                                window.focus(&this.focus_handle, cx);
+                            }
                             Self::columns_menu(kind, cx).show(e.position(), window, cx);
-                        }),
+                        })),
                 )
             })
             .child(

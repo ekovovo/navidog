@@ -446,8 +446,12 @@ impl TableDelegate for GridDelegate {
                 )
                 .on_mouse_down(
                     MouseButton::Right,
-                    cx.listener(move |_t, e: &MouseDownEvent, window, cx| {
+                    cx.listener(move |t, e: &MouseDownEvent, window, cx| {
                         cx.stop_propagation();
+                        // Right-click does not focus the table, and the menu
+                        // dispatches to whoever is focused.
+                        let handle = t.focus_handle(cx);
+                        window.focus(&handle, cx);
                         column_menu(c, name.clone(), show_type, show_comment)
                             .show(e.position, window, cx);
                     }),
@@ -871,6 +875,8 @@ impl ResultGrid {
                         Some(c) => t.delegate_mut().model.select((r, c), false),
                     });
                 }
+                // Same as the column menu: focus first, or the item is a no-op.
+                self.focus_table(window, cx);
                 self.context_menu(cx)
                     .show(window.mouse_position(), window, cx);
             }

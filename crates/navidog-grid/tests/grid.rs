@@ -5,10 +5,11 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use gpui_kit::component::v_flex;
-use gpui_kit::test::TestWindowExt as _;
+use gpui_kit::test::{ClickOptions, TestWindowExt as _};
 use gpui_kit::{
-    AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, Styled as _,
-    TestAppContext, Window, WindowBounds, WindowOptions, div, size,
+    AppContext as _, Context, Entity, FocusHandle, InteractiveElement as _, IntoElement,
+    MouseButton, ParentElement as _, Render, Styled as _, TestAppContext, Window, WindowBounds,
+    WindowOptions, div, size,
 };
 use navidog_db::dialect::Written;
 use navidog_grid::model::GridColumn;
@@ -273,4 +274,88 @@ fn leaving_a_modified_row_requests_a_commit(cx: &mut TestAppContext) {
     .unwrap();
     cx.run_until_parked();
     assert_eq!(commits.get(), 1);
+}
+
+/// A right-click focuses the grid. Menu items dispatch to the focused element,
+/// so a click while another pane is focused would otherwise do nothing.
+struct MenuHost {
+    focus: FocusHandle,
+    grid: Entity<ResultGrid>,
+}
+
+impl Render for MenuHost {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .id("grid-menu-host")
+            .track_focus(&self.focus)
+            .size_full()
+            .child(self.grid.clone())
+    }
+}
+
+#[gpui_kit::test]
+fn right_click_focuses_the_grid_so_the_menu_item_runs(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        navidog_ui::theme::init(cx);
+        navidog_grid::init(cx);
+    });
+    let (handle, grid, focus): (_, Entity<ResultGrid>, FocusHandle) = cx.update(|cx| {
+        // raw-px: test window size
+        let test_size = size(gpui_kit::px(800.), gpui_kit::px(400.));
+        let bounds = gpui_kit::Bounds {
+            origin: Default::default(),
+            size: test_size,
+        };
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
+            ..Default::default()
+        };
+        let (handle, host) = gpui_kit::open_window(options, cx, |window, cx| {
+            let grid = cx.new(|cx| ResultGrid::new(window, cx));
+            let focus = cx.focus_handle();
+            cx.new(|_| MenuHost { focus, grid })
+        })
+        .unwrap();
+        let grid = host.read(cx).grid.clone();
+        let focus = host.read(cx).focus.clone();
+        (handle, grid, focus)
+    });
+    cx.update(|cx| {
+        grid.update(cx, |g, cx| {
+            let cell = |s: &str| Some(s.to_string().into());
+            g.set_data(
+                vec![col("id", true), col("name", false)],
+                vec![vec![cell("1"), cell("a")]],
+                cx,
+            )
+        })
+    });
+
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.render_frame(cx);
+        window.focus(&focus, cx);
+        let rem = window.rem_size();
+        // The name column, past the marker and the id column
+        let x = tokens::grid::ROW_NUMBER_WIDTH.to_pixels(rem)
+            + tokens::grid::COLUMN_WIDTH.to_pixels(rem) * 1.5;
+        window.click_with_options(
+            gpui_kit::ElementId::NamedInteger("row".into(), 0),
+            ClickOptions::new()
+                .with_button(MouseButton::Right)
+                .with_offset(gpui_kit::point(x, rem / 2.)),
+            cx,
+        );
+    })
+    .unwrap();
+    // RightClickedCell is emitted, so selection and focus land after that update.
+    // dispatch_action records the focused element immediately, the way a later menu click does.
+    cx.update_window(handle, |_, window, cx| {
+        window.dispatch_action(Box::new(navidog_grid::grid::Copy), cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    let copied = cx.update(|cx| cx.read_from_clipboard().and_then(|c| c.text()));
+    assert_eq!(copied.as_deref(), Some("a"));
 }

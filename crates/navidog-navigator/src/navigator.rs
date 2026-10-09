@@ -1629,7 +1629,10 @@ impl NavigatorPanel {
                     self.type_filter.is_some(),
                     t!("nav.filter_type").to_string(),
                 )
-                .on_click(|e, window, cx| {
+                .on_click(cx.listener(|this, e: &ClickEvent, window, cx| {
+                    if !this.focus_handle.contains_focused(window, cx) {
+                        window.focus(&this.focus_handle, cx);
+                    }
                     let menu = navidog_db::DriverRegistry::all(cx).into_iter().fold(
                         NativeMenu::new()
                             .menu(
@@ -1648,7 +1651,7 @@ impl NavigatorPanel {
                         },
                     );
                     menu.show(e.position(), window, cx);
-                }),
+                })),
             )
             .child(
                 quick(
