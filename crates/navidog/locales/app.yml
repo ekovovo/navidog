@@ -1,8 +1,8 @@
 _version: 2
 menu:
   about:
-    en: About navidog
-    zh-CN: 关于 navidog
+    en: About Navidog
+    zh-CN: 关于 Navidog
   preferences:
     en: Settings…
     zh-CN: 偏好设置…
@@ -13,8 +13,8 @@ menu:
     en: Services
     zh-CN: 服务
   hide:
-    en: Hide navidog
-    zh-CN: 隐藏 navidog
+    en: Hide Navidog
+    zh-CN: 隐藏 Navidog
   hide_others:
     en: Hide Others
     zh-CN: 隐藏其他
@@ -22,8 +22,8 @@ menu:
     en: Show All
     zh-CN: 全部显示
   quit:
-    en: Quit navidog
-    zh-CN: 退出 navidog
+    en: Quit Navidog
+    zh-CN: 退出 Navidog
   file:
     en: File
     zh-CN: 文件
@@ -46,8 +46,8 @@ menu:
     en: Clear Menu
     zh-CN: 清除菜单
   open_uri:
-    en: Open navidog URI…
-    zh-CN: 使用 navidog URI 打开…
+    en: Open Navidog URI…
+    zh-CN: 使用 Navidog URI 打开…
   manage_connections:
     en: Manage Connections…
     zh-CN: 管理连接…
@@ -169,8 +169,8 @@ menu:
     en: Help
     zh-CN: 帮助
   navidog_help:
-    en: navidog Help
-    zh-CN: navidog 帮助
+    en: Navidog Help
+    zh-CN: Navidog 帮助
   report_issue:
     en: Report an Issue
     zh-CN: 反馈问题
@@ -267,8 +267,8 @@ prefs:
     en: Startup Screen
     zh-CN: 启动画面
   startup_hint:
-    en: These tabs open when navidog starts. Right-click a tab and choose “Add to Startup Screen” to add one.
-    zh-CN: 启动 navidog 时打开这些选项卡。右键点按选项卡并选择“添加到启动画面”即可加入。
+    en: These tabs open when Navidog starts. Right-click a tab and choose “Add to Startup Screen” to add one.
+    zh-CN: 启动 Navidog 时打开这些选项卡。右键点按选项卡并选择“添加到启动画面”即可加入。
   limit_records:
     en: Limit records
     zh-CN: 限制记录
@@ -370,11 +370,11 @@ fav:
     zh-CN: 收藏夹 ID（1–9）
 uri:
   open_title:
-    en: Open navidog URI
-    zh-CN: 使用 navidog URI 打开
+    en: Open Navidog URI
+    zh-CN: 使用 Navidog URI 打开
   invalid:
-    en: Not a navidog URI
-    zh-CN: 不是有效的 navidog URI
+    en: Not a Navidog URI
+    zh-CN: 不是有效的 Navidog URI
   no_connection:
     en: "No saved connection matches “%{name}”"
     zh-CN: "没有与“%{name}”匹配的连接"

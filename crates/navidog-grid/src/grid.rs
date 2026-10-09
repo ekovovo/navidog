@@ -187,6 +187,9 @@ pub struct GridDelegate {
     settled: Option<usize>,
     /// The pointer dragged the selection, so the mouse-up (not SelectCell) settles the row.
     dragged: bool,
+    /// A selection drag only starts from a mouse-down on a data cell. A column-header
+    /// drag also has the button down, but it must not select the cells it passes over.
+    selecting: bool,
     /// A data-cell click should open the editor when "click to edit" is on.
     arm_click_edit: bool,
     commit_requested: bool,
@@ -715,6 +718,7 @@ impl TableDelegate for GridDelegate {
                 MouseButton::Left,
                 cx.listener(move |t, e: &MouseDownEvent, _, cx| {
                     let d = t.delegate_mut();
+                    d.selecting = true;
                     d.model.select((r, c), e.modifiers.shift);
                     d.arm_click_edit = !e.modifiers.shift
                         && cx.has_global::<Settings>()
@@ -726,7 +730,8 @@ impl TableDelegate for GridDelegate {
             // land on the same cell
             .on_mouse_move(cx.listener(move |t, e: &MouseMoveEvent, _, cx| {
                 // A drag that starts in the editor selects text, not other cells.
-                if t.delegate().editing.is_some() {
+                // A column drag never pressed a cell, so it must not extend the selection.
+                if t.delegate().editing.is_some() || !t.delegate().selecting {
                     return;
                 }
                 if e.dragging() && t.delegate().model.head() != (r, c) {
@@ -742,6 +747,7 @@ impl TableDelegate for GridDelegate {
                 MouseButton::Left,
                 cx.listener(move |t, _: &MouseUpEvent, _, cx| {
                     let d = t.delegate_mut();
+                    d.selecting = false;
                     if !std::mem::take(&mut d.dragged) {
                         return;
                     }
@@ -802,6 +808,7 @@ impl ResultGrid {
             widths: BTreeMap::new(),
             settled: None,
             dragged: false,
+            selecting: false,
             arm_click_edit: false,
             commit_requested: false,
         };

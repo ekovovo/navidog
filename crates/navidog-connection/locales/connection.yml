@@ -31,7 +31,7 @@ conn:
     en: "mysql://, postgres:// or navidog:// URI"
     zh-CN: "mysql://、postgres:// 或 navidog:// URI"
   uri_invalid:
-    en: Not a database URI navidog understands
+    en: Not a database URI Navidog understands
     zh-CN: 无法识别的数据库 URI
   manage_title:
     en: Manage Connections
@@ -337,8 +337,8 @@ conn:
     en: SSH Password
     zh-CN: SSH 密码
   unlock_title:
-    en: Unlock navidog
-    zh-CN: 解锁 navidog
+    en: Unlock Navidog
+    zh-CN: 解锁 Navidog
   unlock_prompt:
     en: Enter the master password to decrypt saved passwords.
     zh-CN: 输入主密码以解密保存的密码。

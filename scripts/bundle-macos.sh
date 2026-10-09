@@ -22,8 +22,8 @@ cat > "$app/Contents/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key><string>navidog</string>
-  <key>CFBundleDisplayName</key><string>navidog</string>
+  <key>CFBundleName</key><string>Navidog</string>
+  <key>CFBundleDisplayName</key><string>Navidog</string>
   <key>CFBundleIdentifier</key><string>ci.nn.navidog</string>
   <key>CFBundleExecutable</key><string>navidog</string>
   <key>CFBundleIconFile</key><string>navidog</string>
@@ -38,5 +38,5 @@ cat > "$app/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-hdiutil create -volname navidog -srcfolder "$app" -ov -format UDZO "$out/navidog-${version}.dmg"
+hdiutil create -volname Navidog -srcfolder "$app" -ov -format UDZO "$out/navidog-${version}.dmg"
 echo "已生成 $out/navidog-${version}.dmg"

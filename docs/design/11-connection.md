@@ -227,7 +227,7 @@ flowchart LR
 
 | 模式 | `crypto` 字段 | 密钥来源 |
 | --- | --- | --- |
-| 本机密钥（默认） | `{ "kind": "machine" }` | 首次启动时生成 32 字节随机密钥，存入钥匙串，service 为 `ci.nn.navidog`，account 为 `config-key` |
+| 本机密钥（默认） | `{ "kind": "machine" }` | 首次启动时生成 32 字节随机密钥，存入钥匙串，service 为 `ci.nn.navidog`，account 为 `config-key`。macOS 读取时只取密码、不取钥匙串项，所以未信任的程序只弹一次 |
 | 主密码 | `{ "kind": "master", "salt": "…", "m_kib": 19456, "t": 2, "p": 1, "check": { "nonce": "…", "ct": "…" } }` | 用 Argon2id 从主密码派生 32 字节密钥；`check` 是加密后的固定串，用来验证主密码是否正确 |
 
 - 算法为 XChaCha20-Poly1305，每个字段使用随机 24 字节 nonce；associated data 为 `连接 ID + 字段名`，防止密文在字段之间被调换。

@@ -125,7 +125,7 @@ pub fn set_menus(cx: &mut App) {
             disabled: false,
         };
     cx.set_menus(vec![
-        Menu::new("navidog").items([
+        Menu::new("Navidog").items([
             MenuItem::action(t!("menu.about").to_string(), About),
             MenuItem::separator(),
             MenuItem::action(t!("menu.preferences").to_string(), Preferences),

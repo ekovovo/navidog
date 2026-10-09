@@ -728,7 +728,7 @@ impl Render for MainWindow {
                     .flex()
                     .justify_center()
                     .text_color(p.label)
-                    .child("navidog"),
+                    .child("Navidog"),
             ),
         )
         .when(self.state.show_toolbar, |r| {

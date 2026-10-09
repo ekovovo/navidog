@@ -1,5 +1,6 @@
-//! 秘密字段加密（11-connection.md 第 7 节）：XChaCha20-Poly1305，
-//! associated data 为“连接 ID + 字段名”，防止密文在字段之间调换。
+//! Secret-field encryption (11-connection.md §7): XChaCha20-Poly1305.
+//! Associated data is "connection id + field name", so a ciphertext cannot be
+//! swapped onto another field.
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as B64;
@@ -29,7 +30,7 @@ pub enum CryptoError {
     Kdf(String),
 }
 
-/// 32 字节对称密钥。
+/// 32-byte symmetric key.
 #[derive(Clone)]
 pub struct Key([u8; 32]);
 
@@ -65,7 +66,7 @@ impl Key {
                     aad: aad.as_bytes(),
                 },
             )
-            .expect("XChaCha20-Poly1305 加密不会失败");
+            .expect("XChaCha20-Poly1305 encryption does not fail");
         Secret {
             nonce: B64.encode(nonce),
             ct: B64.encode(ct),
@@ -92,14 +93,14 @@ impl Key {
     }
 }
 
-/// 加密模式，序列化在 connections.json 的 `crypto` 字段。
+/// How secrets are keyed. Serialized as the `crypto` field of connections.json.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CryptoMode {
-    /// 钥匙串中的随机本机密钥
+    /// Random per-machine key stored in the keychain.
     #[default]
     Machine,
-    /// Argon2id 从主密码派生
+    /// Key derived from a master password with Argon2id.
     Master {
         salt: String,
         m_kib: u32,
@@ -109,7 +110,7 @@ pub enum CryptoMode {
     },
 }
 
-/// OWASP 推荐的 Argon2id 参数：19 MiB、2 次迭代、1 路并行。
+/// OWASP Argon2id parameters: 19 MiB, 2 iterations, 1 lane.
 pub const ARGON2_M_KIB: u32 = 19 * 1024;
 pub const ARGON2_T: u32 = 2;
 pub const ARGON2_P: u32 = 1;
@@ -131,7 +132,7 @@ pub fn derive_master_key(
     Ok(Key(out))
 }
 
-/// 为新主密码生成模式描述与密钥。
+/// Builds a master-password mode and the key it derives.
 pub fn new_master(password: &str) -> Result<(CryptoMode, Key), CryptoError> {
     let mut salt = [0u8; 16];
     OsRng.fill_bytes(&mut salt);
@@ -147,7 +148,7 @@ pub fn new_master(password: &str) -> Result<(CryptoMode, Key), CryptoError> {
     Ok((mode, key))
 }
 
-/// 用主密码解锁；密码错误时返回 `CryptoError::Decrypt`。
+/// Unlocks a master-password mode. A wrong password is `CryptoError::Decrypt`.
 pub fn unlock_master(mode: &CryptoMode, password: &str) -> Result<Key, CryptoError> {
     let CryptoMode::Master {
         salt,
@@ -168,23 +169,75 @@ pub fn unlock_master(mode: &CryptoMode, password: &str) -> Result<Key, CryptoErr
     Ok(key)
 }
 
-/// 读取钥匙串中的本机密钥，不存在时生成并写入。
+/// Reads the machine key from the keychain, creating it on the first use.
+///
+/// On macOS the password is read without also asking for the keychain item.
+/// `SecKeychainFindGenericPassword` prompts once for the bytes and again for the
+/// item when both are requested, which is what `keyring` does.
 pub fn machine_key() -> Result<Key, CryptoError> {
     let entry = keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)
         .map_err(|e| CryptoError::Keychain(e.to_string()))?;
-    match entry.get_password() {
-        Ok(encoded) => {
-            let bytes = B64.decode(encoded).map_err(|_| CryptoError::Format)?;
-            let bytes: [u8; 32] = bytes.try_into().map_err(|_| CryptoError::Format)?;
-            Ok(Key(bytes))
-        }
-        Err(keyring::Error::NoEntry) => {
+    match read_keychain_password(&entry) {
+        Ok(Some(encoded)) => decode_machine_key(&encoded),
+        Ok(None) => {
             let key = Key::random();
             entry
                 .set_password(&B64.encode(key.0))
                 .map_err(|e| CryptoError::Keychain(e.to_string()))?;
             Ok(key)
         }
+        Err(e) => Err(e),
+    }
+}
+
+fn decode_machine_key(encoded: &str) -> Result<Key, CryptoError> {
+    let bytes = B64.decode(encoded).map_err(|_| CryptoError::Format)?;
+    let bytes: [u8; 32] = bytes.try_into().map_err(|_| CryptoError::Format)?;
+    Ok(Key(bytes))
+}
+
+/// `Ok(None)` means the item is not in the keychain yet.
+#[cfg(target_os = "macos")]
+fn read_keychain_password(_entry: &keyring::Entry) -> Result<Option<String>, CryptoError> {
+    use std::ffi::c_void;
+    use std::ptr;
+
+    // errSecItemNotFound
+    const NOT_FOUND: i32 = -25300;
+    let mut len: u32 = 0;
+    let mut data: *mut c_void = ptr::null_mut();
+    let status = unsafe {
+        security_framework_sys::keychain::SecKeychainFindGenericPassword(
+            ptr::null(),
+            KEYCHAIN_SERVICE.len() as u32,
+            KEYCHAIN_SERVICE.as_ptr().cast(),
+            KEYCHAIN_ACCOUNT.len() as u32,
+            KEYCHAIN_ACCOUNT.as_ptr().cast(),
+            &mut len,
+            &mut data,
+            ptr::null_mut(),
+        )
+    };
+    if status == NOT_FOUND {
+        return Ok(None);
+    }
+    if status != 0 {
+        return Err(CryptoError::Keychain(format!("OSStatus {status}")));
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(data as *const u8, len as usize) }.to_vec();
+    unsafe {
+        security_framework_sys::keychain_item::SecKeychainItemFreeContent(ptr::null_mut(), data);
+    }
+    String::from_utf8(bytes)
+        .map(Some)
+        .map_err(|_| CryptoError::Format)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn read_keychain_password(entry: &keyring::Entry) -> Result<Option<String>, CryptoError> {
+    match entry.get_password() {
+        Ok(encoded) => Ok(Some(encoded)),
+        Err(keyring::Error::NoEntry) => Ok(None),
         Err(e) => Err(CryptoError::Keychain(e.to_string())),
     }
 }
@@ -201,7 +254,7 @@ mod tests {
             key.decrypt("c-1/general.password", &secret).unwrap(),
             "s3cret"
         );
-        // 换字段或换连接都解不开
+        // A different field or connection does not decrypt.
         assert!(key.decrypt("c-1/ssh.password", &secret).is_err());
         assert!(key.decrypt("c-2/general.password", &secret).is_err());
         assert!(

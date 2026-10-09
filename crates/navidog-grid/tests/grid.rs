@@ -192,6 +192,27 @@ fn select_copy_and_edit(cx: &mut TestAppContext) {
     });
     assert_eq!(head, (1, 1));
     assert_eq!(value, Some(Some("QZ!".into())));
+
+    // A button-down move that did not press a cell (a column drag) leaves the selection.
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        let rem = window.rem_size();
+        let col = tokens::grid::COLUMN_WIDTH.to_pixels(rem);
+        let x = tokens::grid::ROW_NUMBER_WIDTH.to_pixels(rem) + col / 2.;
+        let row0 = window
+            .find(ElementId::NamedInteger("row".into(), 0))
+            .bounds();
+        let move_event = MouseMoveEvent {
+            position: gpui_kit::point(row0.origin.x + x, row0.center().y),
+            pressed_button: Some(MouseButton::Left),
+            modifiers: Modifiers::none(),
+        };
+        window.dispatch_event(move_event.to_platform_input(), cx);
+        window.render_frame(cx);
+    })
+    .unwrap();
+    let head = cx.update(|cx| grid.read(cx).model(cx).head());
+    assert_eq!(head, (1, 1));
 }
 
 /// The table viewer's column: a pane of fixed size and a grid slot that must not grow

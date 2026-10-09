@@ -46,7 +46,7 @@ pub fn run() {
         .with_assets(NavidogAssets)
         .run(|cx| {
             init(cx);
-            cx.set_app_identity("ci.nn.navidog", "navidog");
+            cx.set_app_identity("ci.nn.navidog", "Navidog");
             set_dock_icon();
             menus::bind_keys(cx);
             menus::set_menus(cx);
@@ -130,7 +130,7 @@ fn register_app_actions(cx: &mut App) {
         let _ = window.update(cx, |_, window, cx| {
             window.open_alert_dialog(cx, |alert, _, _| {
                 alert
-                    .title("navidog")
+                    .title("Navidog")
                     .description(format!(
                         "{}\n{}",
                         t!("about.version", version = env!("CARGO_PKG_VERSION")),
@@ -146,7 +146,7 @@ fn register_app_actions(cx: &mut App) {
 /// `scripts/bundle-macos.sh`; gpui ignores `WindowOptions::icon` on macOS.
 #[cfg(target_os = "macos")]
 fn set_dock_icon() {
-    use std::ffi::{c_char, c_void, CStr};
+    use std::ffi::{CStr, c_char, c_void};
 
     #[link(name = "objc", kind = "dylib")]
     unsafe extern "C" {
