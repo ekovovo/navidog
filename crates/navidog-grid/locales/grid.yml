@@ -84,6 +84,9 @@ grid:
   unfreeze_all:
     en: Unfreeze All Columns
     zh-CN: 解除所有冻结列
+  restore_order:
+    en: Restore Default Order
+    zh-CN: 恢复默认顺序
   rowid:
     en: Show or Hide ROWID
     zh-CN: 显示或隐藏 ROWID

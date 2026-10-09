@@ -2289,6 +2289,8 @@ impl TableViewer {
                             .flex_1()
                             .min_h_0()
                             .overflow_hidden()
+                            // raw-px: gpui-kit's focus ring is 3px outside the border; this slot clips it square
+                            .p(gpui_kit::px(3.))
                             .when(kind == Kind::Json, |slot| {
                                 slot.child(Editor::new(&self.json_input).size_full())
                             })

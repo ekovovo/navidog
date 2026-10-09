@@ -77,6 +77,11 @@ pub struct FreezeColumn {
 #[action(namespace = grid, no_json)]
 pub struct UnfreezeAll;
 
+/// Put columns back in the order the server returned, and clear the freeze.
+#[derive(Clone, PartialEq, Eq, Debug, gpui_kit::Action)]
+#[action(namespace = grid, no_json)]
+pub struct RestoreColumnOrder;
+
 /// Copy one column's name (the column-header "Copy Field Name" item).
 #[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
 #[action(namespace = grid, no_json)]
@@ -207,18 +212,21 @@ impl GridDelegate {
         pt.to_pixels(self.rem)
     }
 
-    /// Resting color of a data row. Selected rows share one color; other rows keep the stripe.
-    fn row_background(&self, r: usize, state: RowState, cx: &App) -> gpui_kit::Hsla {
-        let p = palette(cx);
-        if self.model.selection().0.contains(&r) && state != RowState::Deleted {
-            return p.row_selected;
+    /// Selected rows use one opaque color. Other rows are `control_bg`, with the stripe
+    /// painted on top so a translucent alt color cannot let the row hover show through.
+    fn row_shaded(&self, r: usize, state: RowState, cx: &App) -> bool {
+        if state == RowState::Deleted || self.row_selected(r, state) {
+            return false;
         }
-        let shaded = match row_shade(cx) {
+        match row_shade(cx) {
             RowShade::Alternate => r % 2 == 1,
             RowShade::EveryThird => RowShade::EveryThird.paints(r) && state != RowState::Deleted,
             RowShade::None => false,
-        };
-        if shaded { p.row_alt } else { p.control_bg }
+        }
+    }
+
+    fn row_selected(&self, r: usize, state: RowState) -> bool {
+        self.model.selection().0.contains(&r) && state != RowState::Deleted
     }
 
     fn names(&self) -> Vec<SharedString> {
@@ -320,6 +328,7 @@ fn column_menu(
     show_comment: bool,
     frozen: bool,
     any_frozen: bool,
+    at_server: bool,
 ) -> NativeMenu {
     NativeMenu::new()
         .menu(
@@ -358,6 +367,11 @@ fn column_menu(
             t!("grid.unfreeze_all").to_string(),
             !any_frozen,
             Box::new(UnfreezeAll),
+        )
+        .menu_with_disabled(
+            t!("grid.restore_order").to_string(),
+            at_server,
+            Box::new(RestoreColumnOrder),
         )
 }
 
@@ -571,8 +585,18 @@ impl TableDelegate for GridDelegate {
                             .get(c)
                             .is_some_and(|col| d.layout.is_frozen(&col.name));
                         let any_frozen = d.layout.any_frozen();
-                        column_menu(c, name.clone(), show_type, show_comment, frozen, any_frozen)
-                            .show(e.position, window, cx);
+                        let present = d.names();
+                        let at_server = d.layout.is_server_order(&present);
+                        column_menu(
+                            c,
+                            name.clone(),
+                            show_type,
+                            show_comment,
+                            frozen,
+                            any_frozen,
+                            at_server,
+                        )
+                        .show(e.position, window, cx);
                     }),
                 )
             })
@@ -596,10 +620,16 @@ impl TableDelegate for GridDelegate {
                 .into_any_element();
         }
         let state = self.model.row_state(r);
-        // Opaque, so DataTable's row hover cannot show through. A selected row uses one color
-        // on every cell; stripe and every-third only paint rows the selection misses.
+        // Opaque paper first, stripe as a layer on top. A translucent alt color must not be
+        // the only fill, or DataTable's row hover shows through even rows and not odd ones.
         // ponytail: filler rows under the scrollbar are not tinted.
-        let base = self.row_background(r, state, cx);
+        let selected_row = self.row_selected(r, state);
+        let shaded = self.row_shaded(r, state, cx);
+        let fill = if selected_row {
+            p.row_selected
+        } else {
+            p.control_bg
+        };
         let Some(c) = ix.checked_sub(1) else {
             let mark = match state {
                 RowState::Inserted => "*",
@@ -616,7 +646,10 @@ impl TableDelegate for GridDelegate {
                 .border_r_1()
                 .border_color(p.grid_line)
                 .text_color(p.label_secondary)
-                .bg(base)
+                .bg(fill)
+                .when(shaded, |d| {
+                    d.child(div().absolute().inset_0().bg(p.row_alt))
+                })
                 .when(state == RowState::Inserted, |d| d.bg(p.grid_inserted))
                 .when(state == RowState::Deleted, |d| d.bg(p.grid_deleted))
                 .child(mark)
@@ -656,7 +689,10 @@ impl TableDelegate for GridDelegate {
             .items_center()
             .overflow_hidden()
             .when(numeric, |d| d.justify_end())
-            .bg(base)
+            .bg(fill)
+            .when(shaded, |d| {
+                d.child(div().absolute().inset_0().bg(p.row_alt))
+            })
             .when(state == RowState::Inserted, |d| d.bg(p.grid_inserted))
             .when(state == RowState::Deleted, |d| d.bg(p.grid_deleted))
             .when(
@@ -668,10 +704,17 @@ impl TableDelegate for GridDelegate {
             .when(selected, |d| d.bg(p.selection).text_color(p.selection_text));
         if let Some(input) = editing {
             let font = grid_text_size(cx);
-            // Same fill as the cell had. The accent border is the only edit chrome.
+            // Paper color, not the selection fill: the input's own highlight has to stay visible.
             // xsmall fits the row; text_size puts the grid font back (it is applied
             // after Input's own size style).
-            return cell
+            return div()
+                .size_full()
+                .px_1()
+                .flex()
+                .items_center()
+                .overflow_hidden()
+                .when(numeric, |d| d.justify_end())
+                .bg(p.control_bg)
                 .border_1()
                 .border_color(p.accent)
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -681,8 +724,7 @@ impl TableDelegate for GridDelegate {
                         .xsmall()
                         .appearance(false)
                         .size_full()
-                        .text_size(font)
-                        .when(selected, |i| i.text_color(p.selection_text)),
+                        .text_size(font),
                 )
                 .into_any_element();
         }
@@ -872,6 +914,7 @@ impl ResultGrid {
                 .sort
                 .and_then(|(i, asc)| d.model.columns.get(i).map(|c| (c.name.clone(), asc)));
             let names: Vec<_> = columns.iter().map(|c| c.name.clone()).collect();
+            d.layout.remember_server(&names);
             d.layout.sync(&names);
             let desired = d.layout.display_names(&names);
             let order: Vec<usize> = desired
@@ -1450,6 +1493,16 @@ impl Render for ResultGrid {
                 this.table.update(cx, |t, cx| {
                     let d = t.delegate_mut();
                     d.layout.unfreeze_all();
+                    let present = d.names();
+                    let desired = d.layout.display_names(&present);
+                    d.apply_display(&desired);
+                    t.refresh(cx);
+                });
+            }))
+            .on_action(cx.listener(|this, _: &RestoreColumnOrder, _, cx| {
+                this.table.update(cx, |t, cx| {
+                    let d = t.delegate_mut();
+                    d.layout.restore_server();
                     let present = d.names();
                     let desired = d.layout.display_names(&present);
                     d.apply_display(&desired);

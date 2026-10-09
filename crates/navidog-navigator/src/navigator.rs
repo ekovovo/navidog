@@ -4,7 +4,9 @@
 use std::collections::HashSet;
 
 use gpui_kit::component::button::ButtonVariants as _;
-use gpui_kit::component::dock::{BasePanel, Panel, PanelEvent, panel_handle, register_panel};
+use gpui_kit::component::dock::{
+    BasePanel, Panel, PanelEvent, PanelId, panel_handle, register_panel,
+};
 use gpui_kit::component::input::{Escape, Input, InputEvent, InputState};
 use gpui_kit::component::list::ListItem;
 use gpui_kit::component::native_menu::NativeMenu;
@@ -28,10 +30,11 @@ use navidog_db::dialect::Dialect;
 use navidog_db::sessions::{ConnState, Sessions, SessionsEvent};
 use navidog_ui::assets::{driver_icon, lucide};
 use navidog_ui::skin::truncated;
-use navidog_ui::{palette, tokens};
+use navidog_ui::{palette, tabs, tokens};
 use rust_i18n::t;
 
 use crate::catalog::{Catalog, Load};
+use crate::objects::ObjectsPanel;
 use crate::selection::{self, Click};
 
 const PANEL: &str = "NavigatorPanel";
@@ -698,8 +701,32 @@ impl NavigatorPanel {
         self.toggle(&node, window, cx);
     }
 
-    fn select(node: &Node, cx: &mut App) {
+    /// A navigator selection that is not the open editor tab's table goes back to the
+    /// objects tab, so the info pane can follow the tree. A field under that table still
+    /// counts as the table.
+    fn show_objects_tab_unless_same(clicked: &Selection, window: &mut Window, cx: &mut App) {
+        let current = Workspace::global(cx).read(cx).selection().clone();
+        if &current == clicked {
+            return;
+        }
+        let panel = ObjectsPanel::shared(window, cx);
+        let id = PanelId::from(panel.entity_id());
+        let Some(group) = tabs::group_of(id, cx) else {
+            return;
+        };
+        let ix = group
+            .read(cx)
+            .panels()
+            .iter()
+            .position(|p| p.panel_id(cx) == id);
+        if let Some(ix) = ix {
+            group.read(cx).context(cx).select_tab(ix, window, cx);
+        }
+    }
+
+    fn select(node: &Node, window: &mut Window, cx: &mut App) {
         if let Some(sel) = node.selection() {
+            Self::show_objects_tab_unless_same(&sel, window, cx);
             Workspace::global(cx).update(cx, |w, cx| w.select(sel, cx));
         }
     }
@@ -713,7 +740,14 @@ impl NavigatorPanel {
             .collect()
     }
 
-    fn click_select(&mut self, id: &SharedString, cmd: bool, shift: bool, cx: &mut Context<Self>) {
+    fn click_select(
+        &mut self,
+        id: &SharedString,
+        cmd: bool,
+        shift: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let selected = Self::selected_ids(cx);
         let tree = self.tree.read(cx);
         let visible: Vec<SharedString> = (0..)
@@ -731,11 +765,18 @@ impl NavigatorPanel {
         let mut selections = ids.iter().filter_map(|id| Node::parse(id)?.selection());
         let primary = selections.next().unwrap_or_default();
         let also = selections.collect();
+        Self::show_objects_tab_unless_same(&primary, window, cx);
         Workspace::global(cx).update(cx, |w, cx| w.select_many(primary, also, cx));
     }
 
     /// Moves the focused row. `extend` keeps the anchor and selects every visible row between them.
-    fn step_selection(&mut self, down: bool, extend: bool, cx: &mut Context<Self>) {
+    fn step_selection(
+        &mut self,
+        down: bool,
+        extend: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let (len, ix) = {
             let tree = self.tree.read(cx);
             let len = (0..).position(|i| tree.entry(i).is_none()).unwrap_or(0);
@@ -761,7 +802,7 @@ impl NavigatorPanel {
         if extend && self.anchor.is_none() {
             self.anchor = self.tree.read(cx).selected_item().map(|i| i.id.clone());
         }
-        self.click_select(&id, false, extend, cx);
+        self.click_select(&id, false, extend, window, cx);
         let strategy = if down {
             gpui_kit::ScrollStrategy::Bottom
         } else {
@@ -1502,7 +1543,7 @@ impl NavigatorPanel {
                                         cx.stop_propagation();
                                         let Some(n) = &disclose else { return };
                                         window.focus(&this.focus_handle, cx);
-                                        this.click_select(&n.id(), false, false, cx);
+                                        this.click_select(&n.id(), false, false, window, cx);
                                         this.disclose(n, window, cx);
                                     },
                                 ))
@@ -1591,7 +1632,7 @@ impl NavigatorPanel {
             cx.listener(move |this, e: &MouseDownEvent, window, cx| {
                 cx.stop_propagation();
                 if let Some(n) = &right_node {
-                    Self::select(n, cx);
+                    Self::select(n, window, cx);
                 }
                 window.focus(&this.focus_handle, cx);
                 Self::context_menu(right_node.as_ref(), cx).show(e.position, window, cx);
@@ -1601,11 +1642,11 @@ impl NavigatorPanel {
             window.focus(&this.focus_handle, cx);
             let Some(n) = &click_node else { return };
             if e.click_count() >= 2 {
-                Self::select(n, cx);
+                Self::select(n, window, cx);
                 this.toggle(n, window, cx);
             } else {
                 let m = e.modifiers();
-                this.click_select(&n.id(), m.platform, m.shift, cx);
+                this.click_select(&n.id(), m.platform, m.shift, window, cx);
             }
         }))
     }
@@ -2092,14 +2133,18 @@ impl Render for NavigatorPanel {
                     };
                 window.dispatch_action(action, cx);
             })
-            .on_action(cx.listener(|this, _: &NavUp, _, cx| this.step_selection(false, false, cx)))
-            .on_action(cx.listener(|this, _: &NavDown, _, cx| this.step_selection(true, false, cx)))
-            .on_action(
-                cx.listener(|this, _: &NavExtendUp, _, cx| this.step_selection(false, true, cx)),
-            )
-            .on_action(
-                cx.listener(|this, _: &NavExtendDown, _, cx| this.step_selection(true, true, cx)),
-            )
+            .on_action(cx.listener(|this, _: &NavUp, window, cx| {
+                this.step_selection(false, false, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &NavDown, window, cx| {
+                this.step_selection(true, false, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &NavExtendUp, window, cx| {
+                this.step_selection(false, true, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &NavExtendDown, window, cx| {
+                this.step_selection(true, true, window, cx)
+            }))
             .on_action(cx.listener(|this, _: &NavLeft, window, cx| this.fold(false, window, cx)))
             .on_action(cx.listener(|this, _: &NavRight, window, cx| this.fold(true, window, cx)))
             // Not a key binding: Enter in the rename field must still commit. Handled only when

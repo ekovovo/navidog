@@ -581,6 +581,21 @@ impl GridModel {
     }
 }
 
+fn server_order(server: &[SharedString], present: &[SharedString]) -> Vec<SharedString> {
+    let mut out = Vec::with_capacity(present.len());
+    for name in server {
+        if present.iter().any(|p| p == name) && !out.iter().any(|n| n == name) {
+            out.push(name.clone());
+        }
+    }
+    for name in present {
+        if !out.iter().any(|n| n == name) {
+            out.push(name.clone());
+        }
+    }
+    out
+}
+
 fn permute_cells(row: &[Cell], order: &[usize]) -> Vec<Cell> {
     order
         .iter()
@@ -598,12 +613,31 @@ fn remap_col(old: usize, order: &[usize]) -> Option<usize> {
 pub struct ColumnLayout {
     home: Vec<SharedString>,
     frozen: Vec<SharedString>,
+    /// Column order returned by the server. Drags and freezes do not change it.
+    server: Vec<SharedString>,
 }
 
 impl ColumnLayout {
     pub fn clear(&mut self) {
         self.home.clear();
         self.frozen.clear();
+        self.server.clear();
+    }
+
+    /// The query's column order, before this grid permutes it for display.
+    pub fn remember_server(&mut self, present: &[SharedString]) {
+        self.server = present.to_vec();
+    }
+
+    /// Puts `home` back to the server order and clears the freeze.
+    pub fn restore_server(&mut self) {
+        self.home = self.server.clone();
+        self.frozen.clear();
+    }
+
+    /// True when the display order is the server order and nothing is frozen.
+    pub fn is_server_order(&self, present: &[SharedString]) -> bool {
+        !self.any_frozen() && self.display_names(present) == server_order(&self.server, present)
     }
 
     pub fn is_frozen(&self, name: &str) -> bool {
@@ -990,5 +1024,19 @@ mod tests {
         layout.unfreeze_all();
         assert_eq!(layout.display_names(&present), present);
         assert!(!layout.any_frozen());
+    }
+
+    #[test]
+    fn restore_server_undoes_drags_and_freezes() {
+        let present = names(&["a", "b", "c", "d"]);
+        let mut layout = ColumnLayout::default();
+        layout.remember_server(&present);
+        layout.sync(&present);
+        layout.drag(&present, 0, 3);
+        assert!(layout.freeze_column(&present, &present[1]));
+        assert_ne!(layout.display_names(&present), present);
+        layout.restore_server();
+        assert_eq!(layout.display_names(&present), present);
+        assert!(layout.is_server_order(&present));
     }
 }
