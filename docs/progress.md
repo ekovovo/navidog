@@ -90,7 +90,7 @@
 | F-CONN-012 打开、关闭连接 | 完成 | ui 测试、live 测试、tabs 测试 | 关闭连接时关掉该连接的编辑器选项卡（含弹出窗口），不另询问 |
 | F-CONN-013 连接组 | 完成 | store 单元测试、navigator UI 测试 | M2 加入拖放和原地新建、重命名 |
 | F-CONN-014 连接颜色 | 完成 | snapshot | |
-| F-CONN-020 密码存储 | 完成 | crypto、store 单元测试 | macOS 读本机密钥时不取钥匙串项，同一次打开只询问一次 |
+| F-CONN-020 密码存储 | 完成 | crypto、store 单元测试 | 设计见 12-secrets.md。macOS 调试构建一次读取仍可能连弹两次钥匙串框 |
 | F-NAV-001 连接树 | 完成 | ui 测试 | M1 到数据库层级，M2 到对象层级（见下表） |
 | F-NAV-003 筛选 | 部分 | | 搜索已完成；快速筛选在 M2 |
 | F-NAV-006 右键菜单 | 部分 | | 连接和组的菜单已完成 |
@@ -186,6 +186,8 @@
 | `gpui-kit` 用 git patch 钉在 `9c4b175`，为了 `DataTable::header_row_height`（#3420，尚未发版） | M2 | 上游发版后删掉 `Cargo.toml` 里的 patch，改回 crates.io |
 | 对象选项卡固定为第一个，拖走会弹回。选项卡条滚动时它仍一起移动：gpui-kit 的 TabBar 没有单个选项卡冻结 | M2 | 向 gpui-component 要选项卡条前缀，或自绘选项卡条 |
 | 网格列线、新增行、选中选项卡和工具栏图标的颜色按一张深色截图暂定 | M2 | 与 Navicat 并排实测后替换 |
+| macOS 调试构建读取本机密钥时，系统可能连续弹出两个钥匙串授权框。“始终允许”绑在代码签名上，每次编译签名都变 | M1 | 正式签名（M15）后授权才能留下来。读取仍用 `keyring`，见 [12-secrets.md](design/12-secrets.md) |
+| Windows 和 Linux 没有编入 `keyring` 的系统凭据存储，本机密钥不跨进程保留，重启后已保存的密码解不开 | M1 | 需要时打开 `windows-native` 和 Linux 的 secret-service。主密码模式在这些系统上可以跨重启解密 |
 | 数据分析的条形图、高亮颜色不在记录偏好里 | M2 | M10 |
 
 ## 5. 验证方式

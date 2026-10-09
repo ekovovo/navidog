@@ -169,75 +169,27 @@ pub fn unlock_master(mode: &CryptoMode, password: &str) -> Result<Key, CryptoErr
     Ok(key)
 }
 
-/// Reads the machine key from the keychain, creating it on the first use.
+/// Reads the machine key from the OS credential store, creating it on first use.
 ///
-/// On macOS the password is read without also asking for the keychain item.
-/// `SecKeychainFindGenericPassword` prompts once for the bytes and again for the
-/// item when both are requested, which is what `keyring` does.
+/// On macOS one read can still show two keychain dialogs. Asking only for the
+/// password (and not the keychain item) was tried and did not stop the second
+/// dialog, so this stays on `keyring`. See `docs/design/12-secrets.md`.
 pub fn machine_key() -> Result<Key, CryptoError> {
     let entry = keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)
         .map_err(|e| CryptoError::Keychain(e.to_string()))?;
-    match read_keychain_password(&entry) {
-        Ok(Some(encoded)) => decode_machine_key(&encoded),
-        Ok(None) => {
+    match entry.get_password() {
+        Ok(encoded) => {
+            let bytes = B64.decode(encoded).map_err(|_| CryptoError::Format)?;
+            let bytes: [u8; 32] = bytes.try_into().map_err(|_| CryptoError::Format)?;
+            Ok(Key(bytes))
+        }
+        Err(keyring::Error::NoEntry) => {
             let key = Key::random();
             entry
                 .set_password(&B64.encode(key.0))
                 .map_err(|e| CryptoError::Keychain(e.to_string()))?;
             Ok(key)
         }
-        Err(e) => Err(e),
-    }
-}
-
-fn decode_machine_key(encoded: &str) -> Result<Key, CryptoError> {
-    let bytes = B64.decode(encoded).map_err(|_| CryptoError::Format)?;
-    let bytes: [u8; 32] = bytes.try_into().map_err(|_| CryptoError::Format)?;
-    Ok(Key(bytes))
-}
-
-/// `Ok(None)` means the item is not in the keychain yet.
-#[cfg(target_os = "macos")]
-fn read_keychain_password(_entry: &keyring::Entry) -> Result<Option<String>, CryptoError> {
-    use std::ffi::c_void;
-    use std::ptr;
-
-    // errSecItemNotFound
-    const NOT_FOUND: i32 = -25300;
-    let mut len: u32 = 0;
-    let mut data: *mut c_void = ptr::null_mut();
-    let status = unsafe {
-        security_framework_sys::keychain::SecKeychainFindGenericPassword(
-            ptr::null(),
-            KEYCHAIN_SERVICE.len() as u32,
-            KEYCHAIN_SERVICE.as_ptr().cast(),
-            KEYCHAIN_ACCOUNT.len() as u32,
-            KEYCHAIN_ACCOUNT.as_ptr().cast(),
-            &mut len,
-            &mut data,
-            ptr::null_mut(),
-        )
-    };
-    if status == NOT_FOUND {
-        return Ok(None);
-    }
-    if status != 0 {
-        return Err(CryptoError::Keychain(format!("OSStatus {status}")));
-    }
-    let bytes = unsafe { std::slice::from_raw_parts(data as *const u8, len as usize) }.to_vec();
-    unsafe {
-        security_framework_sys::keychain_item::SecKeychainItemFreeContent(ptr::null_mut(), data);
-    }
-    String::from_utf8(bytes)
-        .map(Some)
-        .map_err(|_| CryptoError::Format)
-}
-
-#[cfg(not(target_os = "macos"))]
-fn read_keychain_password(entry: &keyring::Entry) -> Result<Option<String>, CryptoError> {
-    match entry.get_password() {
-        Ok(encoded) => Ok(Some(encoded)),
-        Err(keyring::Error::NoEntry) => Ok(None),
         Err(e) => Err(CryptoError::Keychain(e.to_string())),
     }
 }
