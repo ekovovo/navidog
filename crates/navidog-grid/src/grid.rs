@@ -1177,13 +1177,8 @@ impl ResultGrid {
 impl Render for ResultGrid {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let rem = self.table.read(cx).delegate().rem;
+        let show_type = self.table.read(cx).delegate().show_type;
         let row = self.row_height.to_pixels(rem);
-        // The header and the body share one row height. Two lines need the taller one.
-        let row = if self.table.read(cx).delegate().show_type {
-            row.max(tokens::grid::TYPE_HEADER_HEIGHT.to_pixels(rem))
-        } else {
-            row
-        };
         let font_pt = grid_font_pt(cx);
         let alternate = row_shade(cx) == RowShade::Alternate;
         // The dock clips overflow. Without a zero minimum the grid grows to the
@@ -1225,6 +1220,10 @@ impl Render for ResultGrid {
             .on_action(
                 cx.listener(|this, _: &SetRowHeight, window, cx| this.set_row_height(window, cx)),
             )
+            // Both are only sent from the column menu. On macOS that menu calls
+            // Window::refresh after dispatch, which re-renders every view, so neither
+            // handler notifies. Header height is applied when this view renders; the
+            // comment is read when the table renders.
             .on_action(cx.listener(|this, _: &ToggleFieldType, _, cx| {
                 this.table.update(cx, |t, cx| {
                     t.delegate_mut().show_type = !t.delegate().show_type;
@@ -1232,9 +1231,8 @@ impl Render for ResultGrid {
                 });
             }))
             .on_action(cx.listener(|this, _: &ToggleFieldComment, _, cx| {
-                this.table.update(cx, |t, cx| {
+                this.table.update(cx, |t, _| {
                     t.delegate_mut().show_comment = !t.delegate().show_comment;
-                    cx.notify();
                 });
             }))
             .on_action(cx.listener(|this, a: &SelectColumn, _, cx| {
@@ -1265,6 +1263,9 @@ impl Render for ResultGrid {
             .child(
                 DataTable::new(&self.table)
                     .with_size(Size::Size(row))
+                    .when(show_type, |table| {
+                        table.header_row_height(tokens::grid::TYPE_HEADER_HEIGHT.to_pixels(rem))
+                    })
                     .stripe(alternate)
                     .bordered(false),
             )

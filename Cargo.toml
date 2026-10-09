@@ -49,3 +49,8 @@ lto = "fat"
 # lto = "thin"
 opt-level = "s"
 # panic = "abort"
+
+# #3420 已合入 main、尚未发版。钉住这次检出才能用 DataTable::header_row_height。
+# 上游发版后删掉这段，改回 crates.io。
+[patch.crates-io]
+gpui-kit = { git = "https://github.com/longbridge/gpui-kit", rev = "9c4b175c6b7716d9df141544db6f6c4880501a78" }

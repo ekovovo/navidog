@@ -116,8 +116,7 @@ pub mod editor_tab {
 pub mod grid {
     use super::Pt;
     pub const HEADER_HEIGHT: Pt = Pt(28.);
-    /// Name and type in one header cell. DataTable uses one height for the header
-    /// and the body, so this is also the minimum row height while types are shown.
+    /// Header height while the type line is shown. Body rows stay at `ROW_HEIGHT`.
     /// Taller than `HEADER_HEIGHT` because two lines do not fit in the nib's 28pt.
     pub const TYPE_HEADER_HEIGHT: Pt = Pt(34.);
     pub const ROW_NUMBER_WIDTH: Pt = Pt(20.);
