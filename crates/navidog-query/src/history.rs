@@ -150,7 +150,7 @@ impl HistoryLog {
                 paused: false,
                 held: 0,
                 only_errors: false,
-                bottom: px(0.),
+                bottom: Pixels::ZERO,
                 jumped: false,
                 _poll: poll,
             };
@@ -221,7 +221,7 @@ impl HistoryLog {
         self.editor.update(cx, |e, cx| {
             e.set_value(text, window, cx);
             if follow {
-                // Clamped to the end when laid out
+                // raw-px: scrolled past the end, clamped to the last line when laid out
                 e.set_scroll_offset(point(px(0.), px(-1e9)), cx);
             } else {
                 e.set_scroll_offset(offset, cx);

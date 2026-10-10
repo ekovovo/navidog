@@ -1256,6 +1256,7 @@ impl Render for QueryEditor {
             }
         };
         let editor_panel = resizable_panel()
+            // raw-px: the divider position the user dragged to, saved in pixels
             .when_some(split, |p, size| p.size(px(size)))
             .child(self.render_editor(cx));
         let body = match position {

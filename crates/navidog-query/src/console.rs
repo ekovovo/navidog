@@ -385,6 +385,7 @@ impl Console {
             let _ = handle.update(cx, |_, window, cx| {
                 output.update(cx, |e, cx| {
                     e.set_value(all, window, cx);
+                    // raw-px: scrolled past the end, clamped to the last line when laid out
                     e.set_scroll_offset(point(px(0.), px(-1e9)), cx);
                 });
             });

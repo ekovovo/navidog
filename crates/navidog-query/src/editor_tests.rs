@@ -350,7 +350,7 @@ fn format_commands_undo_in_one_step_and_the_stack_cycles(cx: &mut TestAppContext
         })
     })
     .unwrap();
-    cx.update(|cx| assert_eq!(editor.read(cx).find.matches, [9..17]));
+    cx.update(|cx| assert_eq!(editor.read(cx).find.matches, vec![9..17]));
 
     // The stack pastes its newest item, then swaps in the older ones
     cx.update(|cx| {

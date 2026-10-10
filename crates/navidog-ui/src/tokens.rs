@@ -209,6 +209,7 @@ pub mod explain {
     pub const THRESHOLD_WIDTH: Pt = Pt(45.);
     pub const SEARCH_WIDTH: Pt = Pt(150.);
     pub const NODE_INFO_WIDTH: Pt = Pt(171.);
+    pub const NODE_INFO_HEIGHT: Pt = Pt(212.);
     /// Provisional until compared side by side
     pub const NODE_WIDTH: Pt = Pt(160.);
     pub const NODE_HEIGHT: Pt = Pt(56.);

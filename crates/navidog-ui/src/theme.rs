@@ -84,17 +84,16 @@ pub fn apply_syntax_colors(colors: &std::collections::BTreeMap<String, String>, 
 /// The color of a syntax key in the active theme, for the color pickers.
 pub fn syntax_color(key: &str, cx: &App) -> Option<gpui_kit::Hsla> {
     let style = &Theme::global(cx).highlight_theme.style;
-    let pick = |s: &Option<gpui_kit::component::highlighter::ThemeStyle>| {
-        s.clone()
-            .and_then(|s| gpui_kit::HighlightStyle::from(s).color)
+    let pick = |s: Option<gpui_kit::component::highlighter::ThemeStyle>| {
+        s.and_then(|s| gpui_kit::HighlightStyle::from(s).color)
     };
     match key {
         "text" => style.editor_foreground,
         "background" => style.editor_background,
-        "keyword" => pick(&style.syntax.keyword),
-        "comment" => pick(&style.syntax.comment),
-        "string" => pick(&style.syntax.string),
-        "number" => pick(&style.syntax.number),
+        "keyword" => pick(style.syntax.keyword),
+        "comment" => pick(style.syntax.comment),
+        "string" => pick(style.syntax.string),
+        "number" => pick(style.syntax.number),
         _ => None,
     }
 }
@@ -105,6 +104,7 @@ pub fn parse_hex(hex: &str) -> Option<gpui_kit::Hsla> {
         return None;
     }
     let v = u32::from_str_radix(digits, 16).ok()?;
+    // raw-px: a color the user picked
     Some(gpui_kit::rgb(v).into())
 }
 

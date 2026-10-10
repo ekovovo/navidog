@@ -139,6 +139,7 @@ impl ExplainView {
             move |_, _, _| {},
             move |bounds, _, window, _| {
                 for (a, b) in &edges {
+                    // raw-px: hairline edges
                     let mut path = PathBuilder::stroke(px(1.));
                     let (a, b) = (bounds.origin + *a, bounds.origin + *b);
                     let mid = (a.x + b.x) / 2.;
@@ -233,10 +234,10 @@ impl ExplainView {
             v_flex()
                 .id("plan-node-info")
                 .absolute()
-                .left(pos.x + nw + px(4.))
+                .left(pos.x + nw + gy / 4.)
                 .top(pos.y)
                 .w(tokens::explain::NODE_INFO_WIDTH.rems())
-                .max_h(px(212.) * 1.5)
+                .max_h(tokens::explain::NODE_INFO_HEIGHT.rems())
                 .rounded_md()
                 .border_1()
                 .border_color(p.separator)
@@ -391,7 +392,11 @@ impl ExplainView {
                             }
                             cx.stop_propagation();
                             let dy = e.delta.pixel_delta(window.line_height()).y;
-                            let factor = if dy > px(0.) { 1.1 } else { 1. / 1.1 };
+                            let factor = if dy > gpui_kit::Pixels::ZERO {
+                                1.1
+                            } else {
+                                1. / 1.1
+                            };
                             this.visual.zoom = (this.visual.zoom * factor).clamp(0.25, 4.);
                             cx.notify();
                         },

@@ -448,10 +448,10 @@ mod tests {
             regex: true,
             ..plain
         };
-        assert_eq!(find_all(text, r"sel\w+or", re).unwrap(), [17..25]);
+        assert_eq!(find_all(text, r"sel\w+or", re).unwrap(), vec![17..25]);
         assert!(find_all(text, "(", re).is_err());
         // A literal search escapes regex syntax
-        assert_eq!(find_all("a(b", "(", plain).unwrap(), [1..2]);
+        assert_eq!(find_all("a(b", "(", plain).unwrap(), vec![1..2]);
     }
 
     #[test]

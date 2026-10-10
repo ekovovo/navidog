@@ -625,11 +625,7 @@ impl Render for SnippetEditor {
                             .icon(lucide("braces"))
                             .tooltip(t!("snippet.add_placeholder").to_string())
                             .on_click(cx.listener(|this, _, window, cx| {
-                                this.rewrite_code(
-                                    |code, sel| add_placeholder(code, sel),
-                                    window,
-                                    cx,
-                                )
+                                this.rewrite_code(add_placeholder, window, cx)
                             })),
                     )
                     .child(

@@ -313,9 +313,10 @@ impl QueryEditor {
                         database: database.clone(),
                         used: None,
                     };
-                    let _ = this.update(&mut async_cx, |this, _| match this.live.replace(live) {
-                        Some(old) => old.close(),
-                        None => {}
+                    let _ = this.update(&mut async_cx, |this, _| {
+                        if let Some(old) = this.live.replace(live) {
+                            old.close();
+                        }
                     });
                     (session, None)
                 }

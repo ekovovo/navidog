@@ -40,10 +40,9 @@ pub fn name_hint(sql: &str) -> Option<String> {
     let rest = sql.trim_start();
     let body = if let Some(line) = rest.strip_prefix("--") {
         line.lines().next().unwrap_or("")
-    } else if let Some(block) = rest.strip_prefix("/*") {
-        &block[..block.find("*/")?]
     } else {
-        return None;
+        let block = rest.strip_prefix("/*")?;
+        &block[..block.find("*/")?]
     };
     let name = body.trim().strip_prefix("NAME:")?.trim();
     (!name.is_empty()).then(|| name.to_string())
