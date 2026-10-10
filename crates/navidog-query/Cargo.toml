@@ -18,6 +18,10 @@ tracing.workspace = true
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+anyhow.workspace = true
+chrono.workspace = true
+regex.workspace = true
+lsp-types = "0.97"
 
 [dev-dependencies]
 gpui-kit = { workspace = true, features = ["test-support", "tree-sitter-sql"] }

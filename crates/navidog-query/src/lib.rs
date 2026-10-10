@@ -6,4 +6,19 @@ extern crate gpui_kit as gpui;
 
 rust_i18n::i18n!("locales", fallback = "en");
 
-pub fn init(_cx: &mut gpui_kit::App) {}
+mod editor;
+mod explain;
+mod explain_visual;
+mod params;
+mod results;
+mod run;
+mod snippet;
+
+#[cfg(test)]
+mod editor_tests;
+
+pub use editor::*;
+
+pub fn init(cx: &mut gpui_kit::App) {
+    editor::init(cx);
+}

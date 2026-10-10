@@ -71,6 +71,60 @@ impl RowShade {
     }
 }
 
+/// Where a query editor shows its results (View > Results, 31-query-results.md §4.1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResultsPosition {
+    #[default]
+    Below,
+    Beside,
+    NewPage,
+}
+
+/// The results tab shown after a run (View > Show After Execution).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ShowAfterRun {
+    #[default]
+    Result,
+    Messages,
+    Summary,
+}
+
+/// Header fields shown in the history log viewer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HistoryHeader {
+    pub date: bool,
+    pub time: bool,
+    pub server: bool,
+    pub session: bool,
+    pub kind: bool,
+    pub elapsed: bool,
+}
+
+impl Default for HistoryHeader {
+    fn default() -> Self {
+        Self {
+            date: true,
+            time: true,
+            server: true,
+            session: true,
+            kind: true,
+            elapsed: true,
+        }
+    }
+}
+
+/// Syntax colors chosen on the Editor page, as `#rrggbb` per token key (`text`, `keyword`,
+/// `comment`, `string`, `number`, `background`). A missing key keeps the theme color.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SyntaxColors {
+    pub light: std::collections::BTreeMap<String, String>,
+    pub dark: std::collections::BTreeMap<String, String>,
+}
+
 fn system_prefers_chinese(lang: &str) -> bool {
     if lang.starts_with("zh") {
         return true;
@@ -125,6 +179,53 @@ pub struct Settings {
     pub object_hidden_columns: std::collections::BTreeMap<String, Vec<String>>,
     /// Table viewer column widths in pixels, keyed by scope and table then column name
     pub column_widths: std::collections::BTreeMap<String, std::collections::BTreeMap<String, f32>>,
+
+    // Query editor and results (30-query-editor.md, 31-query-results.md)
+    /// Run: keep going after a failed statement
+    pub continue_on_error: bool,
+    pub results_position: ResultsPosition,
+    pub show_after_run: ShowAfterRun,
+    /// MySQL / MariaDB: profile the run and diff the session status
+    pub show_profile: bool,
+    /// Editor height (or width beside the results) in pixels after the user dragged the divider,
+    /// for every query editor; `None` splits evenly
+    pub editor_split: Option<f32>,
+    /// Beautify SQL options: short parentheses length and uppercase keywords
+    pub beautify_max_inline: usize,
+    pub beautify_uppercase: bool,
+
+    // Editor page (F-PREF-004)
+    /// Above this many megabytes the editor turns plain text, without completion
+    pub highlight_limit_mb: u32,
+    pub show_line_numbers: bool,
+    pub code_folding: bool,
+    pub bracket_highlight: bool,
+    pub syntax_highlight: bool,
+    pub insert_spaces: bool,
+    pub tab_width: u8,
+    pub word_wrap: bool,
+    /// When false, the editor uses `editor_font_pt`. ponytail: size only, like the grid font.
+    pub use_default_editor_font: bool,
+    pub editor_font_pt: f32,
+    pub syntax_colors: SyntaxColors,
+
+    // Code completion page (F-PREF-006)
+    pub code_completion: bool,
+    pub auto_update_outline: bool,
+    pub outline_system_objects: bool,
+    pub auto_select_first: bool,
+
+    /// Auto recovery page (F-PREF-008): seconds between autosaves; `None` is "Never"
+    pub autosave_secs: Option<u32>,
+
+    pub history_header: HistoryHeader,
+
+    // Advanced page (F-PREF-010)
+    /// Log folder; `None` is the default (`paths::log_dir`)
+    pub log_dir: Option<String>,
+    /// The app log records debug messages
+    pub diagnostic_log: bool,
+
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
 }
@@ -150,6 +251,32 @@ impl Default for Settings {
             row_shade: RowShade::Alternate,
             object_hidden_columns: Default::default(),
             column_widths: Default::default(),
+            continue_on_error: false,
+            results_position: ResultsPosition::Below,
+            show_after_run: ShowAfterRun::Result,
+            show_profile: false,
+            editor_split: None,
+            beautify_max_inline: 50,
+            beautify_uppercase: true,
+            highlight_limit_mb: 10,
+            show_line_numbers: true,
+            code_folding: true,
+            bracket_highlight: true,
+            syntax_highlight: true,
+            insert_spaces: false,
+            tab_width: 4,
+            word_wrap: false,
+            use_default_editor_font: true,
+            editor_font_pt: 12.,
+            syntax_colors: SyntaxColors::default(),
+            code_completion: true,
+            auto_update_outline: true,
+            outline_system_objects: false,
+            auto_select_first: true,
+            autosave_secs: Some(30),
+            history_header: HistoryHeader::default(),
+            log_dir: None,
+            diagnostic_log: false,
             extra: Default::default(),
         }
     }
@@ -190,6 +317,15 @@ impl Settings {
 
     pub fn global(cx: &App) -> &Self {
         cx.global::<Self>()
+    }
+
+    /// The folder for the app log and QueryExec.log.
+    pub fn log_dir(&self) -> std::path::PathBuf {
+        self.log_dir
+            .as_deref()
+            .filter(|d| !d.is_empty())
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(paths::log_dir)
     }
 
     /// Changes the settings and saves them right away.

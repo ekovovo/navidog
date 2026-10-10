@@ -72,6 +72,9 @@ pub fn bind_actions<E: InteractiveElement>(el: E) -> E {
             }
         })
         .on_action(|_: &DeleteConnection, window, cx| delete_selected(window, cx))
+        .on_action(|a: &navidog_core::actions::OpenConnectionId, window, cx| {
+            open_connection(a.id.to_string(), window, cx)
+        })
         .on_action(|_: &OpenConnection, window, cx| {
             if let Some(id) = selected_connection(cx) {
                 open_connection(id, window, cx);

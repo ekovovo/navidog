@@ -3,3 +3,246 @@ query:
   untitled:
     en: Untitled
     zh-CN: 无标题
+  connection:
+    en: Connection
+    zh-CN: 连接
+  database:
+    en: Database
+    zh-CN: 数据库
+  schema:
+    en: Schema
+    zh-CN: 模式
+  run:
+    en: Run
+    zh-CN: 运行
+  run_current:
+    en: Run Current Statement
+    zh-CN: 运行当前语句
+  run_selected:
+    en: Run Selected
+    zh-CN: 运行已选择的
+  continue_on_error:
+    en: Continue on Error
+    zh-CN: 遇到错误时继续
+  stop:
+    en: Stop
+    zh-CN: 停止
+  explain:
+    en: Explain
+    zh-CN: 解释
+  explain_selected:
+    en: Explain Selected
+    zh-CN: 解释已选择的
+  beautify:
+    en: Beautify SQL
+    zh-CN: 美化 SQL
+  snippets:
+    en: Code Snippet
+    zh-CN: 代码段
+  builder:
+    en: Query Builder
+    zh-CN: 查询创建工具
+  focus_mode:
+    en: Focus Mode
+    zh-CN: 专注模式
+  no_connection:
+    en: Select a connection to run the query.
+    zh-CN: 请先在工具栏中选择连接。
+  empty:
+    en: Query cannot be empty.
+    zh-CN: 查询不能为空。
+  close_unsaved:
+    en: Do you want to save the changes to the query "%{name}"?
+    zh-CN: 是否保存对查询“%{name}”的更改？
+  cancel:
+    en: Cancel
+    zh-CN: 取消
+  dont_save:
+    en: Don't Save
+    zh-CN: 不保存
+  save:
+    en: Save
+    zh-CN: 保存
+  ok:
+    en: OK
+    zh-CN: 好
+  input_params:
+    en: Input Parameters
+    zh-CN: 输入参数
+  raw_mode:
+    en: Raw Mode
+    zh-CN: 原始模式
+  messages:
+    en: Message
+    zh-CN: 消息
+  summary:
+    en: Summary
+    zh-CN: 摘要
+  result_n:
+    en: Result %{n}
+    zh-CN: 结果 %{n}
+  explain_n:
+    en: Explain %{n}
+    zh-CN: 解释 %{n}
+  profile:
+    en: Profile
+    zh-CN: 查询分析
+  status:
+    en: Status
+    zh-CN: 状态
+  affected_rows:
+    en: Affected rows
+    zh-CN: 受影响的行
+  time:
+    en: Time
+    zh-CN: 时间
+  info_time:
+    en: Timestamp
+    zh-CN: 时间戳
+  info_query_time:
+    en: Query Time
+    zh-CN: 查询时间
+  info_connection:
+    en: Connection
+    zh-CN: 连接
+  none:
+    en: None
+    zh-CN: 无
+  processed:
+    en: Processed Queries
+    zh-CN: 已处理的查询
+  succeeded:
+    en: Success
+    zh-CN: 成功
+  errors:
+    en: Errors
+    zh-CN: 错误
+  start_time:
+    en: Start Time
+    zh-CN: 开始时间
+  end_time:
+    en: End Time
+    zh-CN: 结束时间
+  elapsed:
+    en: Elapsed Time
+    zh-CN: 运行时间
+  only_errors:
+    en: Show Errors Only
+    zh-CN: 仅显示错误
+  query:
+    en: Query
+    zh-CN: 查询
+  message:
+    en: Message
+    zh-CN: 消息
+  pin:
+    en: Pin
+    zh-CN: 固定
+  unpin:
+    en: Unpin
+    zh-CN: 取消固定
+  unpin_all:
+    en: Unpin All
+    zh-CN: 取消固定所有
+  close:
+    en: Close
+    zh-CN: 关闭
+  close_all_results:
+    en: Close All Results
+    zh-CN: 关闭所有结果
+  results_below:
+    en: Show Results Below Editor
+    zh-CN: 在编辑器下方显示结果
+  results_beside:
+    en: Show Results Beside Editor
+    zh-CN: 在编辑器旁边显示结果
+  results_new_page:
+    en: Show Results in New Page
+    zh-CN: 在新页面显示结果
+  back_to_editor:
+    en: Back to Editor
+    zh-CN: 返回编辑器
+  cell_editor:
+    en: Cell Editor
+    zh-CN: 单元格编辑器
+  data_analysis:
+    en: Data Analysis
+    zh-CN: 数据分析
+  export:
+    en: Export Result
+    zh-CN: 导出结果
+  read_only:
+    en: Read Only
+    zh-CN: 只读
+  add_row:
+    en: Add Record
+    zh-CN: 添加记录
+  delete_row:
+    en: Delete Record
+    zh-CN: 删除记录
+  apply:
+    en: Apply Changes
+    zh-CN: 应用更改
+  discard:
+    en: Discard Changes
+    zh-CN: 放弃更改
+  commit_failed:
+    en: The changes could not be saved.
+    zh-CN: 无法保存更改。
+  explain_visual:
+    en: Visual
+    zh-CN: 可视化
+  explain_grid:
+    en: Grid
+    zh-CN: 网格
+  explain_text:
+    en: Text
+    zh-CN: 文本
+  explain_json:
+    en: JSON
+    zh-CN: JSON
+  explain_stats:
+    en: Statistics
+    zh-CN: 统计信息
+  explain_info:
+    en: Info
+    zh-CN: 信息
+  rows:
+    en: rows
+    zh-CN: 行
+  copy_all:
+    en: Copy All
+    zh-CN: 全部复制
+  cost_threshold:
+    en: "Cost Threshold (%):"
+    zh-CN: 耗时阈值(%)：
+  node_type:
+    en: Node Type
+    zh-CN: 节点类型
+  clear_filter:
+    en: Clear Filter
+    zh-CN: 清除筛选
+  stats_by_type:
+    en: Per Node Type
+    zh-CN: 每个节点类型
+  stats_by_relation:
+    en: Per Relation
+    zh-CN: 每个关系
+  stat_count:
+    en: Count
+    zh-CN: 计数
+  stat_cost:
+    en: Cost
+    zh-CN: 耗时
+  stat_percent:
+    en: Cost (%)
+    zh-CN: 耗时 (%)
+  stat_relation:
+    en: Relation Name
+    zh-CN: 关联名称
+  stat_scans:
+    en: Scans
+    zh-CN: 扫描数量
+  stat_relation_percent:
+    en: "% of Relation"
+    zh-CN: 佔关系的 %

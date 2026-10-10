@@ -33,6 +33,34 @@ gpui_kit::actions!(
 // Hides everything but the active editor and enters full screen (F-APP-008); editors show the toggle
 gpui_kit::actions!(navidog, [ToggleFocusMode]);
 
+// Query editor, history log and console (30-query-editor.md, 31-query-results.md). New queries
+// take their connection, database and schema from the workspace selection.
+gpui_kit::actions!(query, [NewQuery, OpenHistoryLog, OpenConsole, ShowSnippets]);
+
+/// Opens a connection by ID, asking for its password if needed (a query editor picking a closed
+/// connection).
+#[derive(Clone, PartialEq, Debug, Action)]
+#[action(namespace = connection, no_json)]
+pub struct OpenConnectionId {
+    pub id: SharedString,
+}
+
+/// Inserts text at the caret of the active query editor (info pane identifiers and snippets).
+#[derive(Clone, PartialEq, Debug, Action)]
+#[action(namespace = query, no_json)]
+pub struct InsertText {
+    pub text: SharedString,
+    /// The text is a snippet: `${…}` marks placeholders to tab through
+    pub snippet: bool,
+}
+
+/// Opens the snippet editor with `code` filled in ("Create Snippet…" in the query editor).
+#[derive(Clone, PartialEq, Debug, Action)]
+#[action(namespace = query, no_json)]
+pub struct CreateSnippet {
+    pub code: SharedString,
+}
+
 // View > Navigation Pane options; the shell persists them and passes them to the navigator
 gpui_kit::actions!(
     navigator,

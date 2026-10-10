@@ -1,0 +1,265 @@
+//! Headless query editor tests on a real SQLite file: running scripts, messages and summary,
+//! stopping at errors, result naming, parameters and editing a single-table result.
+
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use gpui_kit::test::TestWindowExt as _;
+use gpui_kit::{
+    AnyWindowHandle, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render,
+    Styled as _, TestAppContext, Window, WindowBounds, WindowOptions, div, size,
+};
+use navidog_core::connection::Connection;
+use navidog_core::crypto::Key;
+use navidog_core::settings::Settings;
+use navidog_core::store::ConnectionStore;
+use navidog_db::sessions::Sessions;
+use navidog_db::sqlite::SqliteDriver;
+use navidog_db::{ConnectParams, Secrets, connect, runtime};
+
+use crate::editor::{QueryEditor, QuerySource, Target};
+use crate::results::Body;
+use crate::run::RunKind;
+
+struct Host {
+    editor: Entity<QueryEditor>,
+}
+
+impl Render for Host {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().size_full().child(self.editor.clone())
+    }
+}
+
+fn wait(cx: &mut TestAppContext, what: &str, done: impl Fn(&mut TestAppContext) -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !done(cx) {
+        assert!(Instant::now() < deadline, "timed out waiting for {what}");
+        cx.run_until_parked();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn sql(file: &std::path::Path, statements: &str) -> Vec<Vec<Option<String>>> {
+    runtime::runtime().block_on(async {
+        let params = ConnectParams {
+            file: Some(file.to_path_buf()),
+            create_new: !file.exists(),
+            ..Default::default()
+        };
+        let mut s = connect(Arc::new(SqliteDriver::default()), params)
+            .await
+            .unwrap();
+        let sets = s.relational().unwrap().execute(statements).await.unwrap();
+        s.close().await.unwrap();
+        sets.into_iter()
+            .last()
+            .map(|set| set.rows)
+            .unwrap_or_default()
+    })
+}
+
+fn run(
+    cx: &mut TestAppContext,
+    handle: AnyWindowHandle,
+    editor: &Entity<QueryEditor>,
+    kind: RunKind,
+) {
+    cx.update_window(handle, |_, window, cx| {
+        editor.update(cx, |e, cx| e.run(kind, window, cx))
+    })
+    .unwrap();
+}
+
+fn idle(cx: &mut TestAppContext, editor: &Entity<QueryEditor>) {
+    wait(cx, "the run to finish", |cx| {
+        cx.update(|cx| !editor.read(cx).running && editor.read(cx).task.is_some())
+    });
+}
+
+fn set_text(
+    cx: &mut TestAppContext,
+    handle: AnyWindowHandle,
+    editor: &Entity<QueryEditor>,
+    text: &str,
+) {
+    let text = text.to_string();
+    cx.update_window(handle, |_, window, cx| {
+        let state = editor.read(cx).editor.clone();
+        state.update(cx, |s, cx| s.set_value(text, window, cx));
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn runs_scripts_into_messages_summary_and_editable_results(cx: &mut TestAppContext) {
+    let home = std::env::temp_dir().join(format!("navidog-query-test-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(&home).unwrap();
+    let file = home.join("q.db");
+    sql(
+        &file,
+        "CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT); \
+         INSERT INTO t(name) VALUES ('a'), ('b')",
+    );
+    // SAFETY: the crate's other tests do not read NAVIDOG_HOME
+    unsafe { std::env::set_var("NAVIDOG_HOME", &home) };
+
+    let id = cx.update(|cx| {
+        gpui_kit::init(cx);
+        navidog_core::init(cx);
+        navidog_ui::theme::init(cx);
+        navidog_db::init(cx);
+        navidog_grid::init(cx);
+        crate::init(cx);
+        ConnectionStore::global(cx).update(cx, |s, cx| {
+            s.set_key(Key::random());
+            let mut c = Connection::new("sqlite");
+            c.name = "q".into();
+            c.general.file = Some(file.to_string_lossy().into_owned());
+            let id = c.id.clone();
+            s.upsert(c, &[], cx).unwrap();
+            id
+        })
+    });
+    cx.executor().allow_parking();
+    cx.update(|cx| {
+        Sessions::global(cx).update(cx, |s, cx| s.open(id.clone(), Secrets::default(), cx))
+    });
+    wait(cx, "the connection to open", |cx| {
+        cx.update(|cx| Sessions::global(cx).read(cx).state(&id).is_open())
+    });
+
+    let script = "-- NAME:people\nSELECT id, name AS n FROM t;\n\
+                  UPDATE t SET name = 'B' WHERE id = 2;\n\
+                  SELECT * FROM nope;\n\
+                  SELECT 1 + 1";
+    let (handle, editor) = cx.update(|cx| {
+        // raw-px: test window size
+        let test_size = size(gpui_kit::px(1000.), gpui_kit::px(700.));
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(gpui_kit::Bounds {
+                origin: Default::default(),
+                size: test_size,
+            })),
+            ..Default::default()
+        };
+        let mut editor = None;
+        let handle = gpui_kit::open_window(options, cx, |window, cx| {
+            let e = QueryEditor::new(
+                QuerySource::Untitled(1),
+                Target {
+                    connection: Some(id.clone()),
+                    database: Some("main".into()),
+                    schema: None,
+                },
+                script.to_string(),
+                window,
+                cx,
+            );
+            editor = Some(e.clone());
+            cx.new(|_| Host { editor: e })
+        })
+        .unwrap();
+        (handle.0, editor.unwrap())
+    });
+
+    // Stops at the failing statement and marks it
+    run(cx, handle, &editor, RunKind::All);
+    idle(cx, &editor);
+    cx.update(|cx| {
+        let e = editor.read(cx);
+        assert_eq!(e.results.rows.len(), 3, "stops after the error");
+        assert!(e.results.rows[2].error);
+        let names: Vec<_> = e.results.tabs.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(names, ["people"]);
+        let marked = e
+            .editor
+            .read(cx)
+            .diagnostics()
+            .map(|d| d.len())
+            .unwrap_or(0);
+        assert_eq!(marked, 1);
+    });
+    assert_eq!(
+        sql(&file, "SELECT name FROM t WHERE id = 2"),
+        [vec![Some("B".to_string())]]
+    );
+
+    // The single-table result becomes editable once the primary key is found
+    let view = cx.update(|cx| match &editor.read(cx).results.tabs[0].body {
+        Body::Grid(v) => v.clone(),
+        Body::Explain(_) => panic!("a grid tab"),
+    });
+    wait(cx, "the result to become editable", |cx| {
+        cx.update(|cx| view.read(cx).editable())
+    });
+    cx.update_window(handle, |_, window, cx| {
+        view.update(cx, |v, cx| {
+            v.grid.update(cx, |g, cx| {
+                g.update_model(cx, |m| m.set_value(0, 1, Some("z".into())))
+            });
+            v.commit_now(window, cx);
+        })
+    })
+    .unwrap();
+    wait(cx, "the aliased column to be written", |_| {
+        sql(&file, "SELECT name FROM t WHERE id = 1") == [vec![Some("z".to_string())]]
+    });
+
+    // With "continue on error" the rest runs too; the run drops unpinned tabs first
+    cx.update(|cx| Settings::update(cx, |s| s.continue_on_error = true));
+    run(cx, handle, &editor, RunKind::All);
+    idle(cx, &editor);
+    cx.update(|cx| {
+        let e = editor.read(cx);
+        assert_eq!(e.results.rows.len(), 4);
+        assert_eq!(e.results.tabs.len(), 2);
+        assert_eq!(
+            e.results.tabs[1].name,
+            rust_i18n::t!("query.result_n", n = 2)
+        );
+    });
+
+    // Parameters: the dialog is prefilled with the last value; raw mode skips the quotes
+    set_text(cx, handle, &editor, "SELECT [$v] AS v, [$w] AS w");
+    cx.update(|cx| {
+        editor.update(cx, |e, _| {
+            e.params.insert("v".into(), ("it's".into(), false));
+            e.params.insert("w".into(), ("1 + 2".into(), true));
+        })
+    });
+    run(cx, handle, &editor, RunKind::All);
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("params-ok", cx);
+    })
+    .unwrap();
+    idle(cx, &editor);
+    let view = cx.update(
+        |cx| match &editor.read(cx).results.tabs.last().unwrap().body {
+            Body::Grid(v) => v.clone(),
+            Body::Explain(_) => panic!("a grid tab"),
+        },
+    );
+    cx.update(|cx| {
+        let rows = view.read(cx).rows.clone();
+        assert_eq!(
+            rows,
+            [vec![Some("it's".to_string()), Some("3".to_string())]]
+        );
+    });
+
+    // Explain on SQLite opens an explain tab
+    set_text(cx, handle, &editor, "SELECT * FROM t WHERE id = 1");
+    run(cx, handle, &editor, RunKind::Explain);
+    idle(cx, &editor);
+    cx.update(|cx| {
+        let e = editor.read(cx);
+        assert!(matches!(
+            e.results.tabs.last().unwrap().body,
+            Body::Explain(_)
+        ));
+    });
+    let _ = std::fs::remove_dir_all(&home);
+}

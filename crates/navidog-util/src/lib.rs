@@ -1,5 +1,7 @@
 //! Pure helpers shared across crates. No UI and no database drivers.
 
+pub mod console;
+pub mod explain;
 pub mod format;
 pub mod sql_text;
 pub mod sql_type;

@@ -3,11 +3,13 @@
 use gpui_kit::base::input::{Copy, Cut, Paste, Redo, SelectAll, Undo};
 use gpui_kit::{App, KeyBinding, Menu, MenuItem, OsAction, SystemMenuType};
 use navidog_core::actions::{
-    CloseConnection, ManageConnections, NewConnection, NewConnectionOf, NewGroup, Refresh,
-    ToggleFocusMode, ToggleHideObjectGroups, ToggleOnlyActive, ToggleShowHidden,
-    ToggleShowTableProfile,
+    CloseConnection, ManageConnections, NewConnection, NewConnectionOf, NewGroup, NewQuery,
+    OpenConsole, OpenHistoryLog, Refresh, ToggleFocusMode, ToggleHideObjectGroups,
+    ToggleOnlyActive, ToggleShowHidden, ToggleShowTableProfile,
 };
 use navidog_core::favorites::Favorites;
+use navidog_core::settings::{ResultsPosition, Settings, ShowAfterRun};
+use navidog_query as query;
 use navidog_ui::tabs::{CloseTab, NextTab, PrevTab};
 use rust_i18n::t;
 
@@ -31,6 +33,9 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-r", Refresh, None),
         KeyBinding::new("shift-cmd-.", CloseConnection, None),
         KeyBinding::new("cmd-u", OpenUri, None),
+        KeyBinding::new("cmd-y", NewQuery, None),
+        KeyBinding::new("shift-cmd-c", OpenConsole, None),
+        KeyBinding::new("shift-cmd-h", OpenHistoryLog, None),
     ]);
     for id in 1..=9u8 {
         cx.bind_keys([
@@ -105,6 +110,7 @@ pub fn set_menus(cx: &mut App) {
         .try_global::<crate::state::AppState>()
         .cloned()
         .unwrap_or_default();
+    let settings = cx.try_global::<Settings>().cloned().unwrap_or_default();
     let drivers = navidog_db::DriverRegistry::all(cx);
     let new_connection =
         Menu::new(t!("menu.connection").to_string()).items(drivers.iter().map(|d| {
@@ -144,6 +150,8 @@ pub fn set_menus(cx: &mut App) {
             MenuItem::submenu(Menu::new(t!("menu.new").to_string()).items([
                 MenuItem::submenu(new_connection),
                 MenuItem::action(t!("menu.connection").to_string() + "…", NewConnection),
+                MenuItem::separator(),
+                MenuItem::action(t!("menu.new_query").to_string(), NewQuery),
                 MenuItem::separator(),
                 MenuItem::action(t!("menu.group").to_string(), NewGroup),
             ])),
@@ -217,6 +225,50 @@ pub fn set_menus(cx: &mut App) {
             MenuItem::separator(),
             MenuItem::action(t!("menu.raw_data").to_string(), navidog_grid::ToggleRawData),
             MenuItem::separator(),
+            MenuItem::action(t!("menu.word_wrap").to_string(), query::ToggleWordWrap),
+            MenuItem::action(t!("menu.zoom_in").to_string(), query::ZoomIn),
+            MenuItem::action(t!("menu.zoom_out").to_string(), query::ZoomOut),
+            MenuItem::action(t!("menu.actual_size").to_string(), query::ActualSize),
+            MenuItem::submenu(Menu::new(t!("menu.results").to_string()).items([
+                checked(
+                    t!("menu.results_below").to_string(),
+                    Box::new(query::ResultsBelow),
+                    settings.results_position == ResultsPosition::Below,
+                ),
+                checked(
+                    t!("menu.results_beside").to_string(),
+                    Box::new(query::ResultsBeside),
+                    settings.results_position == ResultsPosition::Beside,
+                ),
+                checked(
+                    t!("menu.results_new_page").to_string(),
+                    Box::new(query::ResultsNewPage),
+                    settings.results_position == ResultsPosition::NewPage,
+                ),
+            ])),
+            MenuItem::submenu(Menu::new(t!("menu.show_after_run").to_string()).items([
+                checked(
+                    t!("menu.show_result_tab").to_string(),
+                    Box::new(query::ShowResultAfterRun),
+                    settings.show_after_run == ShowAfterRun::Result,
+                ),
+                checked(
+                    t!("menu.show_messages_tab").to_string(),
+                    Box::new(query::ShowMessagesAfterRun),
+                    settings.show_after_run == ShowAfterRun::Messages,
+                ),
+                checked(
+                    t!("menu.show_summary_tab").to_string(),
+                    Box::new(query::ShowSummaryAfterRun),
+                    settings.show_after_run == ShowAfterRun::Summary,
+                ),
+            ])),
+            checked(
+                t!("menu.show_profile").to_string(),
+                Box::new(query::ToggleProfile),
+                settings.show_profile,
+            ),
+            MenuItem::separator(),
             checked(
                 t!("menu.show_status_bar").to_string(),
                 Box::new(ToggleStatusBar),
@@ -232,6 +284,10 @@ pub fn set_menus(cx: &mut App) {
             MenuItem::action(t!("menu.full_screen").to_string(), ToggleFullScreen),
         ]),
         favorites_menu(cx),
+        Menu::new(t!("menu.tools").to_string()).items([
+            MenuItem::action(t!("menu.console").to_string(), OpenConsole),
+            MenuItem::action(t!("menu.history_log").to_string(), OpenHistoryLog),
+        ]),
         Menu::new(t!("menu.window").to_string()).items([
             MenuItem::action(t!("menu.minimize").to_string(), Minimize),
             MenuItem::action(t!("menu.zoom").to_string(), Zoom),

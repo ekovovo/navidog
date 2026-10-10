@@ -747,6 +747,7 @@ pub(crate) fn kind_icon(kind: ObjectKind) -> &'static str {
         ObjectKind::Trigger => "zap",
         ObjectKind::Index => "key-round",
         ObjectKind::Sequence => "list-ordered",
+        ObjectKind::Query => "file-code",
     }
 }
 

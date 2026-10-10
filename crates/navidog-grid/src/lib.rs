@@ -5,6 +5,7 @@ extern crate gpui_kit as gpui;
 
 rust_i18n::i18n!("locales", fallback = "en");
 
+pub mod commit;
 mod date;
 mod editor;
 mod filter;
@@ -13,6 +14,7 @@ pub mod model;
 mod viewer;
 
 pub use grid::{GridEvent, GridTarget, ResultGrid, ToggleRawData};
+pub use model::{Cell, GridColumn};
 pub use viewer::{FindNext, ShowFind, ShowReplace, TableViewer};
 
 pub fn init(cx: &mut gpui_kit::App) {

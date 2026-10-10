@@ -50,6 +50,8 @@ pub fn run() {
             set_dock_icon();
             menus::bind_keys(cx);
             menus::set_menus(cx);
+            // Checked menu items (results position, profile, …) follow the settings
+            cx.observe_global::<Settings>(menus::set_menus).detach();
             register_app_actions(cx);
 
             let state = AppState::load();
@@ -79,8 +81,26 @@ pub fn init(cx: &mut App) {
     navidog_connection::init(cx);
     navidog_navigator::init(cx);
     navidog_grid::init(cx);
+    navidog_query::init(cx);
     navidog_plugin::init(cx);
+    register_commands(cx);
     cx.set_global(AppState::load());
+}
+
+/// Shell commands shown on the main toolbar.
+fn register_commands(cx: &mut App) {
+    use navidog_core::registry::{CommandInfo, CommandRegistry, Source};
+    let _ = cx.global_mut::<CommandRegistry>().0.register(
+        "query.new",
+        Source::Builtin,
+        CommandInfo {
+            title: "toolbar.new_query".into(),
+            icon: Some("icons/square-terminal.svg".into()),
+            shortcut: Some("cmd-y".into()),
+            action: || Box::new(navidog_core::actions::NewQuery),
+            enabled: None,
+        },
+    );
 }
 
 pub fn main_window_options(state: &AppState, cx: &mut App) -> WindowOptions {

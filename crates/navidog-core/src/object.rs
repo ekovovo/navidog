@@ -1,10 +1,10 @@
-//! 数据库对象的领域类型，导航树、对象选项卡、驱动、表查看器共用。
+//! Domain types of database objects, shared by the navigator, objects tab, drivers and editors.
 
 use serde::{Deserialize, Serialize};
 
 use crate::connection::ConnectionId;
 
-/// 对象分类（导航树中数据库或模式下的分类节点）。
+/// Object category (a category node under a database or schema in the navigator).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ObjectKind {
@@ -16,10 +16,12 @@ pub enum ObjectKind {
     Trigger,
     Index,
     Sequence,
+    /// A saved query: a `.sql` file in the profile folder, not a server object (30 §7)
+    Query,
 }
 
 impl ObjectKind {
-    /// 稳定的英文键，用于 ElementId、i18n 键和持久化。
+    /// Stable English key for ElementIds, i18n keys and persistence.
     pub fn key(self) -> &'static str {
         match self {
             Self::Table => "table",
@@ -30,6 +32,7 @@ impl ObjectKind {
             Self::Trigger => "trigger",
             Self::Index => "index",
             Self::Sequence => "sequence",
+            Self::Query => "query",
         }
     }
 
@@ -43,12 +46,13 @@ impl ObjectKind {
             "trigger" => Self::Trigger,
             "index" => Self::Index,
             "sequence" => Self::Sequence,
+            "query" => Self::Query,
             _ => return None,
         })
     }
 }
 
-/// 对象所在的位置：连接、数据库，以及（PostgreSQL 的）模式。
+/// Where an object lives: connection, database, and (PostgreSQL) schema.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Scope {
     pub connection: ConnectionId,
@@ -70,7 +74,7 @@ impl Scope {
     }
 }
 
-/// 一个具体的数据库对象。
+/// A specific database object.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ObjectRef {
     pub scope: Scope,
@@ -93,6 +97,7 @@ mod tests {
             ObjectKind::Trigger,
             ObjectKind::Index,
             ObjectKind::Sequence,
+            ObjectKind::Query,
         ] {
             assert_eq!(ObjectKind::from_key(k.key()), Some(k));
         }

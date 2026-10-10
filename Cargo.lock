@@ -5138,7 +5138,9 @@ dependencies = [
  "navidog-grid",
  "navidog-navigator",
  "navidog-plugin",
+ "navidog-query",
  "navidog-ui",
+ "navidog-util",
  "rust-i18n",
  "serde",
  "serde_json",
@@ -5244,12 +5246,16 @@ dependencies = [
 name = "navidog-query"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "chrono",
  "gpui-kit",
+ "lsp-types",
  "navidog-core",
  "navidog-db",
  "navidog-grid",
  "navidog-ui",
  "navidog-util",
+ "regex",
  "rust-i18n",
  "serde",
  "serde_json",

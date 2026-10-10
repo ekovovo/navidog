@@ -10,6 +10,7 @@ pub mod crypto;
 pub mod favorites;
 pub mod object;
 pub mod paths;
+pub mod queries;
 pub mod registry;
 pub mod settings;
 pub mod store;

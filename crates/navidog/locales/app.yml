@@ -147,6 +147,57 @@ menu:
   full_screen:
     en: Enter Full Screen
     zh-CN: 进入全屏幕
+  new_query:
+    en: Query
+    zh-CN: 查询
+  word_wrap:
+    en: Word Wrap
+    zh-CN: 自动换行
+  zoom_in:
+    en: Zoom In
+    zh-CN: 放大
+  zoom_out:
+    en: Zoom Out
+    zh-CN: 缩小
+  actual_size:
+    en: Actual Size
+    zh-CN: 实际大小
+  results:
+    en: Result
+    zh-CN: 结果
+  results_below:
+    en: Show Results Below Editor
+    zh-CN: 在编辑器下方显示结果
+  results_beside:
+    en: Show Results Beside Editor
+    zh-CN: 在编辑器旁边显示结果
+  results_new_page:
+    en: Show Results in New Page
+    zh-CN: 在新页面显示结果
+  show_after_run:
+    en: Show After Execution
+    zh-CN: 执行后默认显示
+  show_result_tab:
+    en: Result/Explain Tab
+    zh-CN: 结果/解释选项卡
+  show_messages_tab:
+    en: Message Tab
+    zh-CN: 消息选项卡
+  show_summary_tab:
+    en: Summary Tab
+    zh-CN: 摘要选项卡
+  show_profile:
+    en: Show Profile and Status
+    zh-CN: 显示剖析和状态
+  tools:
+    en: Tools
+    zh-CN: 工具
+  console:
+    en: Console
+    zh-CN: 命令列界面
+  history_log:
+    en: History Log
+    zh-CN: 历史日志
   window:
     en: Window
     zh-CN: 窗口

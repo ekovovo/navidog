@@ -15,11 +15,11 @@ use gpui_kit::{
     Render, Styled as _, Subscription, Window, div,
 };
 use navidog_core::actions::{
-    OpenConnection, OpenObject, ToggleFocusMode, ToggleHideObjectGroups, ToggleOnlyActive,
-    ToggleShowHidden, ToggleShowTableProfile,
+    InsertText, NewQuery, OpenConnection, OpenObject, ToggleFocusMode, ToggleHideObjectGroups,
+    ToggleOnlyActive, ToggleShowHidden, ToggleShowTableProfile,
 };
 use navidog_core::favorites::Favorites;
-use navidog_core::object::ObjectRef;
+use navidog_core::object::{ObjectKind, ObjectRef};
 use navidog_core::registry::CommandRegistry;
 use navidog_core::settings::Settings;
 use navidog_core::store::ConnectionStore;
@@ -283,7 +283,9 @@ impl MainWindow {
                 .iter()
                 .filter_map(|panel| {
                     let object = Self::panel_object(panel, cx)?;
-                    (object.scope.connection == id).then(|| panel.panel_id(cx))
+                    // Saved queries are documents and stay open (30-query-editor.md §2)
+                    (object.scope.connection == id && object.kind != ObjectKind::Query)
+                        .then(|| panel.panel_id(cx))
                 })
                 .collect();
             let ctx = group.read(cx).context(cx);
@@ -294,7 +296,11 @@ impl MainWindow {
         let popped: Vec<_> = self
             .popped
             .iter()
-            .filter(|(_, (_, object))| object.as_ref().is_some_and(|o| o.scope.connection == id))
+            .filter(|(_, (_, object))| {
+                object
+                    .as_ref()
+                    .is_some_and(|o| o.scope.connection == id && o.kind != ObjectKind::Query)
+            })
             .map(|(panel, (handle, _))| (*panel, *handle))
             .collect();
         for (panel, handle) in popped {
@@ -475,6 +481,16 @@ impl MainWindow {
             return;
         }
         let panel = crate::editors::open(object.clone(), window, cx);
+        self.add_editor(panel, window, cx);
+    }
+
+    /// Adds an editor to the object pane, or its own window when the preferences ask for that.
+    fn add_editor(
+        &mut self,
+        panel: Arc<dyn BasePanelView>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if Settings::global(cx).open_in_new_window {
             self.popped_out(panel, window, cx);
             return;
@@ -587,6 +603,15 @@ impl Render for MainWindow {
             .on_action(cx.listener(|this, a: &OpenObject, window, cx| {
                 this.open_object(&a.object, window, cx)
             }))
+            .on_action(cx.listener(|this, _: &NewQuery, window, cx| {
+                let editor = navidog_query::QueryEditor::untitled(window, cx);
+                this.add_editor(panel_handle(editor), window, cx);
+            }))
+            .on_action(|a: &InsertText, window, cx| {
+                if let Some(editor) = navidog_query::active_editor(cx) {
+                    editor.update(cx, |e, cx| e.insert_text(&a.text, a.snippet, window, cx));
+                }
+            })
             .on_action(cx.listener(|this, _: &ToggleNavigator, window, cx| {
                 this.toggle_dock(DockPlacement::Left, window, cx)
             }))

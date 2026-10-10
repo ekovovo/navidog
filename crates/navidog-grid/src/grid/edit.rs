@@ -71,7 +71,7 @@ impl ResultGrid {
 
     /// Ends in-place editing and writes back to the model; an unchanged value is not a change (a NULL
     /// that is still an empty string after editing stays NULL).
-    pub(crate) fn commit_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn commit_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(((r, c), input)) = self
             .table
             .update(cx, |t, _| t.delegate_mut().editing.take())

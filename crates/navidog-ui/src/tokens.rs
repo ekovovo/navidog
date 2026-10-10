@@ -160,6 +160,60 @@ pub mod info {
     // Provisional until measured with AX
     pub const ROW_GAP: Pt = Pt(6.);
     pub const INSET: Pt = Pt(12.);
+    /// Identifiers page search bar and field (SQLEditorModule_ObjectList)
+    pub const SEARCH_BAR_HEIGHT: Pt = Pt(30.);
+    pub const SEARCH_FIELD_HEIGHT: Pt = Pt(22.);
+}
+
+/// Query editor (30-query-editor.md §12).
+pub mod query {
+    use super::Pt;
+    pub const TOOLBAR_HEIGHT: Pt = Pt(30.);
+    /// Provisional until compared side by side
+    pub const EDITOR_FONT_SIZE: Pt = Pt(12.);
+    pub const EDITOR_FONT_MIN: f32 = 8.;
+    pub const EDITOR_FONT_MAX: f32 = 72.;
+    /// Provisional: width of the connection, database and schema pickers
+    pub const PICKER_WIDTH: Pt = Pt(150.);
+    pub const BEAUTIFY_WIDTH: Pt = Pt(356.);
+    pub const BEAUTIFY_HEIGHT: Pt = Pt(143.);
+    pub const RECOVERY_WIDTH: Pt = Pt(870.);
+    pub const RECOVERY_HEIGHT: Pt = Pt(600.);
+    pub const PARAMS_WIDTH: Pt = Pt(400.);
+    pub const PARAMS_HEIGHT: Pt = Pt(300.);
+}
+
+/// Query results (31-query-results.md §9).
+pub mod result {
+    use super::Pt;
+    pub const BOTTOM_BAR_HEIGHT: Pt = Pt(28.);
+    pub const BOTTOM_BUTTON: Pt = Pt(20.);
+    pub const SUMMARY_HEIGHT: Pt = Pt(96.);
+    /// Provisional: result tab strip
+    pub const TAB_HEIGHT: Pt = Pt(26.);
+}
+
+pub mod snippet {
+    use super::Pt;
+    pub const FILTER_HEIGHT: Pt = Pt(25.);
+    pub const ROW_HEIGHT: Pt = Pt(37.);
+    pub const ROW_ICON: Pt = Pt(32.);
+    pub const POPOVER_WIDTH: Pt = Pt(360.);
+    pub const CODE_HEIGHT: Pt = Pt(180.);
+}
+
+pub mod explain {
+    use super::Pt;
+    pub const VIEW_SWITCH_HEIGHT: Pt = Pt(36.);
+    pub const TOOLBAR_HEIGHT: Pt = Pt(32.);
+    pub const THRESHOLD_WIDTH: Pt = Pt(45.);
+    pub const SEARCH_WIDTH: Pt = Pt(150.);
+    pub const NODE_INFO_WIDTH: Pt = Pt(171.);
+    /// Provisional until compared side by side
+    pub const NODE_WIDTH: Pt = Pt(160.);
+    pub const NODE_HEIGHT: Pt = Pt(56.);
+    pub const NODE_GAP_X: Pt = Pt(40.);
+    pub const NODE_GAP_Y: Pt = Pt(16.);
 }
 
 pub mod form {
