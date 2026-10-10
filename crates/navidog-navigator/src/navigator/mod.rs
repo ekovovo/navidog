@@ -935,6 +935,15 @@ fn with_navigator(cx: &mut App, f: impl FnOnce(&mut NavigatorPanel, &mut Context
 /// Renaming edits the name in place in the navigator.
 pub fn bind_actions<E: gpui_kit::InteractiveElement>(el: E) -> E {
     let el = el
+        .on_action(|_: &ShowSnippets, _, cx| {
+            let info = crate::info::InfoPanel::shared_entity(cx);
+            if let Some(info) = info {
+                info.update(cx, |p, cx| p.show_snippets(cx));
+            }
+        })
+        .on_action(|a: &CreateSnippet, window, cx| {
+            crate::snippets::open_editor(None, a.code.to_string(), window, cx)
+        })
         .on_action(|_: &NewGroup, window, cx| {
             with_navigator(cx, |this, cx| this.new_group(window, cx))
         })

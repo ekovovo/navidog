@@ -379,6 +379,18 @@ info:
   general:
     en: General
     zh-CN: 常规
+  preview:
+    en: Preview
+    zh-CN: 预览
+  snippets:
+    en: Code Snippet
+    zh-CN: 代码段
+  identifiers:
+    en: Identifiers
+    zh-CN: 标识符
+  location:
+    en: Location
+    zh-CN: 位置
   share:
     en: Share
     zh-CN: 共享
@@ -460,3 +472,73 @@ info:
   default:
     en: Default
     zh-CN: 默认值
+snippet:
+  search:
+    en: Search
+    zh-CN: 搜索
+  all_tags:
+    en: All Tags
+    zh-CN: 所有标签
+  all_types:
+    en: All
+    zh-CN: 全部
+  preset:
+    en: Preset
+    zh-CN: 预设
+  preview:
+    en: Preview
+    zh-CN: 预览
+  new:
+    en: New Snippet…
+    zh-CN: 新建片段…
+  edit:
+    en: Edit Snippet…
+    zh-CN: 编辑片段…
+  duplicate:
+    en: Duplicate Snippet…
+    zh-CN: 复制片段…
+  delete:
+    en: Delete Snippet
+    zh-CN: 删除片段
+  confirm_delete:
+    en: Do you want to delete the snippet "%{name}"?
+    zh-CN: 是否删除片段“%{name}”？
+  show_other_types:
+    en: Show Snippets of Other Database Types
+    zh-CN: 显示其他数据库类型的片段
+  show_presets:
+    en: Show Preset Snippets
+    zh-CN: 显示预设的片段
+  refresh:
+    en: Refresh
+    zh-CN: 刷新
+  name:
+    en: Name
+    zh-CN: 名称
+  type:
+    en: Database Type
+    zh-CN: 数据库类型
+  tags:
+    en: Tags
+    zh-CN: 标签
+  tags_hint:
+    en: Comma separated
+    zh-CN: 用逗号分隔
+  note:
+    en: Note
+    zh-CN: 备注
+  add_placeholder:
+    en: Add Placeholder
+    zh-CN: 添加占位符
+  remove_placeholder:
+    en: Remove Placeholder
+    zh-CN: 移除占位符
+  cancel:
+    en: Cancel
+    zh-CN: 取消
+  save:
+    en: Save
+    zh-CN: 保存
+  no_database:
+    en: Choose a database in the query editor
+    zh-CN: 请在查询编辑器中选择数据库

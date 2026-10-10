@@ -40,6 +40,24 @@ impl Selection {
     }
 }
 
+/// Where the active query editor points; the info pane's snippets and identifiers pages use it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct QueryContext {
+    pub connection: Option<ConnectionId>,
+    pub database: Option<String>,
+    pub schema: Option<String>,
+}
+
+impl QueryContext {
+    pub fn scope(&self) -> Option<Scope> {
+        Some(Scope::new(
+            self.connection.clone()?,
+            self.database.clone()?,
+            self.schema.clone(),
+        ))
+    }
+}
+
 pub enum WorkspaceEvent {
     SelectionChanged,
     /// Saved query files were written, renamed or deleted; lists of them reload
@@ -54,6 +72,8 @@ pub struct Workspace {
     status: SharedString,
     /// Column focused in the table viewer. The info pane's Fields page shows this column.
     focused_column: Option<String>,
+    /// Set while a query editor tab is active
+    query_context: Option<QueryContext>,
 }
 
 impl EventEmitter<WorkspaceEvent> for Workspace {}
@@ -91,6 +111,17 @@ impl Workspace {
             self.selection = primary;
             self.also = also;
             cx.emit(WorkspaceEvent::SelectionChanged);
+            cx.notify();
+        }
+    }
+
+    pub fn query_context(&self) -> Option<&QueryContext> {
+        self.query_context.as_ref()
+    }
+
+    pub fn set_query_context(&mut self, context: Option<QueryContext>, cx: &mut Context<Self>) {
+        if self.query_context != context {
+            self.query_context = context;
             cx.notify();
         }
     }

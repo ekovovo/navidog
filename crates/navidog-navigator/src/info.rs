@@ -38,16 +38,28 @@ impl Global for SharedInfo {}
 
 type ToggleMaximize = Rc<dyn Fn(&mut Window, &mut App)>;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Page {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Page {
     General,
     Ddl,
     Fields,
+    /// A saved query's SQL (F-INFO-004)
+    Preview,
+    /// While a query editor is active (F-INFO-005, F-INFO-006)
+    Snippets,
+    Identifiers,
 }
 
 pub struct InfoPanel {
     focus_handle: FocusHandle,
-    page: Page,
+    pub(crate) page: Page,
+    preview: Entity<EditorState>,
+    shown_preview: Option<ObjectRef>,
+    pub(crate) snippets: crate::snippets::SnippetsPage,
+    pub(crate) identifiers: crate::identifiers::IdentifiersPage,
+    /// The page shown before a query editor became active, to return to afterwards
+    page_before_query: Option<Page>,
+    in_query: bool,
     maximized: bool,
     on_toggle_maximize: Option<ToggleMaximize>,
     ddl: Entity<EditorState>,
@@ -121,8 +133,20 @@ impl InfoPanel {
             return panel;
         }
         let ddl = sql_editor(window, cx);
+        let preview = sql_editor(window, cx);
+        let snippets = crate::snippets::SnippetsPage::new(window, cx);
+        let identifiers = crate::identifiers::IdentifiersPage::new(window, cx);
         let panel = cx.new(|cx: &mut Context<Self>| {
             let subs = vec![
+                cx.observe(&navidog_core::snippets::Snippets::global(cx), |_, _, cx| {
+                    cx.notify()
+                }),
+                cx.observe(
+                    &navidog_db::outline::OutlineCache::global(cx),
+                    |_, _, cx| cx.notify(),
+                ),
+                cx.observe(&snippets.search, |_, _, cx| cx.notify()),
+                cx.observe(&identifiers.search, |_, _, cx| cx.notify()),
                 cx.observe(&ConnectionStore::global(cx), |_, _, cx| cx.notify()),
                 cx.observe(&Sessions::global(cx), |_, _, cx| cx.notify()),
                 cx.observe_in(&Catalog::global(cx), window, |this, _, window, cx| {
@@ -132,11 +156,19 @@ impl InfoPanel {
                 cx.observe_in(&Workspace::global(cx), window, |this, _, window, cx| {
                     this.ensure_loaded(cx);
                     this.sync_ddl(window, cx);
+                    this.sync_preview(window, cx);
+                    this.follow_query_editor(cx);
                 }),
             ];
             Self {
                 focus_handle: cx.focus_handle(),
                 page: Page::General,
+                preview,
+                shown_preview: None,
+                snippets,
+                identifiers,
+                page_before_query: None,
+                in_query: false,
                 maximized: false,
                 on_toggle_maximize: None,
                 ddl,
@@ -146,6 +178,11 @@ impl InfoPanel {
         });
         cx.set_global(SharedInfo(panel.downgrade()));
         panel
+    }
+
+    /// The pane if it exists already.
+    pub(crate) fn shared_entity(cx: &App) -> Option<Entity<Self>> {
+        cx.try_global::<SharedInfo>().and_then(|s| s.0.upgrade())
     }
 
     /// The shell implements maximize/restore (resizing the right dock).
@@ -164,6 +201,53 @@ impl InfoPanel {
                 c.ensure_columns(&obj.scope, &obj.name, false, cx)
             }),
             _ => {}
+        }
+    }
+
+    /// The snippets and identifiers pages come with an active query editor and go with it,
+    /// returning to the page shown before (30 §6).
+    fn follow_query_editor(&mut self, cx: &mut Context<Self>) {
+        let in_query = Workspace::global(cx).read(cx).query_context().is_some();
+        if in_query == self.in_query {
+            if in_query && self.page == Page::Identifiers {
+                self.ensure_identifiers(cx);
+            }
+            return;
+        }
+        self.in_query = in_query;
+        if in_query {
+            self.page_before_query = Some(self.page);
+            self.page = Page::Snippets;
+        } else if matches!(self.page, Page::Snippets | Page::Identifiers) {
+            self.page = self.page_before_query.take().unwrap_or(Page::General);
+        }
+        cx.notify();
+    }
+
+    /// The selected saved query's text for the preview page.
+    fn sync_preview(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let obj = selected_object(cx).filter(|o| o.kind == ObjectKind::Query);
+        if obj == self.shown_preview {
+            return;
+        }
+        let text = obj
+            .as_ref()
+            .and_then(|o| navidog_core::queries::read(&o.scope, &o.name).ok())
+            .unwrap_or_default();
+        self.preview
+            .update(cx, |s, cx| s.set_value(text, window, cx));
+        self.shown_preview = obj;
+    }
+
+    pub(crate) fn show_snippets(&mut self, cx: &mut Context<Self>) {
+        self.page = Page::Snippets;
+        cx.notify();
+    }
+
+    /// Menu items dispatch along the focused element; keep focus inside the pane.
+    pub(crate) fn focus_for_menu(&self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.focus_handle.contains_focused(window, cx) {
+            window.focus(&self.focus_handle, cx);
         }
     }
 
@@ -272,6 +356,29 @@ impl InfoPanel {
                 ]
             }
             Selection::Connection(c) => conn_fields(c),
+            Selection::Object(o) if o.kind == ObjectKind::Query => {
+                let path = navidog_core::queries::path(&o.scope, &o.name);
+                let mut f = vec![
+                    (t!("info.object").to_string(), o.name.clone().into()),
+                    (
+                        t!("info.type").to_string(),
+                        t!("kind.query").to_string().into(),
+                    ),
+                    (
+                        t!("info.location").to_string(),
+                        path.display().to_string().into(),
+                    ),
+                ];
+                if let Some(info) = Catalog::global(cx).read(cx).object(o) {
+                    f.extend(
+                        info.properties
+                            .iter()
+                            .map(|(k, v)| (t!(format!("col.{k}")).to_string(), v.clone().into())),
+                    );
+                }
+                f.extend(conn_fields(&o.scope.connection).into_iter().take(1));
+                f
+            }
             Selection::Object(o) => {
                 let mut f = vec![
                     (t!("info.object").to_string(), o.name.clone().into()),
@@ -395,7 +502,7 @@ impl InfoPanel {
         }
     }
 
-    fn message(&self, text: String, cx: &App) -> AnyElement {
+    pub(crate) fn message(&self, text: String, cx: &App) -> AnyElement {
         v_flex()
             .flex_1()
             .items_center()
@@ -423,6 +530,9 @@ impl InfoPanel {
                 this.page = page;
                 this.ensure_loaded(cx);
                 this.sync_ddl(window, cx);
+                if page == Page::Identifiers {
+                    this.ensure_identifiers(cx);
+                }
                 cx.notify();
             }))
     }
@@ -432,7 +542,16 @@ impl Render for InfoPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
         let has_object = selected_object(cx).is_some();
-        if !has_object && self.page != Page::General {
+        let is_query_object = selected_object(cx).is_some_and(|o| o.kind == ObjectKind::Query);
+        let in_query = Workspace::global(cx).read(cx).query_context().is_some();
+        let page_ok = match self.page {
+            Page::General => true,
+            Page::Ddl => has_object && !is_query_object,
+            Page::Fields => has_object,
+            Page::Preview => is_query_object,
+            Page::Snippets | Page::Identifiers => in_query,
+        };
+        if !page_ok {
             self.page = Page::General;
         }
         let body = match self.page {
@@ -443,6 +562,13 @@ impl Render for InfoPanel {
                 .child(Editor::new(&self.ddl).bordered(false).size_full())
                 .into_any_element(),
             Page::Fields => self.render_fields(cx),
+            Page::Preview => div()
+                .flex_1()
+                .min_h_0()
+                .child(Editor::new(&self.preview).bordered(false).size_full())
+                .into_any_element(),
+            Page::Snippets => self.render_snippets(cx),
+            Page::Identifiers => self.render_identifiers(cx),
         };
         let is_table = selected_object(cx).is_some_and(|o| o.kind == ObjectKind::Table);
         v_flex()
@@ -467,12 +593,37 @@ impl Render for InfoPanel {
                                 t!("info.general").to_string(),
                                 cx,
                             ))
-                            .when(has_object, |r| {
+                            .when(has_object && !is_query_object, |r| {
                                 r.child(self.page_button(
                                     "info-ddl",
                                     "code",
                                     Page::Ddl,
                                     t!("info.ddl").to_string(),
+                                    cx,
+                                ))
+                            })
+                            .when(is_query_object, |r| {
+                                r.child(self.page_button(
+                                    "info-preview",
+                                    "file-code",
+                                    Page::Preview,
+                                    t!("info.preview").to_string(),
+                                    cx,
+                                ))
+                            })
+                            .when(in_query, |r| {
+                                r.child(self.page_button(
+                                    "info-snippets",
+                                    "scroll-text",
+                                    Page::Snippets,
+                                    t!("info.snippets").to_string(),
+                                    cx,
+                                ))
+                                .child(self.page_button(
+                                    "info-identifiers",
+                                    "list-tree",
+                                    Page::Identifiers,
+                                    t!("info.identifiers").to_string(),
                                     cx,
                                 ))
                             })
@@ -489,6 +640,9 @@ impl Render for InfoPanel {
                                 Page::General => t!("info.general").to_string(),
                                 Page::Ddl => t!("info.ddl").to_string(),
                                 Page::Fields => t!("info.fields").to_string(),
+                                Page::Preview => t!("info.preview").to_string(),
+                                Page::Snippets => t!("info.snippets").to_string(),
+                                Page::Identifiers => t!("info.identifiers").to_string(),
                             })),
                     )
                     .child(

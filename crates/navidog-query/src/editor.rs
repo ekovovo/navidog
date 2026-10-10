@@ -272,11 +272,14 @@ impl BasePanel for QueryEditor {
         tabs::set_active(PanelId::from(cx.entity_id()), active, cx);
         if active {
             set_active_editor(cx.entity().downgrade(), cx);
+            self.publish_context(cx);
             if let QuerySource::Saved(o) = &self.source {
                 let o = o.clone();
                 Workspace::global(cx).update(cx, |w, cx| w.select(Selection::Object(o), cx));
             }
             self.check_external_change(window, cx);
+        } else {
+            Workspace::global(cx).update(cx, |w, cx| w.set_query_context(None, cx));
         }
     }
 
@@ -284,6 +287,7 @@ impl BasePanel for QueryEditor {
         if tabs::removed(PanelId::from(cx.entity_id()), cx) {
             return;
         }
+        Workspace::global(cx).update(cx, |w, cx| w.set_query_context(None, cx));
         if let Some(live) = self.live.take() {
             live.close();
         }
@@ -656,6 +660,7 @@ impl QueryEditor {
         } else {
             self.load_schemas(cx);
         }
+        self.target_changed(cx);
         cx.notify();
     }
 
@@ -668,12 +673,14 @@ impl QueryEditor {
         self.schemas.clear();
         self.load_schemas(cx);
         self.ensure_outline(false, cx);
+        self.target_changed(cx);
         cx.notify();
     }
 
     pub(crate) fn pick_schema(&mut self, name: String, cx: &mut Context<Self>) {
         self.target.schema = Some(name);
         self.ensure_outline(false, cx);
+        self.target_changed(cx);
         cx.notify();
     }
 
@@ -702,6 +709,7 @@ impl QueryEditor {
                 if this.target.schema.is_none() && user.iter().any(|s| s == "public") {
                     this.target.schema = Some("public".into());
                     this.ensure_outline(false, cx);
+                    this.target_changed(cx);
                 }
                 this.schemas = user;
                 cx.notify();
@@ -799,6 +807,23 @@ impl QueryEditor {
         self.editor
             .update(cx, |e, cx| e.set_soft_wrap(wrap, window, cx));
         cx.notify();
+    }
+
+    /// Tells the info pane where this (active) editor points.
+    pub(crate) fn publish_context(&self, cx: &mut Context<Self>) {
+        let context = navidog_core::workspace::QueryContext {
+            connection: self.target.connection.clone(),
+            database: self.target.database.clone(),
+            schema: self.target.schema.clone(),
+        };
+        Workspace::global(cx).update(cx, |w, cx| w.set_query_context(Some(context), cx));
+    }
+
+    fn target_changed(&mut self, cx: &mut Context<Self>) {
+        let active = active_editor(cx).is_some_and(|e| e.entity_id() == cx.entity_id());
+        if active {
+            self.publish_context(cx);
+        }
     }
 
     pub(crate) fn completion_open(&self, cx: &App) -> bool {
@@ -1259,6 +1284,13 @@ impl Render for QueryEditor {
                     Settings::update(cx, |s| s.show_profile = !s.show_profile);
                 }
             }))
+            // Snippets and identifiers dragged from the info pane land at the caret (a recorded
+            // deviation: the editor does not map a drop point to a text position)
+            .on_drop(
+                cx.listener(|this, a: &navidog_core::actions::InsertText, window, cx| {
+                    this.insert_text(&a.text, a.snippet, window, cx)
+                }),
+            )
             .on_action(cx.listener(|this, _: &crate::save::SaveQuery, window, cx| {
                 this.save_query(false, window, cx)
             }))

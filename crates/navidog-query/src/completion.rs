@@ -57,20 +57,8 @@ fn unquote(s: &str) -> String {
     t.to_string()
 }
 
-/// A name as it must be typed: quoted when it is not a plain identifier, is a keyword, or (in
-/// PostgreSQL) has capitals that unquoted would fold away.
 pub(crate) fn typed_name(dialect: Dialect, name: &str) -> String {
-    let plain = name
-        .chars()
-        .next()
-        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
-        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
-    let folds = dialect == Dialect::Postgres && name.chars().any(|c| c.is_ascii_uppercase());
-    if plain && !folds && !dialect.is_keyword(name) {
-        name.to_string()
-    } else {
-        dialect.quote_ident(name)
-    }
+    dialect.typed_name(name)
 }
 
 static ALIAS: LazyLock<Regex> = LazyLock::new(|| {
@@ -478,14 +466,5 @@ mod tests {
         // `info` is inside `actor_info`, after the prefix matches
         let got = run("info|", Dialect::MySql, &none);
         assert!(got.iter().position(|l| l == "actor_info").is_some());
-    }
-
-    #[test]
-    fn names_are_quoted_when_needed() {
-        assert_eq!(typed_name(Dialect::MySql, "actor"), "actor");
-        assert_eq!(typed_name(Dialect::MySql, "order"), "`order`");
-        assert_eq!(typed_name(Dialect::MySql, "my table"), "`my table`");
-        assert_eq!(typed_name(Dialect::Postgres, "Actor"), "\"Actor\"");
-        assert_eq!(typed_name(Dialect::Sqlite, "名称"), "\"名称\"");
     }
 }

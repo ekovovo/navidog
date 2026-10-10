@@ -5229,6 +5229,7 @@ dependencies = [
  "navidog-core",
  "navidog-db",
  "navidog-ui",
+ "navidog-util",
  "rust-i18n",
  "serde",
  "serde_json",

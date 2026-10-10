@@ -315,4 +315,34 @@ impl Dialect {
     pub fn is_keyword(self, word: &str) -> bool {
         self.keywords().any(|k| k.eq_ignore_ascii_case(word))
     }
+
+    /// A name as it must be typed: quoted when it is not a plain identifier, is a keyword, or (in
+    /// PostgreSQL) has capitals that unquoted would fold away.
+    pub fn typed_name(self, name: &str) -> String {
+        let plain = name
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+            && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+        let folds = self == Self::Postgres && name.chars().any(|c| c.is_ascii_uppercase());
+        if plain && !folds && !self.is_keyword(name) {
+            name.to_string()
+        } else {
+            self.quote_ident(name)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn names_are_quoted_when_needed() {
+        assert_eq!(Dialect::MySql.typed_name("actor"), "actor");
+        assert_eq!(Dialect::MySql.typed_name("order"), "`order`");
+        assert_eq!(Dialect::MySql.typed_name("my table"), "`my table`");
+        assert_eq!(Dialect::Postgres.typed_name("Actor"), "\"Actor\"");
+        assert_eq!(Dialect::Sqlite.typed_name("名称"), "\"名称\"");
+    }
 }

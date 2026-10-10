@@ -372,6 +372,28 @@ fn format_commands_undo_in_one_step_and_the_stack_cycles(cx: &mut TestAppContext
     assert_eq!(text(cx), format!("{original}one"));
     paste(cx);
     assert_eq!(text(cx), format!("{original}two"));
+
+    // A snippet's placeholders become tab stops: the first is selected, Tab moves on, then ends
+    select(cx, 0..0);
+    cx.update_window(handle, |_, window, cx| {
+        editor.update(cx, |e, cx| {
+            e.insert_text("SELECT ${cols} FROM ${t};\n", true, window, cx)
+        })
+    })
+    .unwrap();
+    let selected =
+        |cx: &mut TestAppContext| cx.update(|cx| state.read(cx).selected_text().to_string());
+    assert_eq!(selected(cx), "cols");
+    let tab = |cx: &mut TestAppContext| {
+        cx.update_window(handle, |_, window, cx| {
+            editor.update(cx, |e, cx| e.step_tab_stop(true, window, cx))
+        })
+        .unwrap()
+    };
+    assert!(tab(cx));
+    assert_eq!(selected(cx), "t");
+    assert!(tab(cx), "past the last stop the jumps end");
+    assert!(cx.update(|cx| editor.read(cx).tab_stops.is_none()));
 }
 
 #[gpui_kit::test]

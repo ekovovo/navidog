@@ -7,11 +7,16 @@ rust_i18n::i18n!("locales", fallback = "en");
 
 pub mod catalog;
 mod ddl;
+mod identifiers;
 mod info;
 mod navigator;
 mod objects;
 mod ops;
 mod selection;
+mod snippets;
+
+#[cfg(test)]
+mod info_tests;
 
 use gpui_kit::{Action, App, SharedString};
 use navidog_core::object::ObjectKind;
