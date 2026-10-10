@@ -3,6 +3,7 @@
 //! panel id (a right-clicked tab need not be the active one).
 
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 use gpui_kit::component::dock::{PanelId, TabGroup};
 use gpui_kit::component::native_menu::NativeMenu;
@@ -10,8 +11,8 @@ use gpui_kit::component::{Icon, h_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     Action, App, Entity, Global, InteractiveElement as _, IntoElement, MouseButton,
-    ParentElement as _, PlatformInput, ScrollDelta, ScrollWheelEvent, SharedString, Styled as _,
-    WeakEntity, point, px,
+    ParentElement as _, PlatformInput, ScrollDelta, ScrollWheelEvent, SharedString,
+    StatefulInteractiveElement as _, Styled as _, WeakEntity, div, point, px,
 };
 use rust_i18n::t;
 
@@ -56,12 +57,18 @@ pub struct AddToStartup {
 
 gpui_kit::actions!(tabs, [CloseTab, NextTab, PrevTab]);
 
+/// What a panel does instead of closing while it refuses to (`Panel::closable` is false, e.g. with
+/// pending edits): typically ask in its own window, then close itself with `CloseTabs` once the
+/// user decides. The panel captures its window; the close commands may come from the menu bar.
+pub type CloseGuard = Rc<dyn Fn(&mut App)>;
+
 #[derive(Default)]
 struct Tabs {
     groups: HashMap<PanelId, WeakEntity<TabGroup>>,
     active: Option<PanelId>,
     /// Panels leaving the dock for a window of their own; they keep their state
     detaching: HashSet<PanelId>,
+    guards: HashMap<PanelId, CloseGuard>,
 }
 
 impl Global for Tabs {}
@@ -97,7 +104,17 @@ pub fn removed(panel: PanelId, cx: &mut App) -> bool {
     if tabs.active == Some(panel) {
         tabs.active = None;
     }
-    tabs.detaching.remove(&panel)
+    let moving = tabs.detaching.remove(&panel);
+    if !moving {
+        tabs.guards.remove(&panel);
+    }
+    moving
+}
+
+/// Call from `Panel::on_added_to` for a panel that must ask before closing; see `CloseGuard`.
+/// The tab close commands run the guard instead of closing it while it refuses.
+pub fn set_close_guard(panel: PanelId, guard: CloseGuard, cx: &mut App) {
+    cx.global_mut::<Tabs>().guards.insert(panel, guard);
 }
 
 /// Removes a tab from its group without ending it, for moving it into another window.
@@ -156,12 +173,36 @@ fn close(panel: Option<PanelId>, which: Close, cx: &mut App) {
         .iter()
         .map(|p| p.panel_id(cx))
         .collect();
-    let targets = targets(&ids, panel, which);
+    let refuses = |id: PanelId, cx: &App| {
+        !group
+            .read(cx)
+            .panels()
+            .iter()
+            .any(|p| p.panel_id(cx) == id && p.closable(cx))
+    };
+    // A guarded panel that refuses asks instead; the first one asks, the others stay open
+    let mut ask = None;
+    let mut close = Vec::new();
+    for id in targets(&ids, panel, which) {
+        match cx.global::<Tabs>().guards.get(&id) {
+            Some(guard) if refuses(id, cx) => {
+                if ask.is_none() {
+                    ask = Some(guard.clone());
+                }
+            }
+            _ => close.push(id),
+        }
+    }
     group.update(cx, |g, cx| {
-        for id in targets {
+        for id in close {
             g.close_panel(id, cx);
         }
     });
+    // Deferred: a close command runs while its window is busy dispatching, and the guard needs
+    // that window to open its prompt
+    if let Some(guard) = ask {
+        cx.defer(move |cx| guard(cx));
+    }
 }
 
 fn cycle(step: isize, cx: &mut App) {
@@ -211,13 +252,15 @@ pub fn context_menu(panel: PanelId) -> NativeMenu {
 
 /// A tab's title: optional object icon, then the label truncated with the full text on hover;
 /// right-click opens the tab context menu. Panels return it from `Panel::title` (leaving
-/// `tab_name` as `None`).
+/// `tab_name` as `None`). `pending` marks uncommitted changes: the panel then refuses to close,
+/// the dock hides its close button, and a dot in its place closes through the panel's guard.
 pub fn title(
     panel: PanelId,
     icon: Option<Icon>,
     label: impl Into<SharedString>,
     // The connection color (F-CONN-014), drawn as a strip under the title
     color: Option<gpui_kit::Hsla>,
+    pending: bool,
 ) -> impl IntoElement {
     // A floor keeps tabs from shrinking until they all fit. The dock's tab bar
     // already scrolls horizontally once the strip is wider than the pane.
@@ -234,6 +277,26 @@ pub fn title(
             crate::skin::truncated(SharedString::from(format!("tab-label-{panel:?}")), label)
                 .flex_1(),
         )
+        .when(pending, |d| {
+            d.child(
+                div()
+                    .id(SharedString::from(format!("tab-pending-{panel:?}")))
+                    .flex_none()
+                    .cursor_pointer()
+                    .child("●")
+                    .tooltip(|window, cx| {
+                        let tip = SharedString::from(t!("tabs.pending").to_string());
+                        gpui_kit::component::tooltip::Tooltip::new(tip).build(window, cx)
+                    })
+                    .on_click(move |_, window, cx| {
+                        let close = CloseTabs {
+                            panel: Some(panel),
+                            which: Close::This,
+                        };
+                        window.dispatch_action(Box::new(close), cx);
+                    }),
+            )
+        })
         .on_mouse_down(MouseButton::Right, move |e, window, cx| {
             cx.stop_propagation();
             context_menu(panel).show(e.position, window, cx);

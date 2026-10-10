@@ -12,6 +12,9 @@ tabs:
   close_all:
     en: Close All Tabs
     zh-CN: 关闭全部选项卡
+  pending:
+    en: Uncommitted changes. Click to close.
+    zh-CN: 有未提交的更改，点按关闭
   pop_out:
     en: Open in New Window
     zh-CN: 在新窗口中打开

@@ -151,6 +151,7 @@ impl Panel for ObjectsPanel {
             None,
             t!("obj.objects_tab").to_string(),
             None,
+            false,
         )
     }
 }

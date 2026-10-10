@@ -154,6 +154,10 @@ pub struct TableViewer {
     add_after_commit: bool,
     /// Load the page once the commit started by paging, sorting or filtering succeeds
     reload_after_commit: bool,
+    /// The user answered the close prompt; the tab may close now (pending edits are committed or dropped)
+    close_approved: bool,
+    /// Close the tab once the commit chosen in the close prompt succeeds
+    close_after_commit: bool,
     form: bool,
     /// Cell text is submitted as SQL (F-DATA-010)
     raw_data: bool,
@@ -189,10 +193,29 @@ impl BasePanel for TableViewer {
         }
     }
 
-    /// If the tab is closed with uncommitted changes or an open transaction, ask whether to commit or
-    /// discard; the session stays open meanwhile.
-    fn on_added_to(&mut self, group: WeakEntity<TabGroup>, _: &mut Window, cx: &mut Context<Self>) {
-        tabs::added(PanelId::from(cx.entity_id()), group, cx);
+    /// With uncommitted changes or an open transaction the tab refuses to close; the tab close
+    /// commands run `ask_to_close` instead (see `tabs::CloseGuard`).
+    fn closable(&self, cx: &App) -> bool {
+        !self.needs_close_prompt(cx)
+    }
+
+    fn on_added_to(
+        &mut self,
+        group: WeakEntity<TabGroup>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let panel = PanelId::from(cx.entity_id());
+        tabs::added(panel, group, cx);
+        // Runs again when the tab moves to another window, so the prompt follows it
+        let (viewer, home) = (cx.entity().downgrade(), window.window_handle());
+        let guard: tabs::CloseGuard = std::rc::Rc::new(move |cx| {
+            let viewer = viewer.clone();
+            let _ = home.update(cx, |_, window, cx| {
+                let _ = viewer.update(cx, |v, cx| v.ask_to_close(window, cx));
+            });
+        });
+        tabs::set_close_guard(panel, guard, cx);
     }
     fn set_active(&mut self, active: bool, _: &mut Window, cx: &mut Context<Self>) {
         tabs::set_active(PanelId::from(cx.entity_id()), active, cx);
@@ -213,11 +236,14 @@ impl BasePanel for TableViewer {
         let Some(session) = self.session.take() else {
             return;
         };
+        // Closing the session rolls back an open transaction, which is what "discard" asked for
         let dirty = self.grid.read(cx).model(cx).has_changes();
-        if !dirty && !self.in_transaction {
+        if self.close_approved || (!dirty && !self.in_transaction) {
             close_session(session);
             return;
         }
+        // Only reached when something closed the tab without asking first (the dock refusing
+        // via `closable` is the normal path): ask now, with the tab already gone.
         let commit = self.commit_statements(cx);
         let in_tx = self.in_transaction;
         let (ok_session, cancel_session) = (session.clone(), session);
@@ -288,12 +314,95 @@ impl Panel for TableViewer {
             .read(cx)
             .get(&self.object.scope.connection)
             .and_then(|c| c.color.clone());
+        let pending = self.needs_close_prompt(cx);
         tabs::title(
             PanelId::from(cx.entity_id()),
             Some(lucide("table")),
             self.object.name.clone(),
             color.and_then(|c| tokens::connection_color(&c, cx)),
+            pending,
         )
+    }
+}
+
+impl TableViewer {
+    fn needs_close_prompt(&self, cx: &App) -> bool {
+        !self.close_approved
+            && self.session.is_some()
+            && (self.in_transaction || self.grid.read(cx).model(cx).has_changes())
+    }
+
+    /// The tab close commands land here while there are uncommitted changes: commit them and
+    /// close, drop them and close, or keep the tab. A failed commit keeps the tab and the changes.
+    fn ask_to_close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.grid.update(cx, |g, cx| g.commit_edit(window, cx));
+        self.flush_form(cx);
+        if !self.needs_close_prompt(cx) {
+            self.close_now(window, cx);
+            return;
+        }
+        let viewer = cx.entity();
+        let name = self.object.name.clone();
+        window.open_alert_dialog(cx, move |alert, _, _| {
+            let (commit, discard) = (viewer.clone(), viewer.clone());
+            let enter = viewer.clone();
+            alert
+                .icon(lucide("info"))
+                .title(t!("viewer.close_pending", name = name).to_string())
+                // Enter commits, like the primary button; Esc keeps the tab
+                .on_ok(move |_, window, cx| {
+                    enter.update(cx, |v, cx| v.commit_and_close(window, cx));
+                    true
+                })
+                .footer(
+                    h_flex()
+                        .w_full()
+                        .justify_end()
+                        .gap_2()
+                        .child(
+                            Button::new("close-keep")
+                                .label(t!("grid.cancel").to_string())
+                                .on_click(|_, window, cx| window.close_dialog(cx)),
+                        )
+                        .child(
+                            Button::new("close-discard")
+                                .label(t!("viewer.discard").to_string())
+                                .on_click(move |_, window, cx| {
+                                    window.close_dialog(cx);
+                                    discard.update(cx, |v, cx| {
+                                        v.grid.update(cx, |g, cx| {
+                                            g.update_model(cx, |m| m.discard())
+                                        });
+                                        v.close_now(window, cx);
+                                    });
+                                }),
+                        )
+                        .child(
+                            Button::new("close-commit")
+                                .primary()
+                                .label(t!("viewer.commit").to_string())
+                                .on_click(move |_, window, cx| {
+                                    window.close_dialog(cx);
+                                    commit.update(cx, |v, cx| v.commit_and_close(window, cx));
+                                }),
+                        ),
+                )
+        });
+    }
+
+    fn commit_and_close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.close_after_commit = true;
+        self.apply_changes(true, window, cx);
+    }
+
+    /// Closes this tab past its own prompt.
+    fn close_now(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.close_approved = true;
+        let close = tabs::CloseTabs {
+            panel: Some(PanelId::from(cx.entity_id())),
+            which: tabs::Close::This,
+        };
+        window.dispatch_action(Box::new(close), cx);
     }
 }
 
@@ -548,6 +657,8 @@ impl TableViewer {
                 hidden_revert: None,
                 add_after_commit: false,
                 reload_after_commit: false,
+                close_approved: false,
+                close_after_commit: false,
                 form: false,
                 raw_data: false,
                 show_rowid: false,
@@ -904,6 +1015,14 @@ impl TableViewer {
                         if end_transaction {
                             this.in_transaction = false;
                         }
+                        // Committed from the close prompt: nothing to reload, the tab goes
+                        if std::mem::take(&mut this.close_after_commit) {
+                            this.grid.update(cx, |g, cx| {
+                                g.update_model(cx, |m| m.accept_committed());
+                            });
+                            this.close_now(window, cx);
+                            return;
+                        }
                         // Hiding a column while dirty still reloads so the projection matches.
                         let reproject = this.hidden_revert.take().is_some();
                         let leaving = std::mem::take(&mut this.reload_after_commit);
@@ -925,6 +1044,7 @@ impl TableViewer {
                     Err(e) => {
                         this.add_after_commit = false;
                         this.reload_after_commit = false;
+                        this.close_after_commit = false;
                         if let Some(old) = this.hidden_revert.take() {
                             this.hidden = old;
                         }

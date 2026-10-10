@@ -91,6 +91,7 @@ impl Panel for DdlPanel {
             Some(icon),
             self.object.name.clone(),
             color.and_then(|c| navidog_ui::tokens::connection_color(&c, cx)),
+            false,
         )
     }
 }
