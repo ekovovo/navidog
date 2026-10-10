@@ -332,6 +332,9 @@ prefs:
   master_mismatch:
     en: The passwords do not match
     zh-CN: 两次输入的密码不一致
+  master_dropped:
+    en: "Saved passwords of %{names} could not be decrypted with the current key and were removed. Opening those connections asks for them."
+    zh-CN: "%{names} 保存的密码无法用当前的密钥解开，已经清除。打开这些连接时会询问密码。"
   master_enabled:
     en: Saved passwords are protected by a master password.
     zh-CN: 保存的密码受主密码保护。

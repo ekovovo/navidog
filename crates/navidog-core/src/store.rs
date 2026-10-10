@@ -65,66 +65,63 @@ impl ConnectionsFile {
     }
 
     /// Re-encrypts every secret field with a new key (setting, changing or clearing the master password).
-    /// All or nothing: when `old` cannot open some field, nothing changes, so the file never mixes
-    /// ciphertext of two keys (the next save would make the re-encrypted ones unreadable).
-    pub fn rekey(&mut self, old: &Key, new: &Key) -> Result<(), CryptoError> {
-        let mut connections = self.connections.clone();
-        for conn in &mut connections {
-            let id = conn.id.clone();
-            Self::reencrypt(conn, &id, old, new)?;
-        }
-        self.connections = connections;
-        Ok(())
+    /// Returns the names of connections that had a field `old` cannot open; those fields are cleared
+    /// (see `reencrypt`), so the file never mixes ciphertext of two keys.
+    pub fn rekey(&mut self, old: &Key, new: &Key) -> Vec<String> {
+        self.connections
+            .iter_mut()
+            .filter_map(|conn| {
+                let id = conn.id.clone();
+                Self::reencrypt(conn, &id, old, new).then(|| conn.name.clone())
+            })
+            .collect()
     }
 
     /// Re-encrypts the secrets of every profile of `conn`, read as `old_id` with `old`, for its
-    /// own id with `new`.
-    fn reencrypt(
-        conn: &mut Connection,
-        old_id: &str,
-        old: &Key,
-        new: &Key,
-    ) -> Result<(), CryptoError> {
+    /// own id with `new`. A field `old` cannot open was written with a key that is gone (another
+    /// machine, a keychain item that was replaced) and can never be read again: it is cleared and
+    /// its "save password" switched off, so opening asks for it. Returns whether that happened.
+    fn reencrypt(conn: &mut Connection, old_id: &str, old: &Key, new: &Key) -> bool {
+        let mut cleared = false;
         for ix in 0..=conn.profiles.len() {
             // Inactive profiles are swapped into the active slots so the field helpers reach them
             if ix > 0 {
                 conn.swap_profile(ix - 1);
             }
-            let result = SecretField::ALL.into_iter().try_for_each(|field| {
-                let plain = field
+            for field in SecretField::ALL {
+                let opened = field
                     .slot(conn)
                     .as_ref()
                     .map(|s| old.decrypt(&aad(old_id, field), s))
-                    .transpose()?;
-                Self::set_secret(conn, field, plain.as_deref(), new);
-                Ok(())
-            });
+                    .transpose();
+                match opened {
+                    Ok(plain) => Self::set_secret(conn, field, plain.as_deref(), new),
+                    Err(_) => {
+                        *field.slot_mut(conn) = None;
+                        *field.saved_mut(conn) = false;
+                        cleared = true;
+                    }
+                }
+            }
             if ix > 0 {
                 conn.swap_profile(ix - 1);
             }
-            result?;
         }
-        Ok(())
+        cleared
     }
 
     /// Duplicates a connection: new id, the name gets the "copy" suffix, secrets are re-encrypted for the new id.
-    pub fn duplicate(
-        &mut self,
-        id: &str,
-        suffix: &str,
-        key: &Key,
-    ) -> Result<Option<ConnectionId>, CryptoError> {
-        let Some(src) = self.get(id).cloned() else {
-            return Ok(None);
-        };
+    pub fn duplicate(&mut self, id: &str, suffix: &str, key: &Key) -> Option<ConnectionId> {
+        let src = self.get(id).cloned()?;
         let mut copy = src.clone();
         copy.id = crate::connection::new_connection_id();
         copy.name = format!("{} {suffix}", src.name);
-        Self::reencrypt(&mut copy, &src.id, key, key)?;
+        // A field the key cannot open is left out of the copy; the source keeps it
+        Self::reencrypt(&mut copy, &src.id, key, key);
         let new_id = copy.id.clone();
         let ix = self.connections.iter().position(|c| c.id == id).unwrap();
         self.connections.insert(ix + 1, copy);
-        Ok(Some(new_id))
+        Some(new_id)
     }
 
     /// Deletes a group; its connections and subgroups move up one level.
@@ -334,7 +331,7 @@ impl ConnectionStore {
         cx: &mut Context<Self>,
     ) -> Result<Option<ConnectionId>, StoreError> {
         let key = self.key()?;
-        let new_id = self.file.duplicate(id, suffix, &key)?;
+        let new_id = self.file.duplicate(id, suffix, &key);
         self.commit(cx);
         Ok(new_id)
     }
@@ -380,25 +377,26 @@ impl ConnectionStore {
     }
 
     /// Sets, changes or clears (`None`) the master password and re-encrypts every secret with the new key.
+    /// Returns the connections whose unreadable saved passwords were dropped (see `ConnectionsFile::rekey`).
     pub fn set_master_password(
         &mut self,
         password: Option<&str>,
         cx: &mut Context<Self>,
-    ) -> Result<(), StoreError> {
+    ) -> Result<Vec<String>, StoreError> {
         let old = self.key()?;
         let (mode, new) = match password {
             Some(p) => crypto::new_master(p)?,
             None => (CryptoMode::Machine, crypto::machine_key()?),
         };
-        self.file.rekey(&old, &new)?;
+        let cleared = self.file.rekey(&old, &new);
         self.file.crypto = mode;
         self.key = Some(new);
         self.commit(cx);
-        Ok(())
+        Ok(cleared)
     }
 
     fn commit(&mut self, cx: &mut Context<Self>) {
-        let bytes = serde_json::to_vec_pretty(&self.file).expect("连接配置可序列化");
+        let bytes = serde_json::to_vec_pretty(&self.file).expect("connections.json serializes");
         if let Err(err) = paths::write_atomic(&self.path, &bytes) {
             tracing::error!("保存 connections.json 失败: {err}");
         }
@@ -445,13 +443,13 @@ mod tests {
             active.and_then(|a| other.map(|o| (a, o)))
         };
 
-        let new_id = file.duplicate(&id, "副本", &k1).unwrap().unwrap();
+        let new_id = file.duplicate(&id, "副本", &k1).unwrap();
         let copy = file.get(&new_id).unwrap();
         assert!(copy.name.ends_with(" 副本"));
         assert_eq!(reveal(copy, &k1).unwrap(), ("pw".into(), "pw2".into()));
 
         let k2 = Key::random();
-        file.rekey(&k1, &k2).unwrap();
+        assert!(file.rekey(&k1, &k2).is_empty());
         for c in &file.connections {
             assert_eq!(reveal(c, &k2).unwrap(), ("pw".into(), "pw2".into()));
             assert!(reveal(c, &k1).is_err());
@@ -462,22 +460,28 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_rekey_changes_nothing() {
+    fn rekey_drops_fields_the_old_key_cannot_open() {
         let (k1, lost, k3) = (Key::random(), Key::random(), Key::random());
         let mut good = Connection::new("mysql");
+        good.general.save_password = true;
         ConnectionsFile::set_secret(&mut good, SecretField::Password, Some("pw"), &k1);
-        // A field from a key that is gone (another machine, a new keychain item)
+        // A field from a key that is gone (another machine, a keychain item that was replaced)
         let mut bad = Connection::new("mysql");
+        bad.name = "bad".into();
+        bad.general.save_password = true;
         ConnectionsFile::set_secret(&mut bad, SecretField::Password, Some("x"), &lost);
         let mut file = ConnectionsFile {
             connections: vec![good, bad],
             ..Default::default()
         };
-        let before = file.clone();
-        assert!(file.rekey(&k1, &k3).is_err());
-        assert_eq!(file, before);
-        let revealed = ConnectionsFile::reveal(&file.connections[0], SecretField::Password, &k1);
+        assert_eq!(file.rekey(&k1, &k3), ["bad"]);
+        // The readable one moved to the new key; the other is gone and will be asked for
+        let revealed = ConnectionsFile::reveal(&file.connections[0], SecretField::Password, &k3);
         assert_eq!(revealed.unwrap().as_deref(), Some("pw"));
+        let bad = &file.connections[1];
+        assert!(bad.general.password.is_none() && !bad.general.save_password);
+        // Nothing left that the new key cannot read
+        assert!(file.rekey(&k3, &k1).is_empty());
     }
 
     #[test]

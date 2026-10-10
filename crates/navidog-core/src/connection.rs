@@ -462,6 +462,15 @@ impl SecretField {
         }
     }
 
+    /// The "save password" switch of this field.
+    pub fn saved_mut(self, conn: &mut Connection) -> &mut bool {
+        match self {
+            Self::Password => &mut conn.general.save_password,
+            Self::SshPassword => &mut conn.ssh.save_password,
+            Self::SshPassphrase => &mut conn.ssh.save_passphrase,
+        }
+    }
+
     pub const ALL: [SecretField; 3] = [Self::Password, Self::SshPassword, Self::SshPassphrase];
 }
 

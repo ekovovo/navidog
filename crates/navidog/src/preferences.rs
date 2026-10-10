@@ -389,11 +389,14 @@ impl Preferences {
                                 .label(t!("prefs.master_clear").to_string())
                                 .on_click(|_, window, cx| {
                                     let store = ConnectionStore::global(cx);
-                                    if let Err(e) =
-                                        store.update(cx, |s, cx| s.set_master_password(None, cx))
+                                    match store.update(cx, |s, cx| s.set_master_password(None, cx))
                                     {
-                                        let message = navidog_connection::store_error_message(&e);
-                                        window.push_notification(message, cx);
+                                        Ok(dropped) => notify_dropped(&dropped, window, cx),
+                                        Err(e) => {
+                                            let message =
+                                                navidog_connection::store_error_message(&e);
+                                            window.push_notification(message, cx);
+                                        }
                                     }
                                 }),
                         )
@@ -513,13 +516,25 @@ impl MasterDialog {
         }
         let store = ConnectionStore::global(cx);
         match store.update(cx, |s, cx| s.set_master_password(Some(&a), cx)) {
-            Ok(()) => window.close_dialog(cx),
+            Ok(dropped) => {
+                window.close_dialog(cx);
+                notify_dropped(&dropped, window, cx);
+            }
             Err(e) => {
                 self.error = Some(navidog_connection::store_error_message(&e).into());
                 cx.notify();
             }
         }
     }
+}
+
+/// Saved passwords no key can open any more were dropped while re-encrypting; say whose.
+fn notify_dropped(connections: &[String], window: &mut Window, cx: &mut App) {
+    if connections.is_empty() {
+        return;
+    }
+    let names = connections.join(", ");
+    window.push_notification(t!("prefs.master_dropped", names = names).to_string(), cx);
 }
 
 impl Render for MasterDialog {
