@@ -1348,6 +1348,8 @@ impl ResultGrid {
 
     fn copy_text(&self, format: &str, cx: &App) -> String {
         let m = self.model(cx);
+        let delegate = self.table.read(cx).delegate();
+        let raw = delegate.raw.then_some(delegate.dialect);
         match (format, &self.target) {
             ("insert", Some(t)) => t.dialect.insert_statements(
                 &t.scope,
@@ -1370,9 +1372,9 @@ impl ResultGrid {
                     &m.selected_values(),
                 )
             }
-            ("names", _) => m.selected_tsv(true, false),
-            ("both", _) => m.selected_tsv(true, true),
-            _ => m.selected_tsv(false, true),
+            ("names", _) => m.selected_tsv(true, false, None),
+            ("both", _) => m.selected_tsv(true, true, raw),
+            _ => m.selected_tsv(false, true, raw),
         }
     }
 

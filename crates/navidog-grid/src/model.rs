@@ -458,21 +458,26 @@ impl GridModel {
     }
 
     /// The selection as tab-separated text; NULL is copied as an empty string. `header` adds a name row.
+    /// `raw` is the dialect in raw data mode: values are copied as the grid shows them (strings as
+    /// quoted literals), so pasting them back in raw data mode, where text is SQL, writes the same values.
     // ponytail: tabs and newlines inside a value are not escaped, so pasting back mis-aligns; quote the
     // TSV if a round trip is needed
-    pub fn selected_tsv(&self, header: bool, data: bool) -> String {
+    pub fn selected_tsv(&self, header: bool, data: bool, raw: Option<Dialect>) -> String {
         let mut lines = Vec::new();
         if header {
             lines.push(self.selected_columns().join("\t"));
         }
         if data {
-            for row in self.selected_values() {
-                lines.push(
-                    row.into_iter()
-                        .map(Option::unwrap_or_default)
-                        .collect::<Vec<_>>()
-                        .join("\t"),
-                );
+            let (rows, cols) = self.selection();
+            for r in rows.filter(|&r| r < self.row_count()) {
+                let cells: Vec<SharedString> = cols
+                    .clone()
+                    .map(|c| match raw {
+                        Some(dialect) => self.shown_text(r, c, true, dialect),
+                        None => self.value(r, c).cloned().flatten().unwrap_or_default(),
+                    })
+                    .collect();
+                lines.push(cells.join("\t"));
             }
         }
         lines.join("\n")
@@ -967,7 +972,7 @@ mod tests {
         m.select((1, 1), false);
         m.select((0, 0), true);
         assert_eq!(m.selection(), (0..=1, 0..=1));
-        assert_eq!(m.selected_tsv(true, true), "id\tname\n1\ta\n2\t");
+        assert_eq!(m.selected_tsv(true, true, None), "id\tname\n1\ta\n2\t");
         m.select_rows(1, false);
         assert_eq!(m.selected_values(), [vec![Some("2".into()), None]]);
 
@@ -1072,6 +1077,19 @@ mod tests {
         m.set_value(0, 1, Some("O'Brien".into()));
         assert_eq!(m.raw_text(0, 1, true, Dialect::MySql), "'O''Brien'");
         assert_eq!(m.raw_text(0, 1, false, Dialect::MySql), "O'Brien");
+        // Copy in raw mode is what the grid shows, so pasting it back as SQL writes the same value
+        m.select((0, 0), false);
+        m.select((0, 1), true);
+        assert_eq!(
+            m.selected_tsv(false, true, Some(Dialect::MySql)),
+            "1\t'O''Brien'"
+        );
+        assert_eq!(m.selected_tsv(false, true, None), "1\tO'Brien");
+        m.discard();
+        m.select((0, 1), false);
+        m.paste("'O''Brien'", true);
+        let cs = m.change_set();
+        assert_eq!(cs.updates[0].values[0].1, Written::expr("'O''Brien'"));
     }
 
     #[test]
