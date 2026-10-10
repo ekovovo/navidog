@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 
 use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{
+    EntityInputHandler as _,
     AnyWindowHandle, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render,
     Styled as _, TestAppContext, Window, WindowBounds, WindowOptions, div, size,
 };
@@ -261,6 +262,46 @@ fn runs_scripts_into_messages_summary_and_editable_results(cx: &mut TestAppConte
             Body::Explain(_)
         ));
     });
+}
+
+#[gpui_kit::test]
+fn typing_a_character_does_not_reenter_the_editor(cx: &mut TestAppContext) {
+    let home = std::env::temp_dir().join(format!("navidog-query-test-{}", std::process::id()));
+    std::fs::create_dir_all(&home).unwrap();
+    // SAFETY: the crate's other tests set the same value
+    unsafe { std::env::set_var("NAVIDOG_HOME", &home) };
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        navidog_core::init(cx);
+        navidog_ui::theme::init(cx);
+        navidog_db::init(cx);
+        navidog_grid::init(cx);
+        crate::init(cx);
+    });
+    let (handle, editor) = cx.update(|cx| {
+        let mut editor = None;
+        let handle = gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+            let e = QueryEditor::new(
+                QuerySource::Untitled(1),
+                Target::default(),
+                String::new(),
+                window,
+                cx,
+            );
+            editor = Some(e.clone());
+            cx.new(|_| Host { editor: e })
+        })
+        .unwrap();
+        (handle.0, editor.unwrap())
+    });
+    // The same path as macOS insertText: inside the editor update, while completion is on.
+    cx.update_window(handle, |_, window, cx| {
+        let state = editor.read(cx).editor.clone();
+        state.update(cx, |s, cx| s.replace_text_in_range(None, "s", window, cx));
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert_eq!(cx.update(|cx| editor.read(cx).text(cx)), "s");
 }
 
 #[gpui_kit::test]

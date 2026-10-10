@@ -196,6 +196,9 @@ pub struct QueryEditor {
     pub(crate) results_page: bool,
     /// Editor preferences last applied (line numbers, folding, tab width, spaces)
     applied: Option<(bool, bool, u8, bool)>,
+    /// Highlighting is SQL, so completion may run. Cached: the completion trigger
+    /// runs inside the editor update and must not read that editor.
+    pub(crate) sql_highlight: bool,
     /// Snippet placeholders being tabbed through
     pub(crate) tab_stops: Option<crate::snippet::TabStops>,
     /// Snippet codes the completion menu offered last
@@ -346,6 +349,7 @@ impl QueryEditor {
         cx: &mut App,
     ) -> Entity<Self> {
         let s = Settings::global(cx).clone();
+        let sql_highlight = language_for(&s, text.len()) == "sql";
         let editor = cx.new(|cx| {
             EditorState::new(window, cx)
                 .language(language_for(&s, text.len()))
@@ -415,6 +419,7 @@ impl QueryEditor {
                     s.tab_width,
                     s.insert_spaces,
                 )),
+                sql_highlight,
                 tab_stops: None,
                 offered_snippets: offered,
                 menu_moved: false,
@@ -612,6 +617,7 @@ impl QueryEditor {
     fn apply_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let s = Settings::global(cx).clone();
         let lang = language_for(&s, self.editor.read(cx).text().len());
+        self.sql_highlight = lang == "sql";
         let wanted = (
             s.show_line_numbers,
             s.code_folding,
@@ -650,6 +656,7 @@ impl QueryEditor {
         // Past the size limit the editor turns plain text and completion stops (F-PREF-004)
         let s = Settings::global(cx);
         let lang = language_for(s, self.editor.read(cx).text().len());
+        self.sql_highlight = lang == "sql";
         if self.editor.read(cx).language_name() != lang {
             self.editor.update(cx, |e, cx| e.set_highlighter(lang, cx));
         }

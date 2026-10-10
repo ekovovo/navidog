@@ -307,6 +307,8 @@ impl CompletionProvider for Provider {
         let Some(editor) = self.editor.upgrade() else {
             return false;
         };
+        // Runs inside the editor update (each keystroke). `completion_on` must
+        // not read that editor, or the app aborts.
         completion_on(editor.read(cx), cx)
             && !new_text.is_empty()
             && new_text.chars().all(|c| is_ident(c) || c == '.')
@@ -315,8 +317,7 @@ impl CompletionProvider for Provider {
 
 /// Off in the preferences, or above the size where highlighting and completion stop (F-PREF-004).
 pub(crate) fn completion_on(e: &QueryEditor, cx: &App) -> bool {
-    let s = Settings::global(cx);
-    s.code_completion && e.editor.read(cx).language_name() == "sql"
+    Settings::global(cx).code_completion && e.sql_highlight
 }
 
 impl QueryEditor {
