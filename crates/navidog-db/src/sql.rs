@@ -1,7 +1,9 @@
-//! SQL 分句：按语句末尾的分号切分，跳过字符串、引号标识符、注释、PostgreSQL 的 `$tag$` 字符串，
-//! 以及 `CREATE TRIGGER / FUNCTION / PROCEDURE / EVENT` 中的 `BEGIN … END` 块。
+//! SQL statement splitting: cuts at statement-ending semicolons, skipping strings, quoted
+//! identifiers, comments, PostgreSQL `$tag$` strings, and `BEGIN … END` blocks inside
+//! `CREATE TRIGGER / FUNCTION / PROCEDURE / EVENT`.
 
-/// 切分为语句列表（去掉末尾分号与首尾空白，丢弃空语句与纯注释）。
+/// Splits into statements (trailing semicolon and surrounding whitespace removed; empty and
+/// comment-only statements dropped).
 pub fn split_statements(sql: &str) -> Vec<String> {
     let bytes = sql.as_bytes();
     let mut out = Vec::new();
@@ -51,11 +53,13 @@ pub fn split_statements(sql: &str) -> Vec<String> {
                 if word.eq_ignore_ascii_case("BEGIN") && is_routine(&sql[start..i]) {
                     depth += 1;
                 } else if word.eq_ignore_ascii_case("END") && depth > 0 {
-                    // `END IF` / `END LOOP` 等不结束块
-                    let next = sql[end..].trim_start();
-                    let closes = !["IF", "LOOP", "WHILE", "REPEAT", "CASE"]
-                        .iter()
-                        .any(|k| next.len() >= k.len() && next[..k.len()].eq_ignore_ascii_case(k));
+                    // `END IF`, `END LOOP` and the like do not close the block. Bytes, not
+                    // `next[..k.len()]`, so a multi-byte character there cannot panic.
+                    let next = sql[end..].trim_start().as_bytes();
+                    let closes = !["IF", "LOOP", "WHILE", "REPEAT", "CASE"].iter().any(|k| {
+                        next.get(..k.len())
+                            .is_some_and(|b| b.eq_ignore_ascii_case(k.as_bytes()))
+                    });
                     if closes {
                         depth -= 1;
                     }
@@ -88,7 +92,8 @@ fn is_routine(prefix: &str) -> bool {
             .any(|k| p.contains(k))
 }
 
-/// 跳过引号内容（成对引号表示转义，反斜杠转义下一个字符），返回结束引号之后的位置。
+/// Skips a quoted span (a doubled quote escapes, a backslash escapes the next character) and
+/// returns the position after the closing quote.
 fn skip_quoted(bytes: &[u8], start: usize, quote: u8) -> usize {
     let mut i = start + 1;
     while i < bytes.len() {
@@ -107,7 +112,7 @@ fn skip_quoted(bytes: &[u8], start: usize, quote: u8) -> usize {
     bytes.len()
 }
 
-/// PostgreSQL 的 `$tag$ … $tag$`；不是合法起始标记时返回 `None`。
+/// PostgreSQL `$tag$ … $tag$`; `None` when this is not a valid opening tag.
 fn skip_dollar(sql: &str, start: usize) -> Option<usize> {
     let rest = &sql[start + 1..];
     let tag_len = rest.find('$')?;
@@ -168,5 +173,10 @@ mod tests {
             ["DO $body$ BEGIN PERFORM 1; END $body$", "SELECT $1"]
         );
         assert!(split_statements("  -- only comment\n").is_empty());
+        // A multi-byte character right after END
+        assert_eq!(
+            split_statements("CREATE PROCEDURE p() BEGIN SELECT 1; END 名; SELECT 2"),
+            ["CREATE PROCEDURE p() BEGIN SELECT 1; END 名", "SELECT 2"]
+        );
     }
 }

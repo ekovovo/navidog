@@ -5,6 +5,7 @@
 //! parser does not recognize stays in text mode (`parse_where` returns `None`).
 
 use navidog_db::dialect::Dialect;
+use navidog_util::starts_with_ignore_ascii_case;
 use rust_i18n::t;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -519,8 +520,7 @@ fn word_span(s: &str, kw: &str) -> Option<usize> {
 
 fn match_word(s: &str, kw: &str) -> bool {
     let rest = s.trim_start();
-    if rest.len() == s.len() || rest.len() < kw.len() || !rest[..kw.len()].eq_ignore_ascii_case(kw)
-    {
+    if rest.len() == s.len() || !starts_with_ignore_ascii_case(rest, kw) {
         return false;
     }
     !rest[kw.len()..]
@@ -535,9 +535,9 @@ fn match_join(s: &str) -> Option<(usize, bool)> {
     if rest.len() == s.len() {
         return None;
     }
-    let (word, or) = if rest.len() >= 3 && rest[..3].eq_ignore_ascii_case("AND") {
+    let (word, or) = if starts_with_ignore_ascii_case(rest, "AND") {
         (3, false)
-    } else if rest.len() >= 2 && rest[..2].eq_ignore_ascii_case("OR") {
+    } else if starts_with_ignore_ascii_case(rest, "OR") {
         (2, true)
     } else {
         return None;
@@ -944,7 +944,7 @@ fn paren_end(sql: &str) -> Option<usize> {
 
 fn eat_kw<'a>(s: &'a str, kw: &str) -> Option<&'a str> {
     let s = s.trim_start();
-    if s.len() < kw.len() || !s[..kw.len()].eq_ignore_ascii_case(kw) {
+    if !starts_with_ignore_ascii_case(s, kw) {
         return None;
     }
     let after = &s[kw.len()..];
@@ -1093,5 +1093,20 @@ mod tests {
         assert!(parse_where("1 = 1; DROP TABLE t", dialect).is_none());
         assert!(parse_where("name = 'x' OR 1", dialect).is_none());
         assert!(parse_order("name ASC LIMIT 1", dialect).is_none());
+    }
+
+    #[test]
+    fn non_ascii_text_does_not_panic() {
+        for dialect in [Dialect::MySql, Dialect::Postgres, Dialect::Sqlite] {
+            for sql in [
+                "名称 = 1",
+                "NOT 名称 = 1",
+                "col名称 = 1",
+                "a = 1 和 b = 2",
+                "\"名\" = 'é' OR 名 ILIKE 'x'",
+            ] {
+                let _ = parse_where(sql, dialect);
+            }
+        }
     }
 }

@@ -247,7 +247,7 @@ pub fn choices(type_name: &str) -> Option<Choices> {
 }
 
 fn strip_kind<'a>(type_name: &'a str, kind: &str) -> Option<&'a str> {
-    if type_name.len() < kind.len() || !type_name[..kind.len()].eq_ignore_ascii_case(kind) {
+    if !crate::starts_with_ignore_ascii_case(type_name, kind) {
         return None;
     }
     let rest = type_name[kind.len()..].trim_start();
@@ -364,5 +364,6 @@ mod tests {
         assert!(choices("varchar(20)").is_none());
         assert!(choices("enum").is_none());
         assert!(choices("ENUM('x', y)").is_none());
+        assert!(choices("中文类型").is_none());
     }
 }
