@@ -39,27 +39,35 @@ fn dir() -> PathBuf {
     navidog_core::paths::config_dir().join("autosave")
 }
 
-fn path(id: &str) -> PathBuf {
-    dir().join(format!("{id}.json"))
+fn path_in(dir: &std::path::Path, id: &str) -> PathBuf {
+    dir.join(format!("{id}.json"))
 }
 
 pub(crate) fn write(entry: &Autosave) {
+    write_in(&dir(), entry);
+}
+
+fn write_in(dir: &std::path::Path, entry: &Autosave) {
     let Ok(bytes) = serde_json::to_vec_pretty(entry) else {
         return;
     };
-    if let Err(e) = navidog_core::paths::write_atomic(&path(&entry.id), &bytes) {
+    if let Err(e) = navidog_core::paths::write_atomic(&path_in(dir, &entry.id), &bytes) {
         tracing::warn!("autosave failed: {e}");
     }
 }
 
 #[cfg(test)]
-pub(crate) fn read(id: &str) -> Option<Autosave> {
-    serde_json::from_slice(&std::fs::read(path(id)).ok()?).ok()
+fn read_in(dir: &std::path::Path, id: &str) -> Option<Autosave> {
+    serde_json::from_slice(&std::fs::read(path_in(dir, id)).ok()?).ok()
 }
 
 /// Saved, closed without saving, or quit cleanly with no changes: the file goes.
 pub(crate) fn forget(id: &str) {
-    let _ = std::fs::remove_file(path(id));
+    forget_in(&dir(), id);
+}
+
+fn forget_in(dir: &std::path::Path, id: &str) {
+    let _ = std::fs::remove_file(path_in(dir, id));
 }
 
 pub(crate) fn all() -> Vec<Autosave> {
@@ -354,10 +362,7 @@ mod tests {
 
     #[test]
     fn entries_round_trip_through_their_files() {
-        // The same folder the editor tests use: they all run in one process
-        let home = std::env::temp_dir().join(format!("navidog-query-test-{}", std::process::id()));
-        // SAFETY: every test of this crate sets the same value
-        unsafe { std::env::set_var("NAVIDOG_HOME", &home) };
+        let dir = std::env::temp_dir().join(format!("navidog-autosave-{}", std::process::id()));
         let entry = Autosave {
             id: "e1".into(),
             title: "Untitled".into(),
@@ -367,9 +372,10 @@ mod tests {
             saved_at: "2026-10-11 00:00:00".into(),
             on_quit: false,
         };
-        write(&entry);
-        assert_eq!(read("e1"), Some(entry.clone()));
-        forget("e1");
-        assert_eq!(read("e1"), None);
+        write_in(&dir, &entry);
+        assert_eq!(read_in(&dir, "e1"), Some(entry.clone()));
+        forget_in(&dir, "e1");
+        assert_eq!(read_in(&dir, "e1"), None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
