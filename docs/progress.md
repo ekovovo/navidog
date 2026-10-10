@@ -35,7 +35,7 @@ M2 的任务都已完成，逐项记录见 git 历史；M2 的功能状态仍在
 
 | 任务 | 状态 | 说明 |
 | --- | --- | --- |
-| SQL 编辑器技术验证（30-query-editor 第 1 节） | 未开始 | 区间装饰的判定、5 万行性能 |
+| SQL 编辑器技术验证（30-query-editor 第 1 节） | 完成 | 继续用 `EditorState`；括号高亮、查找、占位符用区间装饰；5 万行上色后滚动和输入平均约 2.9ms，数据见规格第 1 节 |
 | 驱动扩展：列来源、会话 ID、PostgreSQL NOTICE、MySQL 读取超时、PostgreSQL 取消走 TLS | 未开始 | 31 第 1 节 |
 | 分句器返回区间并支持 `DELIMITER` | 未开始 | `split_script` |
 | `navidog-query`：查询选项卡、目标选择、运行、停止、查询参数 | 未开始 | 30 第 2 节，31 第 2、3 节 |
@@ -229,3 +229,4 @@ M2 的任务都已完成，逐项记录见 git 历史；M2 的功能状态仍在
 | 截图 | `cargo test -p navidog --test snapshot` | 本地执行，输出 `target/snapshots/` |
 | 结果网格性能 | `cargo run --release -p navidog-grid --example spike` | 本地执行，需要 Metal |
 | 导航树性能 | `cargo run --release -p navidog-navigator --example tree_spike` | 本地执行，需要 Metal |
+| SQL 编辑器性能 | `cargo run --release -p navidog-query --example editor_spike` | 本地执行，需要 Metal；`NAVIDOG_SPIKE_LINES` 改行数，截图写到 `target/editor-spike-*.png` |
