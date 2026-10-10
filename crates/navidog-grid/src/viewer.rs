@@ -730,11 +730,9 @@ impl TableViewer {
                             .into_iter()
                             .map(|r| r.into_iter().map(|v| v.map(Into::into)).collect())
                             .collect();
-                        this.raw_columns = columns.clone();
-                        this.raw_rows = rows.clone();
-                        let (columns, rows) = GridModel::project(&columns, &rows, &this.hidden);
-                        this.grid.update(cx, |g, cx| g.set_data(columns, rows, cx));
-                        this.form_for = None;
+                        this.raw_columns = columns;
+                        this.raw_rows = rows;
+                        this.reproject(cx);
                         if std::mem::take(&mut this.add_after_commit) {
                             this.insert_row(cx);
                         }
@@ -920,8 +918,12 @@ impl TableViewer {
     }
 
     fn reproject(&mut self, cx: &mut Context<Self>) {
-        let (columns, rows) = GridModel::project(&self.raw_columns, &self.raw_rows, &self.hidden);
-        self.grid.update(cx, |g, cx| g.set_data(columns, rows, cx));
+        let (raw_columns, raw_rows, hidden) = (&self.raw_columns, &self.raw_rows, &self.hidden);
+        let (columns, rows) = GridModel::project(raw_columns, raw_rows, hidden);
+        self.grid.update(cx, |g, cx| {
+            g.set_data(columns, rows, cx);
+            g.update_model(cx, |m| m.set_hidden_columns(raw_columns, raw_rows, hidden));
+        });
         self.form_for = None;
     }
 

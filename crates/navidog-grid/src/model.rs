@@ -1,7 +1,7 @@
 //! Grid data model: the current page, the edit overlay, inserted and pending-delete rows, and the
 //! rectangular selection (21-table-viewer.md §2). No UI here; unit tests cover the change set and copy/paste.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::ops::RangeInclusive;
 
 use gpui_kit::SharedString;
@@ -43,6 +43,10 @@ pub struct GridModel {
     deleted: BTreeSet<usize>,
     /// Cells whose text is SQL rather than a string literal (raw data mode)
     raw: BTreeSet<Pos>,
+    /// Hidden columns and their values in each loaded row. Rows are still located by them, so
+    /// hiding the primary key (or any column of a table without one) does not widen a WHERE.
+    hidden_columns: Vec<GridColumn>,
+    hidden_rows: Vec<Vec<Cell>>,
     anchor: Pos,
     head: Pos,
 }
@@ -51,6 +55,8 @@ impl GridModel {
     pub fn set_data(&mut self, columns: Vec<GridColumn>, rows: Vec<Vec<Cell>>) {
         self.columns = columns;
         self.rows = rows;
+        self.hidden_columns.clear();
+        self.hidden_rows.clear();
         self.discard();
         let max = (
             self.row_count().saturating_sub(1),
@@ -265,11 +271,17 @@ impl GridModel {
             if r < self.rows.len() {
                 self.rows.remove(r);
             }
+            if r < self.hidden_rows.len() {
+                self.hidden_rows.remove(r);
+            }
         }
         for row in self.new_rows.drain(..) {
             if row.iter().any(Option::is_some) {
                 self.rows
                     .push(row.into_iter().map(|cell| cell.flatten()).collect());
+                if !self.hidden_columns.is_empty() {
+                    self.hidden_rows.push(vec![None; self.hidden_columns.len()]);
+                }
             }
         }
         self.edits.clear();
@@ -286,15 +298,22 @@ impl GridModel {
     }
 
     pub fn has_primary_key(&self) -> bool {
-        self.columns.iter().any(|c| c.primary_key)
+        self.columns
+            .iter()
+            .chain(&self.hidden_columns)
+            .any(|c| c.primary_key)
     }
 
     fn key(&self, r: usize) -> RowKey {
         let pk = self.has_primary_key();
+        let visible = self.columns.iter().zip(&self.rows[r]);
+        let hidden = self
+            .hidden_columns
+            .iter()
+            .zip(self.hidden_rows.get(r).into_iter().flatten());
         RowKey(
-            self.columns
-                .iter()
-                .zip(&self.rows[r])
+            visible
+                .chain(hidden)
                 .filter(|(col, _)| (!pk || col.primary_key) && !col.read_only)
                 .map(|(col, v)| (col.name.to_string(), v.as_ref().map(|s| s.to_string())))
                 .collect(),
@@ -445,25 +464,25 @@ impl GridModel {
         lines.join("\n")
     }
 
-    /// Columns and cell values with `hidden` names removed. Hiding every column keeps them all,
-    /// since the grid could not show anything to unhide.
+    /// Columns and cell values with `hidden` names removed. Hiding every column keeps them all.
     pub fn project(
         columns: &[GridColumn],
         rows: &[Vec<Cell>],
-        hidden: &std::collections::HashSet<String>,
+        hidden: &HashSet<String>,
     ) -> (Vec<GridColumn>, Vec<Vec<Cell>>) {
-        let keep: Vec<usize> = columns
-            .iter()
-            .enumerate()
-            .filter(|(_, c)| hidden.len() >= columns.len() || !hidden.contains(c.name.as_ref()))
-            .map(|(i, _)| i)
-            .collect();
-        let columns = keep.iter().map(|i| columns[*i].clone()).collect();
-        let rows = rows
-            .iter()
-            .map(|r| keep.iter().map(|i| r.get(*i).cloned().flatten()).collect())
-            .collect();
-        (columns, rows)
+        select_columns(columns, rows, |c| !hides(columns, hidden, c))
+    }
+
+    /// Keeps the `hidden` columns of the unprojected page, so rows are still located by them.
+    /// Call after `set_data` with the projection of the same page.
+    pub fn set_hidden_columns(
+        &mut self,
+        columns: &[GridColumn],
+        rows: &[Vec<Cell>],
+        hidden: &HashSet<String>,
+    ) {
+        (self.hidden_columns, self.hidden_rows) =
+            select_columns(columns, rows, |c| hides(columns, hidden, c));
     }
 
     /// Next cell at or after `from` whose text contains `query`. Wraps around the page.
@@ -605,6 +624,22 @@ fn permute_cells(row: &[Cell], order: &[usize]) -> Vec<Cell> {
 
 fn remap_col(old: usize, order: &[usize]) -> Option<usize> {
     order.iter().position(|&i| i == old)
+}
+
+/// Hiding every column hides none, since the grid could not show anything to unhide.
+fn hides(columns: &[GridColumn], hidden: &HashSet<String>, col: &GridColumn) -> bool {
+    hidden.len() < columns.len() && hidden.contains(col.name.as_ref())
+}
+
+fn select_columns(
+    columns: &[GridColumn],
+    rows: &[Vec<Cell>],
+    pick: impl Fn(&GridColumn) -> bool,
+) -> (Vec<GridColumn>, Vec<Vec<Cell>>) {
+    let ix: Vec<usize> = (0..columns.len()).filter(|&i| pick(&columns[i])).collect();
+    let columns = ix.iter().map(|&i| columns[i].clone()).collect();
+    let rows = rows.iter().map(|r| permute_cells(r, &ix)).collect();
+    (columns, rows)
 }
 
 /// Column order for one open grid. `home` is the order with freeze-induced moves undone.
@@ -927,6 +962,49 @@ mod tests {
         let (columns, _) =
             GridModel::project(&m.columns, &[], &["id".into(), "name".into()].into());
         assert_eq!(columns.len(), 2);
+    }
+
+    #[test]
+    fn hidden_columns_still_locate_rows() {
+        let v = |c: &str, s: &str| (c.to_string(), Some(s.to_string()));
+        let full = model(true);
+        let rows = vec![
+            vec![Some("1".into()), Some("a".into())],
+            vec![Some("2".into()), Some("a".into())],
+        ];
+        let hide = |pk: bool, rows: &[Vec<Cell>]| {
+            let mut columns = full.columns.clone();
+            columns[0].primary_key = pk;
+            let hidden: HashSet<String> = ["id".into()].into();
+            let (shown, shown_rows) = GridModel::project(&columns, rows, &hidden);
+            let mut m = GridModel::default();
+            m.set_data(shown, shown_rows);
+            m.set_hidden_columns(&columns, rows, &hidden);
+            m
+        };
+
+        // Hidden primary key: still the key, and the table still counts as keyed
+        let mut m = hide(true, &rows);
+        assert!(m.has_primary_key());
+        m.set_value(1, 0, Some("b".into()));
+        assert_eq!(m.change_set().updates[0].key, RowKey(vec![v("id", "2")]));
+
+        // No primary key: the hidden column stays in the whole-row key
+        let mut m = hide(false, &rows);
+        m.set_value(1, 0, Some("b".into()));
+        assert_eq!(
+            m.change_set().updates[0].key,
+            RowKey(vec![v("name", "a"), v("id", "2")])
+        );
+
+        // Deleting a row keeps the hidden values aligned with the remaining rows
+        let mut m = hide(true, &rows);
+        m.select((0, 0), false);
+        m.delete_selected_rows();
+        m.accept_committed();
+        m.select((0, 0), false);
+        m.delete_selected_rows();
+        assert_eq!(m.change_set().deletes, [RowKey(vec![v("id", "2")])]);
     }
 
     #[test]
