@@ -30,7 +30,7 @@ navidog 用 gpui-kit 0.7 复刻 Navicat Premium 17（macOS）。决策、架构�
 - 测试元素注册表只登记按钮、列表项等元素，普通容器的 id 用 `find` 找不到。
 - headless 测试中 `dispatch_action` 之前要先 `render_frame` 并聚焦目标元素；`RadioGroup` 的子项 id 是 `ElementId::Integer(序号)`。
 - 同一个 `update_window` 闭包里的 `notify` 要到闭包结束才生效。会改变界面的命令放在单独的 `update_window` 里派发，接着 `run_until_parked()`，然后再输入文字或按键。
-- 需要带修饰键的点击（⌘ 点按）时，用 `window.dispatch_event` 发送带 `modifiers` 的 `MouseDownEvent` / `MouseUpEvent`，示例见 `crates/navidog-navigator/tests/navigator.rs`。
+- 需要带修饰键的点击（⌘ 点按）时，用 `window.click_with_modifiers(id, Modifiers::command(), cx)`，示例见 `crates/navidog-navigator/tests/navigator.rs`。测试辅助 `click` 沿用窗口当前的修饰键，自己用 `window.dispatch_event` 发带 `modifiers` 的鼠标事件会让修饰键一直保持按下，之后的普通单击都变成 ⌘ 点按。换 gpui-kit 版本后要跑全量测试。
 
 ## 验证
 

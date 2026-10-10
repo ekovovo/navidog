@@ -3,9 +3,9 @@
 
 use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{
-    AppContext as _, Context, FocusHandle, InputEvent as _, InteractiveElement as _, IntoElement,
-    Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, ParentElement as _, Render, Styled as _,
-    TestAppContext, Window, WindowBounds, WindowOptions, div, point, size,
+    AppContext as _, Context, FocusHandle, InteractiveElement as _, IntoElement, Modifiers,
+    ParentElement as _, Render, Styled as _, TestAppContext, Window, WindowBounds, WindowOptions,
+    div, point, size,
 };
 use navidog_core::actions::{NewGroup, RenameGroup};
 use navidog_core::connection::Connection;
@@ -29,27 +29,6 @@ impl Render for Host {
                 .child(self.navigator.clone()),
         )
     }
-}
-
-fn cmd_click(window: &mut Window, id: &str, cx: &mut gpui_kit::App) {
-    let position = window.find(id.to_string()).bounds().center();
-    let modifiers = Modifiers::command();
-    let down = MouseDownEvent {
-        button: MouseButton::Left,
-        position,
-        modifiers,
-        click_count: 1,
-        first_mouse: false,
-    };
-    window.dispatch_event(down.to_platform_input(), cx);
-    let up = MouseUpEvent {
-        button: MouseButton::Left,
-        position,
-        modifiers,
-        click_count: 1,
-    };
-    window.dispatch_event(up.to_platform_input(), cx);
-    window.render_frame(cx);
 }
 
 #[gpui_kit::test]
@@ -142,7 +121,9 @@ fn multi_select_drag_and_rename(cx: &mut TestAppContext) {
 
     cx.update_window(handle, |_, window, cx| {
         window.click(row_a.clone(), cx);
-        cmd_click(window, &row_b, cx);
+        // Restores the previous modifiers, so later plain clicks are not ⌘-clicks
+        window.click_with_modifiers(row_b.clone(), Modifiers::command(), cx);
+        window.render_frame(cx);
     })
     .unwrap();
     assert_eq!(

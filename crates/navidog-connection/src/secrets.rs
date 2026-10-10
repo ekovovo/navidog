@@ -217,9 +217,11 @@ impl Render for AskPassword {
             .min_w_0()
             .gap(tokens::form::ROW_GAP.rems())
             .child(heading(title))
-            .children(self.inputs.iter().map(|(f, input)| {
-                FormRow::new(crate::secret_label(*f), field(input)).hug_label()
-            }))
+            .children(
+                self.inputs.iter().map(|(f, input)| {
+                    FormRow::new(crate::secret_label(*f), field(input)).hug_label()
+                }),
+            )
             .child(
                 FormRow::bare(
                     Checkbox::new("save")
