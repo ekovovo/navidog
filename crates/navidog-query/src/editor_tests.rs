@@ -261,7 +261,6 @@ fn runs_scripts_into_messages_summary_and_editable_results(cx: &mut TestAppConte
             Body::Explain(_)
         ));
     });
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[gpui_kit::test]
@@ -373,4 +372,121 @@ fn format_commands_undo_in_one_step_and_the_stack_cycles(cx: &mut TestAppContext
     assert_eq!(text(cx), format!("{original}one"));
     paste(cx);
     assert_eq!(text(cx), format!("{original}two"));
+}
+
+#[gpui_kit::test]
+fn saves_untitled_queries_reloads_outside_edits_and_recovers(cx: &mut TestAppContext) {
+    let home = std::env::temp_dir().join(format!("navidog-query-test-{}", std::process::id()));
+    std::fs::create_dir_all(&home).unwrap();
+    // SAFETY: every test of this binary sets the same value
+    unsafe { std::env::set_var("NAVIDOG_HOME", &home) };
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        navidog_core::init(cx);
+        navidog_ui::theme::init(cx);
+        navidog_db::init(cx);
+        navidog_grid::init(cx);
+        crate::init(cx);
+    });
+    let scope = navidog_core::object::Scope::new("save-test", "main", None);
+    let _ = navidog_core::queries::delete(&scope, "first");
+    navidog_core::queries::write(&scope, "taken", "SELECT 0").unwrap();
+    let (handle, editor) = cx.update(|cx| {
+        let mut editor = None;
+        let handle = gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+            let e = QueryEditor::new(
+                QuerySource::Untitled(1),
+                Target {
+                    connection: Some("save-test".into()),
+                    database: Some("main".into()),
+                    schema: None,
+                },
+                "SELECT 1".to_string(),
+                window,
+                cx,
+            );
+            editor = Some(e.clone());
+            cx.new(|_| Host { editor: e })
+        })
+        .unwrap();
+        (handle.0, editor.unwrap())
+    });
+    cx.update(|cx| editor.update(cx, |e, _| e.dirty = true));
+
+    // A taken name is refused; a free one saves and binds the tab to the query
+    let name_and_ok = |cx: &mut TestAppContext, name: &str| {
+        let name = name.to_string();
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            window.click("query-name-input", cx);
+            window.press("cmd-a", cx);
+            window.input(&name, cx);
+            window.click("query-name-ok", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+    };
+    cx.update_window(handle, |_, window, cx| {
+        editor.update(cx, |e, cx| e.save_query(false, window, cx))
+    })
+    .unwrap();
+    name_and_ok(cx, "taken");
+    assert!(
+        cx.update(|cx| editor.read(cx).dirty),
+        "a taken name does not save"
+    );
+    name_and_ok(cx, "first");
+    assert_eq!(
+        navidog_core::queries::read(&scope, "first").unwrap(),
+        "SELECT 1"
+    );
+    cx.update(|cx| {
+        let e = editor.read(cx);
+        assert!(!e.dirty);
+        assert!(matches!(&e.source, QuerySource::Saved(o) if o.name == "first"));
+    });
+
+    // An edit made outside is offered for reload when the tab is activated
+    std::thread::sleep(Duration::from_millis(1100));
+    navidog_core::queries::write(&scope, "first", "SELECT 2").unwrap();
+    cx.update_window(handle, |_, window, cx| {
+        editor.update(cx, |e, cx| e.check_external_change(window, cx));
+    })
+    .unwrap();
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.press("enter", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert_eq!(cx.update(|cx| editor.read(cx).text(cx)), "SELECT 2");
+
+    // A crash leftover comes back through the dialog with its text, unsaved
+    crate::recovery::write(&crate::recovery::Autosave {
+        id: "crashed".into(),
+        title: "Untitled 9".into(),
+        source: QuerySource::Untitled(9),
+        target: Target::default(),
+        text: "SELECT 'lost'".into(),
+        saved_at: "2026-10-11 00:00:00".into(),
+        on_quit: false,
+    });
+    let recovered: std::rc::Rc<std::cell::RefCell<Vec<Entity<QueryEditor>>>> = Default::default();
+    let sink = recovered.clone();
+    cx.update_window(handle, |_, window, cx| {
+        crate::recovery::check(window, cx, move |e, _, _| sink.borrow_mut().push(e));
+        window.render_frame(cx);
+        window.click("recover-ok", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    let recovered = recovered.borrow();
+    let back = recovered
+        .iter()
+        .find(|e| cx.update(|cx| e.read(cx).id == "crashed"))
+        .expect("recovered");
+    cx.update(|cx| {
+        assert_eq!(back.read(cx).text(cx), "SELECT 'lost'");
+        assert!(back.read(cx).dirty);
+    });
 }

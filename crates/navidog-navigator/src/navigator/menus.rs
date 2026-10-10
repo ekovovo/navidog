@@ -175,7 +175,7 @@ impl NavigatorPanel {
                         Box::new(Refresh),
                     )
                     .separator()
-                    .menu_with_disabled(t!("nav.new_query").to_string(), true, Box::new(Refresh))
+                    .menu(t!("nav.new_query").to_string(), Box::new(NewQuery))
                     .menu_with_disabled(t!("nav.run_sql_file").to_string(), true, Box::new(Refresh))
                     .menu_with_disabled(
                         t!("nav.dump_sql_file").to_string(),
@@ -183,17 +183,19 @@ impl NavigatorPanel {
                         Box::new(Refresh),
                     ),
             ),
-            Some(Node::Schema(_)) => refresh(NativeMenu::new().menu_with_disabled(
-                t!("nav.new_query").to_string(),
-                true,
-                Box::new(Refresh),
-            )),
+            Some(Node::Schema(_)) => {
+                refresh(NativeMenu::new().menu(t!("nav.new_query").to_string(), Box::new(NewQuery)))
+            }
             Some(Node::Category(_, k)) => refresh(
                 NativeMenu::new()
                     .menu_with_disabled(
                         t!("obj.new_object", kind = kind_label(*k)).to_string(),
-                        true,
-                        Box::new(Refresh),
+                        *k != ObjectKind::Query,
+                        if *k == ObjectKind::Query {
+                            Box::new(NewQuery)
+                        } else {
+                            Box::new(Refresh)
+                        },
                     )
                     .separator()
                     .submenu(
@@ -222,8 +224,46 @@ impl NavigatorPanel {
         }
     }
 
+    /// Context menu of a saved query (30 §7).
+    fn query_menu(o: &ObjectRef) -> NativeMenu {
+        let kind = kind_label(o.kind);
+        NativeMenu::new()
+            .menu(
+                t!("obj.open_kind", kind = kind).to_string(),
+                Box::new(RunQuery { object: o.clone() }),
+            )
+            .menu(
+                t!("obj.design_kind", kind = kind).to_string(),
+                Box::new(OpenObject { object: o.clone() }),
+            )
+            .menu(
+                t!("obj.new_object", kind = kind).to_string(),
+                Box::new(NewQuery),
+            )
+            .menu(
+                t!("obj.delete_kind", kind = kind).to_string(),
+                Box::new(DeleteObjects),
+            )
+            .menu(t!("obj.rename").to_string(), Box::new(RenameObject))
+            .menu(
+                t!("obj.duplicate_query").to_string(),
+                Box::new(DuplicateQuery),
+            )
+            .separator()
+            .menu(
+                t!("obj.open_external").to_string(),
+                Box::new(OpenQueryExternally),
+            )
+            .menu(t!("obj.reveal").to_string(), Box::new(RevealQuery))
+            .separator()
+            .menu(t!("obj.copy_name").to_string(), Box::new(CopyObjectNames))
+    }
+
     /// Context menu of an object, shared with the objects tab.
     pub(crate) fn object_menu(o: &ObjectRef, cx: &App) -> NativeMenu {
+        if o.kind == ObjectKind::Query {
+            return Self::query_menu(o);
+        }
         let d = Sessions::global(cx).read(cx).dialect(&o.scope.connection);
         let kind = kind_label(o.kind);
         let droppable = d.and_then(|d| d.drop_keyword(o.kind)).is_some();

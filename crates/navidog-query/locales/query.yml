@@ -318,3 +318,30 @@ query:
   find_bad_regex:
     en: Invalid regular expression
     zh-CN: 正则表达式无效
+  query_name:
+    en: Query Name
+    zh-CN: 查询名称
+  name_invalid:
+    en: The query name is invalid or already exists.
+    zh-CN: 查询名称无效或已存在。
+  save_failed:
+    en: The query could not be saved.
+    zh-CN: 无法保存查询。
+  changed_outside:
+    en: The query "%{name}" has been modified externally. Do you want to reload it?
+    zh-CN: 查询“%{name}”已在外部修改。是否重新加载？
+  reload:
+    en: Reload
+    zh-CN: 重新加载
+  recover_title:
+    en: Autosaved files were found. Do you want to recover them?
+    zh-CN: 找到自动保存的文件。你要将它们恢复吗？
+  recover_time:
+    en: Saved Time
+    zh-CN: 保存时间
+  recover_name:
+    en: Name
+    zh-CN: 名称
+  deselect_all:
+    en: Deselect All
+    zh-CN: 取消全选

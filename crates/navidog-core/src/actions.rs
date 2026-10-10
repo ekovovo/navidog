@@ -35,7 +35,36 @@ gpui_kit::actions!(navidog, [ToggleFocusMode]);
 
 // Query editor, history log and console (30-query-editor.md, 31-query-results.md). New queries
 // take their connection, database and schema from the workspace selection.
-gpui_kit::actions!(query, [NewQuery, OpenHistoryLog, OpenConsole, ShowSnippets]);
+gpui_kit::actions!(
+    query,
+    [
+        NewQuery,
+        OpenHistoryLog,
+        OpenConsole,
+        ShowSnippets,
+        // File > Open External File > Query…
+        OpenExternalQuery,
+        // Saved queries selected in the navigator or objects tab
+        DuplicateQuery,
+        OpenQueryExternally,
+        RevealQuery,
+    ]
+);
+
+/// "Open Query": opens a saved query and runs it.
+#[derive(Clone, PartialEq, Debug, Action)]
+#[action(namespace = query, no_json)]
+pub struct RunQuery {
+    pub object: ObjectRef,
+}
+
+/// A saved query file was renamed; open editors follow it.
+#[derive(Clone, PartialEq, Debug, Action)]
+#[action(namespace = query, no_json)]
+pub struct QueryRenamed {
+    pub from: ObjectRef,
+    pub to: ObjectRef,
+}
 
 /// Opens a connection by ID, asking for its password if needed (a query editor picking a closed
 /// connection).

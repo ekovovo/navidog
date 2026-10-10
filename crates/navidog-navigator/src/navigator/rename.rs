@@ -78,11 +78,12 @@ impl NavigatorPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let renamable = Sessions::global(cx)
-            .read(cx)
-            .dialect(&obj.scope.connection)
-            .and_then(|d| d.rename_object(&obj.scope, obj.kind, &obj.name, &obj.name))
-            .is_some();
+        let renamable = obj.kind == ObjectKind::Query
+            || Sessions::global(cx)
+                .read(cx)
+                .dialect(&obj.scope.connection)
+                .and_then(|d| d.rename_object(&obj.scope, obj.kind, &obj.name, &obj.name))
+                .is_some();
         if renamable {
             let name = obj.name.clone();
             self.start_rename_target(RenameTarget::Object(obj), name, window, cx);
@@ -142,6 +143,9 @@ impl NavigatorPanel {
             }
             RenameTarget::VGroup(g) => {
                 VirtualGroups::global(cx).update(cx, |s, cx| s.rename_group(&g, name, cx))
+            }
+            RenameTarget::Object(o) if o.kind == ObjectKind::Query && o.name != name => {
+                crate::ops::rename_query(o, name, window, cx);
             }
             RenameTarget::Object(o) if o.name != name => {
                 let sql = Sessions::global(cx)

@@ -15,8 +15,8 @@ use gpui_kit::{
     Render, Styled as _, Subscription, Window, div,
 };
 use navidog_core::actions::{
-    InsertText, NewQuery, OpenConnection, OpenObject, ToggleFocusMode, ToggleHideObjectGroups,
-    ToggleOnlyActive, ToggleShowHidden, ToggleShowTableProfile,
+    InsertText, NewQuery, OpenConnection, OpenExternalQuery, OpenObject, RunQuery, ToggleFocusMode,
+    ToggleHideObjectGroups, ToggleOnlyActive, ToggleShowHidden, ToggleShowTableProfile,
 };
 use navidog_core::favorites::Favorites;
 use navidog_core::object::{ObjectKind, ObjectRef};
@@ -209,6 +209,16 @@ impl MainWindow {
             focus_mode: None,
             _subscriptions: subs,
         }
+    }
+
+    /// Auto recovery (F-APP-016): offers editors left unsaved by a crash.
+    pub fn check_recovery(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let main = cx.entity().downgrade();
+        navidog_query::check_recovery(window, cx, move |editor, window, cx| {
+            let _ = main.update(cx, |this, cx| {
+                this.add_editor(panel_handle(editor), window, cx)
+            });
+        });
     }
 
     /// Startup screen (F-APP-012): reopens the configured tabs, connecting as needed.
@@ -606,6 +616,33 @@ impl Render for MainWindow {
             .on_action(cx.listener(|this, _: &NewQuery, window, cx| {
                 let editor = navidog_query::QueryEditor::untitled(window, cx);
                 this.add_editor(panel_handle(editor), window, cx);
+            }))
+            .on_action(cx.listener(|this, a: &RunQuery, window, cx| {
+                this.open_object(&a.object, window, cx);
+                if let Some(editor) = navidog_query::editor_for(&a.object, cx) {
+                    editor.update(cx, |e, cx| e.run_all(window, cx));
+                }
+            }))
+            .on_action(cx.listener(|_, _: &OpenExternalQuery, window, cx| {
+                let picked = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
+                    files: true,
+                    directories: false,
+                    multiple: true,
+                    prompt: None,
+                });
+                cx.spawn_in(window, async move |this, cx| {
+                    let Ok(Ok(Some(paths))) = picked.await else {
+                        return;
+                    };
+                    let _ = this.update_in(cx, |this, window, cx| {
+                        for path in paths {
+                            let editor =
+                                navidog_query::QueryEditor::open_external(path, window, cx);
+                            this.add_editor(panel_handle(editor), window, cx);
+                        }
+                    });
+                })
+                .detach();
             }))
             .on_action(|a: &InsertText, window, cx| {
                 if let Some(editor) = navidog_query::active_editor(cx) {

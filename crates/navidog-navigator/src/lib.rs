@@ -60,7 +60,11 @@ fn category_scope(cx: &App) -> Option<navidog_core::object::Scope> {
 }
 
 /// A category button is enabled when there is a scope and its dialect supports the category.
+/// Saved queries exist in every scope.
 fn category_enabled(cx: &App, kind: ObjectKind) -> bool {
+    if kind == ObjectKind::Query {
+        return category_scope(cx).is_some();
+    }
     category_scope(cx)
         .and_then(|s| {
             navidog_db::sessions::Sessions::global(cx)
@@ -79,7 +83,7 @@ fn register_commands(cx: &mut App) {
         fn() -> Box<dyn Action>,
         fn(&App) -> bool,
     );
-    let commands: [Entry; 3] = [
+    let commands: [Entry; 4] = [
         (
             "objects.tables",
             "kind.table",
@@ -112,6 +116,17 @@ fn register_commands(cx: &mut App) {
                 })
             },
             |cx| category_enabled(cx, ObjectKind::Function),
+        ),
+        (
+            "objects.queries",
+            "kind.query",
+            "icons/file-code.svg",
+            || {
+                Box::new(ShowCategory {
+                    kind: "query".into(),
+                })
+            },
+            |cx| category_enabled(cx, ObjectKind::Query),
         ),
     ];
     for (id, title, icon, action, enabled) in commands {

@@ -4,8 +4,8 @@ use gpui_kit::base::input::{Copy, Cut, Paste, Redo, SelectAll, Undo};
 use gpui_kit::{App, KeyBinding, Menu, MenuItem, OsAction, SystemMenuType};
 use navidog_core::actions::{
     CloseConnection, ManageConnections, NewConnection, NewConnectionOf, NewGroup, NewQuery,
-    OpenConsole, OpenHistoryLog, Refresh, ToggleFocusMode, ToggleHideObjectGroups,
-    ToggleOnlyActive, ToggleShowHidden, ToggleShowTableProfile,
+    OpenConsole, OpenExternalQuery, OpenHistoryLog, Refresh, ToggleFocusMode,
+    ToggleHideObjectGroups, ToggleOnlyActive, ToggleShowHidden, ToggleShowTableProfile,
 };
 use navidog_core::favorites::Favorites;
 use navidog_core::settings::{ResultsPosition, Settings, ShowAfterRun};
@@ -155,8 +155,22 @@ pub fn set_menus(cx: &mut App) {
                 MenuItem::separator(),
                 MenuItem::action(t!("menu.group").to_string(), NewGroup),
             ])),
+            MenuItem::submenu(Menu::new(t!("menu.open_external").to_string()).items([
+                MenuItem::action(
+                    t!("menu.open_external_query").to_string(),
+                    OpenExternalQuery,
+                ),
+            ])),
             MenuItem::submenu(recent_menu(cx)),
             MenuItem::action(t!("menu.open_uri").to_string(), OpenUri),
+            MenuItem::separator(),
+            MenuItem::action(t!("menu.save").to_string(), query::SaveQuery),
+            MenuItem::action(t!("menu.save_as").to_string(), query::SaveQueryAs),
+            MenuItem::action(
+                t!("menu.save_as_external").to_string(),
+                query::SaveAsExternal,
+            ),
+            MenuItem::action(t!("menu.save_as_navicat").to_string(), query::SaveAsNavicat),
             MenuItem::separator(),
             MenuItem::action(t!("menu.manage_connections").to_string(), ManageConnections),
             MenuItem::separator(),

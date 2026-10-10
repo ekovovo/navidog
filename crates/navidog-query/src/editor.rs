@@ -103,6 +103,8 @@ pub(crate) fn init(cx: &mut App) {
         KeyBinding::new("shift-cmd-g", FindPrevious, Some(IN_EDITOR)),
         KeyBinding::new("cmd-/", ToggleComment, Some(IN_EDITOR)),
         KeyBinding::new("shift-cmd-v", PasteFromStack, Some(IN_EDITOR)),
+        KeyBinding::new("cmd-s", crate::save::SaveQuery, Some(CONTEXT)),
+        KeyBinding::new("shift-cmd-s", crate::save::SaveQueryAs, Some(CONTEXT)),
         KeyBinding::new("cmd-=", ZoomIn, Some(CONTEXT)),
         KeyBinding::new("cmd-+", ZoomIn, Some(CONTEXT)),
         KeyBinding::new("cmd--", ZoomOut, Some(CONTEXT)),
@@ -176,6 +178,8 @@ pub struct QueryEditor {
     pub(crate) editor: Entity<EditorState>,
     /// Changed since it was opened or saved
     pub(crate) dirty: bool,
+    /// Modification time of the file when it was loaded or saved, to notice outside edits
+    pub(crate) file_mtime: Option<std::time::SystemTime>,
     /// PostgreSQL schemas of the picked database
     pub(crate) schemas: Vec<String>,
     pub(crate) live: Option<Live>,
@@ -368,6 +372,7 @@ impl QueryEditor {
                 id,
                 source,
                 target,
+                file_mtime: None,
                 editor,
                 dirty: false,
                 schemas: Vec::new(),
@@ -390,8 +395,50 @@ impl QueryEditor {
                 _subscriptions: subs,
             }
         });
-        this.update(cx, |this, cx| this.load_schemas(cx));
+        this.update(cx, |this, cx| {
+            this.file_mtime = this
+                .file_path()
+                .and_then(|p| navidog_core::queries::modified(&p));
+            this.load_schemas(cx);
+        });
+        crate::save::register(this.downgrade(), cx);
         this
+    }
+
+    /// An editor brought back from an autosave: its text is unsaved.
+    pub(crate) fn restored(
+        id: String,
+        source: QuerySource,
+        target: Target,
+        text: String,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Entity<Self> {
+        let editor = Self::with_id(id, source, target, text, window, cx);
+        editor.update(cx, |e, _| e.dirty = true);
+        editor
+    }
+
+    /// File > Open External File > Query…: any `.sql` file, saved back in place.
+    pub fn open_external(
+        path: std::path::PathBuf,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Entity<Self> {
+        let text = std::fs::read_to_string(&path).unwrap_or_default();
+        let selection = Workspace::global(cx).read(cx).selection().clone();
+        let scope = selection.scope();
+        let target = Target {
+            connection: selection.connection_id().cloned(),
+            database: scope.as_ref().map(|s| s.database.clone()),
+            schema: scope.and_then(|s| s.schema),
+        };
+        Self::new(QuerySource::External(path), target, text, window, cx)
+    }
+
+    /// Runs everything (the navigator's "Open Query").
+    pub fn run_all(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.run(RunKind::All, window, cx);
     }
 
     /// A new untitled query at the workspace selection (⌘Y, toolbar "New Query").
@@ -670,7 +717,10 @@ impl QueryEditor {
                                 .label(t!("query.dont_save").to_string())
                                 .on_click(move |_, window, cx| {
                                     window.close_dialog(cx);
-                                    discard.update(cx, |e, cx| e.close_now(window, cx));
+                                    discard.update(cx, |e, cx| {
+                                        crate::recovery::forget(&e.id);
+                                        e.close_now(window, cx)
+                                    });
                                 }),
                         )
                         .child(
@@ -686,35 +736,12 @@ impl QueryEditor {
         });
     }
 
+    /// Saving an untitled query asks for a name first; the tab stays until it is saved.
     fn save_and_close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        // Saving an untitled query asks for a name first; the tab stays until it is saved
-        if self.save(window, cx) {
-            self.close_now(window, cx);
-        }
+        self.save_query(true, window, cx);
     }
 
-    /// Saves to the query's file. Untitled queries are not handled yet; returns whether it saved.
-    pub(crate) fn save(&mut self, _: &mut Window, cx: &mut Context<Self>) -> bool {
-        let text = self.text(cx);
-        let result = match &self.source {
-            QuerySource::Saved(o) => navidog_core::queries::write(&o.scope, &o.name, &text),
-            QuerySource::External(path) => navidog_core::paths::write_atomic(path, text.as_bytes()),
-            QuerySource::Untitled(_) => return false,
-        };
-        match result {
-            Ok(()) => {
-                self.dirty = false;
-                cx.notify();
-                true
-            }
-            Err(e) => {
-                tracing::error!("saving the query failed: {e}");
-                false
-            }
-        }
-    }
-
-    fn close_now(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn close_now(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.close_approved = true;
         let close = tabs::CloseTabs {
             panel: Some(PanelId::from(cx.entity_id())),
@@ -722,8 +749,6 @@ impl QueryEditor {
         };
         window.dispatch_action(Box::new(close), cx);
     }
-
-    fn check_external_change(&mut self, _: &mut Window, _: &mut Context<Self>) {}
 
     /// The editor font size: zoom, else the preferences, else the token.
     fn font_pt(&self, cx: &App) -> f32 {
@@ -1201,6 +1226,27 @@ impl Render for QueryEditor {
                     Settings::update(cx, |s| s.show_profile = !s.show_profile);
                 }
             }))
+            .on_action(cx.listener(|this, _: &crate::save::SaveQuery, window, cx| {
+                this.save_query(false, window, cx)
+            }))
+            .on_action(
+                cx.listener(|this, _: &crate::save::SaveQueryAs, window, cx| {
+                    this.save_query_as(window, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &crate::save::SaveAsExternal, window, cx| {
+                    let rebind = matches!(this.source, QuerySource::Untitled(_));
+                    this.save_as_external(rebind, false, window, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &crate::save::SaveAsNavicat, window, cx| {
+                    if let Some(scope) = this.target.scope() {
+                        this.save_as_navicat(scope, false, window, cx);
+                    }
+                }),
+            )
             .on_action(cx.listener(|this, _: &navidog_grid::ShowFind, window, cx| {
                 this.open_find(false, window, cx)
             }))

@@ -17,7 +17,7 @@ use gpui_kit::{
     Styled as _, Subscription, UniformListScrollHandle, WeakEntity, Window, div, img, uniform_list,
 };
 use navidog_core::actions::{
-    DeleteObjects, EmptyTables, OpenConnection, OpenObject, TruncateTables,
+    DeleteObjects, EmptyTables, NewQuery, OpenConnection, OpenObject, RunQuery, TruncateTables,
 };
 use navidog_core::object::{ObjectKind, ObjectRef, Scope};
 use navidog_core::settings::Settings;
@@ -185,7 +185,9 @@ impl ObjectsPanel {
                     cx.notify();
                 }),
                 cx.subscribe(&Workspace::global(cx), |_, _, e: &WorkspaceEvent, cx| {
-                    let WorkspaceEvent::SelectionChanged = e;
+                    if !matches!(e, WorkspaceEvent::SelectionChanged) {
+                        return;
+                    }
                     Self::ensure_loaded(cx);
                     cx.notify();
                 }),
@@ -435,9 +437,11 @@ impl ObjectsPanel {
             listed.and_then(|(s, _)| Sessions::global(cx).read(cx).dialect(&s.connection));
         let kind = listed.map(|(_, k)| *k);
         let is_table = kind == Some(ObjectKind::Table);
-        let droppable = kind
-            .zip(dialect)
-            .is_some_and(|(k, d)| d.drop_keyword(k).is_some());
+        let is_query = kind == Some(ObjectKind::Query);
+        let droppable = is_query
+            || kind
+                .zip(dialect)
+                .is_some_and(|(k, d)| d.drop_keyword(k).is_some());
         let button = |id: &'static str, icon: &'static str, label: String| {
             Button::new(id)
                 .ghost()
@@ -457,12 +461,29 @@ impl ObjectsPanel {
                     .disabled(selected.is_none())
                     .on_click(cx.listener(|_, _, window, cx| {
                         if let Some(object) = Self::selected_object(cx) {
+                            // "Open Query" opens and runs it (30 §7)
+                            if object.kind == ObjectKind::Query {
+                                window.dispatch_action(Box::new(RunQuery { object }), cx);
+                            } else {
+                                window.dispatch_action(Box::new(OpenObject { object }), cx);
+                            }
+                        }
+                    })),
+            )
+            .child(
+                button("obj-design", "pencil", t!("obj.design").to_string())
+                    .disabled(!is_query || selected.is_none())
+                    .on_click(cx.listener(|_, _, window, cx| {
+                        if let Some(object) = Self::selected_object(cx) {
                             window.dispatch_action(Box::new(OpenObject { object }), cx);
                         }
                     })),
             )
-            .child(button("obj-design", "pencil", t!("obj.design").to_string()).disabled(true))
-            .child(button("obj-new", "plus", t!("obj.new").to_string()).disabled(true))
+            .child(
+                button("obj-new", "plus", t!("obj.new").to_string())
+                    .disabled(!is_query)
+                    .on_click(|_, window, cx| window.dispatch_action(Box::new(NewQuery), cx)),
+            )
             .child(
                 button("obj-delete", "trash", t!("obj.delete").to_string())
                     .disabled(selected.is_none() || !droppable)

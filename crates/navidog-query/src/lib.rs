@@ -12,8 +12,10 @@ mod explain_visual;
 mod find;
 mod format;
 mod params;
+mod recovery;
 mod results;
 mod run;
+mod save;
 mod snippet;
 
 #[cfg(test)]
@@ -26,6 +28,11 @@ pub use format::{
     ToggleComment, UncommentLines, UpperCase,
 };
 
+pub use recovery::{check as check_recovery, flush_on_quit};
+pub use save::{SaveAsExternal, SaveAsNavicat, SaveQuery, SaveQueryAs, editor_for};
+
 pub fn init(cx: &mut gpui_kit::App) {
     editor::init(cx);
+    save::init(cx);
+    recovery::init(cx);
 }

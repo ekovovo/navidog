@@ -6,8 +6,12 @@ use std::collections::HashSet;
 
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::{App, InteractiveElement, Window};
-use navidog_core::actions::{DeleteObjects, DuplicateTable, EmptyTables, TruncateTables};
+use navidog_core::actions::{
+    DeleteObjects, DuplicateQuery, DuplicateTable, EmptyTables, OpenQueryExternally, QueryRenamed,
+    RevealQuery, TruncateTables,
+};
 use navidog_core::object::{ObjectKind, ObjectRef};
+use navidog_core::queries;
 use navidog_core::workspace::{Selection, Workspace};
 use navidog_db::DbError;
 use navidog_db::dialect::Dialect;
@@ -37,6 +41,87 @@ pub(crate) fn bind<E: InteractiveElement>(el: E) -> E {
         .on_action(|_: &EmptyTables, window, cx| empty(false, window, cx))
         .on_action(|_: &TruncateTables, window, cx| empty(true, window, cx))
         .on_action(|a: &DuplicateTable, window, cx| duplicate(a.with_data, window, cx))
+        .on_action(|_: &DuplicateQuery, window, cx| duplicate_query(window, cx))
+        .on_action(|_: &OpenQueryExternally, _, cx| {
+            for o in selected_queries(cx) {
+                cx.open_with_system(&queries::path(&o.scope, &o.name));
+            }
+        })
+        .on_action(|_: &RevealQuery, _, cx| {
+            if let Some(o) = selected_queries(cx).first() {
+                cx.reveal_path(&queries::path(&o.scope, &o.name));
+            }
+        })
+}
+
+fn selected_queries(cx: &App) -> Vec<ObjectRef> {
+    selected_objects(cx)
+        .into_iter()
+        .filter(|o| o.kind == ObjectKind::Query)
+        .collect()
+}
+
+/// Deleting saved queries deletes their files, after confirming.
+fn delete_queries(list: Vec<ObjectRef>, window: &mut Window, cx: &mut App) {
+    let message = match list.as_slice() {
+        [] => return,
+        [o] => t!("obj.confirm_drop", kind = kind_label(o.kind), name = o.name),
+        _ => t!("obj.confirm_drop_many", n = list.len()),
+    }
+    .to_string();
+    window.open_alert_dialog(cx, move |alert, _, _| {
+        let list = list.clone();
+        alert
+            .icon(lucide("triangle-alert"))
+            .title(message.clone())
+            .show_cancel(true)
+            .ok_text(t!("obj.ok").to_string())
+            .cancel_text(t!("obj.cancel").to_string())
+            .on_ok(move |_, window, cx| {
+                let failed = list
+                    .iter()
+                    .find_map(|o| queries::delete(&o.scope, &o.name).err());
+                Workspace::global(cx).update(cx, |w, cx| w.queries_changed(cx));
+                if let Some(e) = failed {
+                    show_error(e.to_string(), window, cx);
+                }
+                true
+            })
+    });
+}
+
+/// Renames a saved query's file; open editors follow through `QueryRenamed`.
+pub(crate) fn rename_query(o: ObjectRef, name: String, window: &mut Window, cx: &mut App) {
+    if !queries::name_ok(&o.scope, &name, Some(&o.name)) {
+        show_error(t!("obj.query_name_invalid").to_string(), window, cx);
+        return;
+    }
+    if let Err(e) = queries::rename(&o.scope, &o.name, &name) {
+        show_error(e.to_string(), window, cx);
+        return;
+    }
+    let to = ObjectRef { name, ..o.clone() };
+    Workspace::global(cx).update(cx, |w, cx| {
+        w.queries_changed(cx);
+        w.select(Selection::Object(to.clone()), cx);
+    });
+    window.dispatch_action(Box::new(QueryRenamed { from: o, to }), cx);
+}
+
+fn duplicate_query(window: &mut Window, cx: &mut App) {
+    let Some(o) = selected_queries(cx).into_iter().next() else {
+        return;
+    };
+    match queries::duplicate(&o.scope, &o.name) {
+        Ok(copy) => {
+            let copy = ObjectRef { name: copy, ..o };
+            Workspace::global(cx).update(cx, |w, cx| {
+                w.queries_changed(cx);
+                w.select(Selection::Object(copy), cx);
+            });
+        }
+        Err(e) => show_error(e.to_string(), window, cx),
+    }
 }
 
 fn kind_label(kind: ObjectKind) -> String {
@@ -44,7 +129,14 @@ fn kind_label(kind: ObjectKind) -> String {
 }
 
 fn delete(window: &mut Window, cx: &mut App) {
-    let stmts: Vec<(ObjectRef, String)> = selected_objects(cx)
+    let (files, objects): (Vec<ObjectRef>, Vec<ObjectRef>) = selected_objects(cx)
+        .into_iter()
+        .partition(|o| o.kind == ObjectKind::Query);
+    if !files.is_empty() {
+        delete_queries(files, window, cx);
+        return;
+    }
+    let stmts: Vec<(ObjectRef, String)> = objects
         .into_iter()
         .filter_map(|o| {
             let d = dialect(&o, cx)?;

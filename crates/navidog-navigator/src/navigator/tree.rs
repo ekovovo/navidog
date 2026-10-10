@@ -208,9 +208,11 @@ impl TreeBuilder<'_> {
         if !self.show_objects {
             return Vec::new();
         }
+        // Every database (PostgreSQL: every schema) also lists its saved queries
         dialect
             .object_kinds()
             .iter()
+            .chain([&ObjectKind::Query])
             .filter_map(|&kind| {
                 let node = Node::Category(scope.clone(), kind);
                 let children = match self.catalog.objects(scope, kind) {

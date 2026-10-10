@@ -42,6 +42,8 @@ impl Selection {
 
 pub enum WorkspaceEvent {
     SelectionChanged,
+    /// Saved query files were written, renamed or deleted; lists of them reload
+    QueriesChanged,
 }
 
 #[derive(Default)]
@@ -91,6 +93,10 @@ impl Workspace {
             cx.emit(WorkspaceEvent::SelectionChanged);
             cx.notify();
         }
+    }
+
+    pub fn queries_changed(&mut self, cx: &mut Context<Self>) {
+        cx.emit(WorkspaceEvent::QueriesChanged);
     }
 
     pub fn status(&self) -> &SharedString {

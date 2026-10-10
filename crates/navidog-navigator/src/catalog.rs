@@ -148,6 +148,16 @@ impl Catalog {
         force: bool,
         cx: &mut Context<Self>,
     ) {
+        // Saved queries are files in the profile folder: listed here, never by the driver
+        if kind == ObjectKind::Query {
+            let key = (scope.clone(), kind);
+            if force || !self.objects.contains_key(&key) {
+                self.objects.insert(key, Load::Ready(query_infos(scope)));
+                self.bump();
+                cx.notify();
+            }
+            return;
+        }
         let s = scope.clone();
         let job = move |cx: &App| {
             let (conn, db) = (s.connection.clone(), s.database.clone());
@@ -246,8 +256,46 @@ impl Catalog {
     }
 }
 
+/// Saved queries of a scope as object rows: name, modification date and size (30 §7).
+fn query_infos(scope: &Scope) -> Vec<ObjectInfo> {
+    navidog_core::queries::list(scope)
+        .into_iter()
+        .map(|q| {
+            let mut properties = Vec::new();
+            if let Some(t) = q.modified {
+                let t: chrono::DateTime<chrono::Local> = t.into();
+                properties.push(("modified".into(), t.format("%Y-%m-%d %H:%M:%S").to_string()));
+            }
+            properties.push(("data_length".into(), q.size.to_string()));
+            ObjectInfo {
+                name: q.name,
+                kind: ObjectKind::Query,
+                comment: None,
+                properties,
+            }
+        })
+        .collect()
+}
+
 pub(crate) fn init(cx: &mut App) {
     let catalog = cx.new(|cx: &mut Context<Catalog>| {
+        cx.subscribe(
+            &navidog_core::workspace::Workspace::global(cx),
+            |this, _, e: &navidog_core::workspace::WorkspaceEvent, cx| {
+                if matches!(e, navidog_core::workspace::WorkspaceEvent::QueriesChanged) {
+                    let scopes: Vec<Scope> = this
+                        .objects
+                        .keys()
+                        .filter(|(_, k)| *k == ObjectKind::Query)
+                        .map(|(s, _)| s.clone())
+                        .collect();
+                    for scope in scopes {
+                        this.ensure_objects(&scope, ObjectKind::Query, true, cx);
+                    }
+                }
+            },
+        )
+        .detach();
         cx.subscribe(&Sessions::global(cx), |this, _, e: &SessionsEvent, cx| {
             if let SessionsEvent::Closed(id)
             | SessionsEvent::Reopening(id)

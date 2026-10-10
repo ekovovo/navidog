@@ -525,7 +525,9 @@ impl NavigatorPanel {
                 // Do not copy TreeState's index back: its notify can arrive late and
                 // would replace a newer click with the previous row.
                 cx.subscribe(&Workspace::global(cx), |this, _, e: &WorkspaceEvent, cx| {
-                    let WorkspaceEvent::SelectionChanged = e;
+                    if !matches!(e, WorkspaceEvent::SelectionChanged) {
+                        return;
+                    }
                     this.marked = Self::selected_ids(cx).into_iter().collect();
                     // A selection made elsewhere (objects tab, editor tab) starts a new range
                     let anchor = this

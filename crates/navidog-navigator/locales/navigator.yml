@@ -175,7 +175,22 @@ kind:
   sequence:
     en: Sequences
     zh-CN: 序列
+  query:
+    en: Queries
+    zh-CN: 查询
 obj:
+  duplicate_query:
+    en: Duplicate Query
+    zh-CN: 复制查询
+  open_external:
+    en: Open with External Editor
+    zh-CN: 使用外部编辑器打开
+  reveal:
+    en: Show in Finder
+    zh-CN: 在 Finder 中显示
+  query_name_invalid:
+    en: The query name is invalid or already exists.
+    zh-CN: 查询名称无效或已存在。
   objects_tab:
     en: Objects
     zh-CN: 对象
