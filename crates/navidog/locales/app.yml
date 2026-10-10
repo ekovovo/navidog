@@ -150,6 +150,60 @@ menu:
   new_query:
     en: Query
     zh-CN: 查询
+  paste_from_stack:
+    en: Paste from Clipboard Stack
+    zh-CN: 从剪贴板堆栈粘贴
+  find_previous:
+    en: Find Previous
+    zh-CN: 查找上一个
+  code_completion:
+    en: Code Completion
+    zh-CN: 代码补全
+  update_outline:
+    en: Update Code Completion Info
+    zh-CN: 更新代码补全的信息
+  format:
+    en: Format
+    zh-CN: 格式
+  indent:
+    en: Indent
+    zh-CN: 缩排
+  indent_more:
+    en: Increase Indent
+    zh-CN: 增加缩排
+  indent_less:
+    en: Decrease Indent
+    zh-CN: 减少缩排
+  comment:
+    en: Comment
+    zh-CN: 注释
+  comment_lines:
+    en: Comment Lines
+    zh-CN: 注释行
+  uncomment_lines:
+    en: Uncomment Lines
+    zh-CN: 取消注释行
+  toggle_comment:
+    en: Toggle Comment
+    zh-CN: 切换注释
+  convert_case:
+    en: Convert Case
+    zh-CN: 转换大小写
+  upper_case:
+    en: Upper Case
+    zh-CN: 大写
+  lower_case:
+    en: Lower Case
+    zh-CN: 小写
+  beautify:
+    en: Beautify SQL
+    zh-CN: 美化 SQL
+  beautify_options:
+    en: Beautify SQL Options…
+    zh-CN: 美化 SQL 选项…
+  minify:
+    en: Minify SQL
+    zh-CN: 简化 SQL
   word_wrap:
     en: Word Wrap
     zh-CN: 自动换行

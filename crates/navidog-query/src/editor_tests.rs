@@ -263,3 +263,114 @@ fn runs_scripts_into_messages_summary_and_editable_results(cx: &mut TestAppConte
     });
     let _ = std::fs::remove_dir_all(&home);
 }
+
+#[gpui_kit::test]
+fn format_commands_undo_in_one_step_and_the_stack_cycles(cx: &mut TestAppContext) {
+    let home = std::env::temp_dir().join(format!("navidog-query-test-{}", std::process::id()));
+    std::fs::create_dir_all(&home).unwrap();
+    // SAFETY: both tests of this binary set the same value
+    unsafe { std::env::set_var("NAVIDOG_HOME", &home) };
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        navidog_core::init(cx);
+        navidog_ui::theme::init(cx);
+        navidog_db::init(cx);
+        navidog_grid::init(cx);
+        crate::init(cx);
+    });
+    let original = "select a\nselect b";
+    let (handle, editor) = cx.update(|cx| {
+        let mut editor = None;
+        let handle = gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+            let e = QueryEditor::new(
+                QuerySource::Untitled(1),
+                Target::default(),
+                original.to_string(),
+                window,
+                cx,
+            );
+            editor = Some(e.clone());
+            cx.new(|_| Host { editor: e })
+        })
+        .unwrap();
+        (handle.0, editor.unwrap())
+    });
+    let text = |cx: &mut TestAppContext| cx.update(|cx| editor.read(cx).text(cx));
+    let state = cx.update(|cx| editor.read(cx).editor.clone());
+    let undo = |cx: &mut TestAppContext| {
+        cx.update_window(handle, |_, window, cx| {
+            state.update(cx, |s, cx| s.focus(window, cx));
+            window.render_frame(cx);
+            window.press("cmd-z", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+    };
+    let select = |cx: &mut TestAppContext, range: std::ops::Range<usize>| {
+        cx.update(|cx| state.update(cx, |s, cx| s.set_selected_range(range, cx)));
+    };
+
+    select(cx, 3..12);
+    cx.update_window(handle, |_, window, cx| {
+        editor.update(cx, |e, cx| {
+            e.comment(navidog_util::sql_format::CommentMode::Toggle, window, cx)
+        })
+    })
+    .unwrap();
+    assert_eq!(text(cx), "-- select a\n-- select b");
+    undo(cx);
+    assert_eq!(text(cx), original);
+
+    select(cx, 0..8);
+    cx.update_window(handle, |_, window, cx| {
+        editor.update(cx, |e, cx| e.change_case(true, window, cx))
+    })
+    .unwrap();
+    assert_eq!(text(cx), "SELECT A\nselect b");
+    undo(cx);
+    assert_eq!(text(cx), original);
+
+    select(cx, 0..0);
+    cx.update_window(handle, |_, window, cx| {
+        editor.update(cx, |e, cx| e.beautify(window, cx))
+    })
+    .unwrap();
+    assert!(text(cx).starts_with("SELECT"), "{}", text(cx));
+    undo(cx);
+    assert_eq!(text(cx), original);
+
+    // Regular expression find over the whole text
+    cx.update_window(handle, |_, window, cx| {
+        editor.update(cx, |e, cx| {
+            e.open_find(false, window, cx);
+            e.find.options.regex = true;
+            e.find
+                .query
+                .update(cx, |s, cx| s.set_value(r"sel\w+ b", window, cx));
+            e.refresh_matches(cx);
+        })
+    })
+    .unwrap();
+    cx.update(|cx| assert_eq!(editor.read(cx).find.matches, [9..17]));
+
+    // The stack pastes its newest item, then swaps in the older ones
+    cx.update(|cx| {
+        let stack = cx.default_global::<crate::format::ClipboardStack>();
+        stack.push("one".into());
+        stack.push("two".into());
+    });
+    let end = original.len();
+    select(cx, end..end);
+    let paste = |cx: &mut TestAppContext| {
+        cx.update_window(handle, |_, window, cx| {
+            editor.update(cx, |e, cx| e.paste_from_stack(window, cx))
+        })
+        .unwrap();
+    };
+    paste(cx);
+    assert_eq!(text(cx), format!("{original}two"));
+    paste(cx);
+    assert_eq!(text(cx), format!("{original}one"));
+    paste(cx);
+    assert_eq!(text(cx), format!("{original}two"));
+}

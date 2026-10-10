@@ -9,7 +9,9 @@ use gpui_kit::component::dock::{
     BasePanel, Panel, PanelEvent, PanelId, PanelInfo, PanelState, TabGroup, panel_handle,
     register_panel,
 };
-use gpui_kit::component::input::{Editor, EditorState, InputEvent, TabSize};
+use gpui_kit::component::input::{
+    Copy, Cut, Editor, EditorState, Escape, IndentInline, InputEvent, OutdentInline, TabSize,
+};
 use gpui_kit::component::native_menu::NativeMenu;
 use gpui_kit::component::resizable::{h_resizable, resizable_panel, v_resizable};
 use gpui_kit::component::{Disableable as _, Sizable as _, WindowExt as _, h_flex, v_flex};
@@ -28,6 +30,7 @@ use navidog_db::dialect::Dialect;
 use navidog_db::sessions::{ConnState, Sessions, SessionsEvent};
 use navidog_ui::assets::lucide;
 use navidog_ui::{palette, tabs, tokens};
+use navidog_util::sql_format::CommentMode;
 use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 
@@ -57,6 +60,7 @@ actions!(
         ShowMessagesAfterRun,
         ShowSummaryAfterRun,
         ToggleProfile,
+        UpdateOutline,
     ]
 );
 
@@ -78,11 +82,27 @@ pub(crate) struct PickSchema {
     pub name: SharedString,
 }
 
+/// Inputs inside a query editor: binding here overrides the text field's own keys (⌘. is "code
+/// actions" and ⌘F the built-in search there).
+const IN_EDITOR: &str = "QueryEditor > Input";
+
 pub(crate) fn init(cx: &mut App) {
+    use crate::find::FindPrevious;
+    use crate::format::{PasteFromStack, ToggleComment};
+    use navidog_grid::{FindNext, ShowFind, ShowReplace};
     cx.bind_keys([
         KeyBinding::new("cmd-r", Run, Some(CONTEXT)),
         KeyBinding::new("shift-cmd-r", RunCurrent, Some(CONTEXT)),
         KeyBinding::new("cmd-.", Stop, Some(CONTEXT)),
+        KeyBinding::new("cmd-.", Stop, Some(IN_EDITOR)),
+        KeyBinding::new("cmd-f", ShowFind, Some(CONTEXT)),
+        KeyBinding::new("cmd-f", ShowFind, Some(IN_EDITOR)),
+        KeyBinding::new("alt-cmd-f", ShowReplace, Some(IN_EDITOR)),
+        KeyBinding::new("alt-cmd-f", ShowReplace, Some(CONTEXT)),
+        KeyBinding::new("cmd-g", FindNext, Some(IN_EDITOR)),
+        KeyBinding::new("shift-cmd-g", FindPrevious, Some(IN_EDITOR)),
+        KeyBinding::new("cmd-/", ToggleComment, Some(IN_EDITOR)),
+        KeyBinding::new("shift-cmd-v", PasteFromStack, Some(IN_EDITOR)),
         KeyBinding::new("cmd-=", ZoomIn, Some(CONTEXT)),
         KeyBinding::new("cmd-+", ZoomIn, Some(CONTEXT)),
         KeyBinding::new("cmd--", ZoomOut, Some(CONTEXT)),
@@ -171,6 +191,11 @@ pub struct QueryEditor {
     pub(crate) results_page: bool,
     /// Snippet placeholders being tabbed through
     pub(crate) tab_stops: Option<crate::snippet::TabStops>,
+    pub(crate) find: crate::find::Find,
+    pub(crate) stack_paste: Option<crate::format::StackPaste>,
+    /// Bracket highlight frames and the caret they were computed for
+    pub(crate) brackets: Option<gpui_kit::component::input::RangeDecorationCollection>,
+    pub(crate) bracket_caret: Option<usize>,
     /// Zoomed font size; `None` follows the preferences
     pub(crate) zoom: Option<f32>,
     pub(crate) word_wrap: bool,
@@ -333,8 +358,11 @@ impl QueryEditor {
                     |this, _, e: &SessionsEvent, window, cx| this.on_sessions_event(e, window, cx),
                 ),
                 cx.observe(&ConnectionStore::global(cx), |_, _, cx| cx.notify()),
+                // Caret moves only notify the editor; bracket frames follow them from here
+                cx.observe(&editor, |this, _, cx| this.sync_brackets(cx)),
             ];
             let results = Results::new(window, cx);
+            let find = crate::find::Find::new(window, cx);
             Self {
                 focus_handle: cx.focus_handle(),
                 id,
@@ -351,6 +379,10 @@ impl QueryEditor {
                 results,
                 results_page: false,
                 tab_stops: None,
+                find,
+                stack_paste: None,
+                brackets: None,
+                bracket_caret: None,
                 zoom: None,
                 word_wrap: s.word_wrap,
                 close_approved: false,
@@ -720,6 +752,10 @@ impl QueryEditor {
         cx.notify();
     }
 
+    pub(crate) fn editor_focused(&self, window: &Window, cx: &App) -> bool {
+        self.editor.read(cx).focus_handle(cx).is_focused(window)
+    }
+
     /// Menu items dispatch along the focused element; keep focus inside this editor.
     pub(crate) fn focus_for_menu(&self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.focus_handle.contains_focused(window, cx) {
@@ -930,7 +966,7 @@ impl QueryEditor {
                     t!("query.beautify").to_string(),
                 )
                 .on_click(|_, window, cx| {
-                    window.dispatch_action(Box::new(crate::editor::Beautify), cx)
+                    window.dispatch_action(Box::new(crate::format::Beautify), cx)
                 }),
             )
             .child(
@@ -961,14 +997,73 @@ impl QueryEditor {
 
     /// The theme's mono font (`font.mono_family`); zoom and the preferences change only its size.
     fn render_editor(&self, cx: &App) -> impl IntoElement {
+        let state = self.editor.clone();
         div().id("query-editor-text").size_full().min_h_0().child(
             Editor::new(&self.editor)
                 .bordered(false)
                 .size_full()
                 // raw-px: font size in points set by zoom or the preferences
-                .text_size(px(self.font_pt(cx))),
+                .text_size(px(self.font_pt(cx)))
+                .context_menu(move |menu, _, cx| context_menu(menu, &state, cx)),
         )
     }
+}
+
+/// Right-click menu of the SQL editor (30 §3). Items about the selection are disabled without one.
+fn context_menu(menu: NativeMenu, state: &Entity<EditorState>, cx: &App) -> NativeMenu {
+    use crate::format::{
+        Beautify, CommentLines, LowerCase, PasteFromStack, UncommentLines, UpperCase,
+    };
+    use gpui_kit::component::input::{Paste, SelectAll};
+    let selected = state.read(cx).selected_text().to_string();
+    let none = selected.is_empty();
+    menu.menu_with_disabled(t!("query.cut").to_string(), none, Box::new(Cut))
+        .menu_with_disabled(t!("query.copy").to_string(), none, Box::new(Copy))
+        .menu(t!("query.paste").to_string(), Box::new(Paste))
+        .menu(
+            t!("query.paste_from_stack").to_string(),
+            Box::new(PasteFromStack),
+        )
+        .menu(t!("query.select_all").to_string(), Box::new(SelectAll))
+        .separator()
+        .menu_with_disabled(
+            t!("query.run_selected").to_string(),
+            none,
+            Box::new(RunSelected),
+        )
+        .menu(t!("query.run_current").to_string(), Box::new(RunCurrent))
+        .menu_with_disabled(
+            t!("query.explain_selected").to_string(),
+            none,
+            Box::new(Explain),
+        )
+        .separator()
+        .menu(t!("query.beautify").to_string(), Box::new(Beautify))
+        .submenu(
+            t!("query.comment").to_string(),
+            NativeMenu::new()
+                .menu(
+                    t!("query.comment_lines").to_string(),
+                    Box::new(CommentLines),
+                )
+                .menu(
+                    t!("query.uncomment_lines").to_string(),
+                    Box::new(UncommentLines),
+                ),
+        )
+        .submenu(
+            t!("query.convert_case").to_string(),
+            NativeMenu::new()
+                .menu(t!("query.upper_case").to_string(), Box::new(UpperCase))
+                .menu(t!("query.lower_case").to_string(), Box::new(LowerCase)),
+        )
+        .separator()
+        .menu(
+            t!("query.create_snippet").to_string(),
+            Box::new(navidog_core::actions::CreateSnippet {
+                code: selected.into(),
+            }),
+        )
 }
 
 fn separator(cx: &App) -> impl IntoElement {
@@ -1106,7 +1201,112 @@ impl Render for QueryEditor {
                     Settings::update(cx, |s| s.show_profile = !s.show_profile);
                 }
             }))
+            .on_action(cx.listener(|this, _: &navidog_grid::ShowFind, window, cx| {
+                this.open_find(false, window, cx)
+            }))
+            .on_action(
+                cx.listener(|this, _: &navidog_grid::ShowReplace, window, cx| {
+                    this.open_find(true, window, cx)
+                }),
+            )
+            .on_action(cx.listener(|this, _: &navidog_grid::FindNext, window, cx| {
+                this.find_step(true, window, cx)
+            }))
+            .on_action(
+                cx.listener(|this, _: &crate::find::FindPrevious, window, cx| {
+                    this.find_step(false, window, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &crate::find::ToggleFindRegex, window, cx| {
+                    this.toggle_find_option(|o| o.regex = !o.regex, window, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &crate::find::ToggleFindCase, window, cx| {
+                    this.toggle_find_option(|o| o.case = !o.case, window, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &crate::find::ToggleFindWholeWord, window, cx| {
+                    this.toggle_find_option(|o| o.whole_word = !o.whole_word, window, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &crate::format::CommentLines, window, cx| {
+                    this.comment(CommentMode::Comment, window, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &crate::format::UncommentLines, window, cx| {
+                    this.comment(CommentMode::Uncomment, window, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &crate::format::ToggleComment, window, cx| {
+                    this.comment(CommentMode::Toggle, window, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &crate::format::UpperCase, window, cx| {
+                    this.change_case(true, window, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &crate::format::LowerCase, window, cx| {
+                    this.change_case(false, window, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &crate::format::Beautify, window, cx| {
+                    this.beautify(window, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|_, _: &crate::format::BeautifyOptionsDialog, window, cx| {
+                    crate::format::open_beautify_options(cx.entity().downgrade(), window, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &crate::format::Minify, window, cx| this.minify(window, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &crate::format::PasteFromStack, window, cx| {
+                    this.paste_from_stack(window, cx)
+                }),
+            )
+            // Capture phase: these run before the text field handles the key
+            .capture_action(cx.listener(|this, _: &Copy, window, cx| {
+                if this.editor_focused(window, cx) {
+                    this.remember_copy(cx);
+                }
+            }))
+            .capture_action(cx.listener(|this, _: &Cut, window, cx| {
+                if this.editor_focused(window, cx) {
+                    this.remember_copy(cx);
+                }
+            }))
+            .capture_action(cx.listener(|this, _: &IndentInline, window, cx| {
+                if this.editor_focused(window, cx) && this.step_tab_stop(true, window, cx) {
+                    cx.stop_propagation();
+                }
+            }))
+            .capture_action(cx.listener(|this, _: &OutdentInline, window, cx| {
+                if this.editor_focused(window, cx) && this.step_tab_stop(false, window, cx) {
+                    cx.stop_propagation();
+                }
+            }))
+            .capture_action(cx.listener(|this, _: &Escape, window, cx| {
+                if this.tab_stops.is_some() {
+                    this.end_tab_stops(cx);
+                    cx.stop_propagation();
+                } else if this.find.open {
+                    this.close_find(window, cx);
+                    cx.stop_propagation();
+                }
+            }))
             .child(self.render_toolbar(cx))
+            .when(self.find.open, |v| v.child(self.render_find(cx)))
             .child(div().flex_1().min_h_0().min_w_0().child(body))
     }
 }
@@ -1116,8 +1316,6 @@ fn set_position(position: ResultsPosition, cx: &mut App) {
     // Every open query editor follows; the menus show the check
     cx.refresh_windows();
 }
-
-actions!(query, [Beautify]);
 
 impl QueryEditor {
     pub(crate) fn connection_name(&self, cx: &App) -> String {

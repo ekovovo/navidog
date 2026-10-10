@@ -10,50 +10,13 @@ use gpui_kit::component::input::{
 use gpui_kit::{Context, Window};
 use navidog_ui::palette;
 
+use navidog_util::sql_text::expand_placeholders as expand;
+
 use crate::editor::QueryEditor;
 
 pub(crate) struct TabStops {
     collection: RangeDecorationCollection,
     current: usize,
-}
-
-/// The snippet text with its `${…}` markers removed, and the ranges of the placeholder texts.
-/// PostgreSQL's `$1` and `$$` have no braces and stay as they are.
-pub(crate) fn expand(code: &str) -> (String, Vec<Range<usize>>) {
-    let mut out = String::with_capacity(code.len());
-    let mut ranges = Vec::new();
-    let mut rest = code;
-    while let Some(start) = rest.find("${") {
-        let Some(len) = rest[start + 2..].find('}') else {
-            break;
-        };
-        out.push_str(&rest[..start]);
-        let name = &rest[start + 2..start + 2 + len];
-        let at = out.len();
-        out.push_str(name);
-        ranges.push(at..at + name.len());
-        rest = &rest[start + 2 + len + 1..];
-    }
-    out.push_str(rest);
-    (out, ranges)
-}
-
-/// Wraps the selected text of `code` as a placeholder ("Add Placeholder" in the snippet editor).
-pub(crate) fn add_placeholder(code: &str, selection: Range<usize>) -> String {
-    if selection.is_empty() || selection.end > code.len() {
-        return code.to_string();
-    }
-    format!(
-        "{}${{{}}}{}",
-        &code[..selection.start],
-        &code[selection.clone()],
-        &code[selection.end..]
-    )
-}
-
-/// Turns every `${text}` back into `text` ("Remove Placeholder").
-pub(crate) fn remove_placeholders(code: &str) -> String {
-    expand(code).0
 }
 
 impl QueryEditor {
@@ -145,28 +108,5 @@ impl QueryEditor {
         self.editor
             .update(cx, |e, cx| e.set_selected_range(range, cx));
         true
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn placeholders_expand_to_their_text() {
-        let (text, ranges) = expand("SELECT ${cols} FROM ${table} WHERE id = $1");
-        assert_eq!(text, "SELECT cols FROM table WHERE id = $1");
-        assert_eq!(ranges, [7..11, 17..22]);
-        assert_eq!(&text[ranges[1].clone()], "table");
-        assert_eq!(expand("a ${unclosed").0, "a ${unclosed");
-    }
-
-    #[test]
-    fn placeholders_are_added_and_removed() {
-        let code = "SELECT * FROM t";
-        let with = add_placeholder(code, 14..15);
-        assert_eq!(with, "SELECT * FROM ${t}");
-        assert_eq!(remove_placeholders(&with), code);
-        assert_eq!(add_placeholder(code, 3..3), code);
     }
 }

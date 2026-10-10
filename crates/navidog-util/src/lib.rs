@@ -3,6 +3,7 @@
 pub mod console;
 pub mod explain;
 pub mod format;
+pub mod sql_format;
 pub mod sql_text;
 pub mod sql_type;
 

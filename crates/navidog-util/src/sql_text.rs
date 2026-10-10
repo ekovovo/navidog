@@ -1,5 +1,7 @@
 //! SQL text helpers that need no parser: leading comments, statement names, the query editor's
-//! `[$name]` parameters.
+//! `[$name]` parameters and snippet placeholders.
+
+use std::ops::Range;
 
 /// Skips whitespace and `--`, `#` and `/* */` comments at the start of `sql`.
 pub fn skip_leading_comments(sql: &str) -> &str {
@@ -119,6 +121,45 @@ pub fn substitute_params(sql: &str, mut value: impl FnMut(&str) -> String) -> St
     out
 }
 
+/// The snippet text with its `${…}` markers removed, and the ranges of the placeholder texts.
+/// PostgreSQL's `$1` and `$$` have no braces and stay as they are.
+pub fn expand_placeholders(code: &str) -> (String, Vec<Range<usize>>) {
+    let mut out = String::with_capacity(code.len());
+    let mut ranges = Vec::new();
+    let mut rest = code;
+    while let Some(start) = rest.find("${") {
+        let Some(len) = rest[start + 2..].find('}') else {
+            break;
+        };
+        out.push_str(&rest[..start]);
+        let name = &rest[start + 2..start + 2 + len];
+        let at = out.len();
+        out.push_str(name);
+        ranges.push(at..at + name.len());
+        rest = &rest[start + 2 + len + 1..];
+    }
+    out.push_str(rest);
+    (out, ranges)
+}
+
+/// Wraps the selected text of `code` as a placeholder ("Add Placeholder" in the snippet editor).
+pub fn add_placeholder(code: &str, selection: Range<usize>) -> String {
+    if selection.is_empty() || selection.end > code.len() {
+        return code.to_string();
+    }
+    format!(
+        "{}${{{}}}{}",
+        &code[..selection.start],
+        &code[selection.clone()],
+        &code[selection.end..]
+    )
+}
+
+/// Turns every `${text}` back into `text` ("Remove Placeholder").
+pub fn remove_placeholders(code: &str) -> String {
+    expand_placeholders(code).0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,5 +193,18 @@ mod tests {
         assert!(out.contains("a = 1 AND b = 'x' OR c = 1"), "{out}");
         assert!(out.contains("'[$no]'"));
         assert!(find_params("[$] [$a\nb]").is_empty());
+    }
+
+    #[test]
+    fn placeholders_expand_add_and_remove() {
+        let (text, ranges) = expand_placeholders("SELECT ${cols} FROM ${table} WHERE id = $1");
+        assert_eq!(text, "SELECT cols FROM table WHERE id = $1");
+        assert_eq!(ranges, [7..11, 17..22]);
+        assert_eq!(expand_placeholders("a ${unclosed").0, "a ${unclosed");
+        let code = "SELECT * FROM t";
+        let with = add_placeholder(code, 14..15);
+        assert_eq!(with, "SELECT * FROM ${t}");
+        assert_eq!(remove_placeholders(&with), code);
+        assert_eq!(add_placeholder(code, 3..3), code);
     }
 }

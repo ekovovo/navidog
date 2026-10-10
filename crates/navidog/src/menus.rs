@@ -175,6 +175,10 @@ pub fn set_menus(cx: &mut App) {
                 SelectAll,
                 OsAction::SelectAll,
             ),
+            MenuItem::action(
+                t!("menu.paste_from_stack").to_string(),
+                query::PasteFromStack,
+            ),
             MenuItem::separator(),
             MenuItem::submenu(Menu::new(t!("menu.find").to_string()).items([
                 MenuItem::action(t!("menu.find_find").to_string(), navidog_grid::ShowFind),
@@ -183,7 +187,42 @@ pub fn set_menus(cx: &mut App) {
                     navidog_grid::ShowReplace,
                 ),
                 MenuItem::action(t!("menu.find_next").to_string(), navidog_grid::FindNext),
+                MenuItem::action(t!("menu.find_previous").to_string(), query::FindPrevious),
             ])),
+            MenuItem::submenu(Menu::new(t!("menu.code_completion").to_string()).items([
+                MenuItem::action(t!("menu.update_outline").to_string(), query::UpdateOutline),
+            ])),
+        ]),
+        Menu::new(t!("menu.format").to_string()).items([
+            MenuItem::submenu(Menu::new(t!("menu.indent").to_string()).items([
+                MenuItem::action(
+                    t!("menu.indent_more").to_string(),
+                    gpui_kit::component::input::Indent,
+                ),
+                MenuItem::action(
+                    t!("menu.indent_less").to_string(),
+                    gpui_kit::component::input::Outdent,
+                ),
+            ])),
+            MenuItem::submenu(Menu::new(t!("menu.comment").to_string()).items([
+                MenuItem::action(t!("menu.comment_lines").to_string(), query::CommentLines),
+                MenuItem::action(
+                    t!("menu.uncomment_lines").to_string(),
+                    query::UncommentLines,
+                ),
+            ])),
+            MenuItem::action(t!("menu.toggle_comment").to_string(), query::ToggleComment),
+            MenuItem::submenu(Menu::new(t!("menu.convert_case").to_string()).items([
+                MenuItem::action(t!("menu.upper_case").to_string(), query::UpperCase),
+                MenuItem::action(t!("menu.lower_case").to_string(), query::LowerCase),
+            ])),
+            MenuItem::separator(),
+            MenuItem::action(t!("menu.beautify").to_string(), query::Beautify),
+            MenuItem::action(
+                t!("menu.beautify_options").to_string(),
+                query::BeautifyOptionsDialog,
+            ),
+            MenuItem::action(t!("menu.minify").to_string(), query::Minify),
         ]),
         Menu::new(t!("menu.view").to_string()).items([
             MenuItem::submenu(Menu::new(t!("menu.navigation_pane").to_string()).items([

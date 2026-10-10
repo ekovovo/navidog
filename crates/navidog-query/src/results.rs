@@ -596,6 +596,7 @@ impl ResultView {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn editable(&self) -> bool {
         self.edit.is_some()
     }

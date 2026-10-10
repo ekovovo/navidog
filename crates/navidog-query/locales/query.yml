@@ -246,3 +246,75 @@ query:
   stat_relation_percent:
     en: "% of Relation"
     zh-CN: 佔关系的 %
+  beautify_options:
+    en: Beautify SQL Options
+    zh-CN: 美化 SQL 选项
+  short_paren:
+    en: Short Parenthesis Length
+    zh-CN: 短括号长度
+  uppercase_keywords:
+    en: Uppercase Keywords
+    zh-CN: 大写关键字
+  default:
+    en: Default
+    zh-CN: 默认
+  comment:
+    en: Comment
+    zh-CN: 注释
+  comment_lines:
+    en: Comment Lines
+    zh-CN: 注释行
+  uncomment_lines:
+    en: Uncomment Lines
+    zh-CN: 取消注释行
+  convert_case:
+    en: Convert Case
+    zh-CN: 转换大小写
+  upper_case:
+    en: Upper Case
+    zh-CN: 大写
+  lower_case:
+    en: Lower Case
+    zh-CN: 小写
+  cut:
+    en: Cut
+    zh-CN: 剪切
+  copy:
+    en: Copy
+    zh-CN: 拷贝
+  paste:
+    en: Paste
+    zh-CN: 粘贴
+  paste_from_stack:
+    en: Paste from Clipboard Stack
+    zh-CN: 从剪贴板堆栈粘贴
+  select_all:
+    en: Select All
+    zh-CN: 全选
+  create_snippet:
+    en: Create Snippet…
+    zh-CN: 创建片段…
+  find:
+    en: Find
+    zh-CN: 查找
+  replace:
+    en: Replace
+    zh-CN: 替换
+  replace_all:
+    en: Replace All
+    zh-CN: 全部替换
+  find_regex:
+    en: Regular Expression
+    zh-CN: 正则表达式
+  find_case:
+    en: Match Case
+    zh-CN: 大小写符合
+  find_whole_word:
+    en: Whole Word
+    zh-CN: 整个字
+  find_count:
+    en: "%{n} matches"
+    zh-CN: "%{n} 个符合"
+  find_bad_regex:
+    en: Invalid regular expression
+    zh-CN: 正则表达式无效
