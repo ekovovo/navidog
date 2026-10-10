@@ -17,6 +17,14 @@ use navidog_grid::model::GridColumn;
 use navidog_grid::{GridEvent, ResultGrid};
 use navidog_ui::tokens;
 
+fn fit(rem: gpui_kit::Pixels, header: &str, values: &[&str]) -> gpui_kit::Pixels {
+    navidog_grid::grid::auto_width(
+        header,
+        values.iter().copied(),
+        tokens::font::SIZE_BODY.to_pixels(rem).as_f32(),
+    )
+}
+
 fn col(name: &str, pk: bool) -> GridColumn {
     GridColumn {
         name: name.to_string().into(),
@@ -71,8 +79,7 @@ fn select_copy_and_edit(cx: &mut TestAppContext) {
         // Cells are not in the test registry; click the first data column by its offset within
         // the row (column 0 is the marker column)
         let rem = window.rem_size();
-        let x = tokens::grid::ROW_NUMBER_WIDTH.to_pixels(rem)
-            + tokens::grid::COLUMN_WIDTH.to_pixels(rem) / 2.;
+        let x = tokens::grid::ROW_NUMBER_WIDTH.to_pixels(rem) + fit(rem, "id", &["1", "2"]) / 2.;
         window.click_at(
             gpui_kit::ElementId::NamedInteger("row".into(), 0),
             gpui_kit::point(x, rem / 2.),
@@ -126,9 +133,10 @@ fn select_copy_and_edit(cx: &mut TestAppContext) {
         window.press("cmd-a", cx);
         window.input("Q", cx);
         let rem = window.rem_size();
-        let col = tokens::grid::COLUMN_WIDTH.to_pixels(rem);
         // The edited cell is the second data column (name), past the marker and id.
-        let x = tokens::grid::ROW_NUMBER_WIDTH.to_pixels(rem) + col + col / 2.;
+        let x = tokens::grid::ROW_NUMBER_WIDTH.to_pixels(rem)
+            + fit(rem, "id", &["1", "2"])
+            + fit(rem, "name", &["a", "b"]) / 2.;
         window.click_at(
             gpui_kit::ElementId::NamedInteger("row".into(), 1),
             gpui_kit::point(x, rem / 2.),
@@ -148,9 +156,10 @@ fn select_copy_and_edit(cx: &mut TestAppContext) {
         window.press("enter", cx);
         window.render_frame(cx);
         let rem = window.rem_size();
-        let col = tokens::grid::COLUMN_WIDTH.to_pixels(rem);
         // The editor is the name column: past the marker and the id column.
-        let x = tokens::grid::ROW_NUMBER_WIDTH.to_pixels(rem) + col + col / 2.;
+        let x = tokens::grid::ROW_NUMBER_WIDTH.to_pixels(rem)
+            + fit(rem, "id", &["1", "2"])
+            + fit(rem, "name", &["a", "b"]) / 2.;
         let row1 = window
             .find(ElementId::NamedInteger("row".into(), 1))
             .bounds();
@@ -197,8 +206,7 @@ fn select_copy_and_edit(cx: &mut TestAppContext) {
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
         let rem = window.rem_size();
-        let col = tokens::grid::COLUMN_WIDTH.to_pixels(rem);
-        let x = tokens::grid::ROW_NUMBER_WIDTH.to_pixels(rem) + col / 2.;
+        let x = tokens::grid::ROW_NUMBER_WIDTH.to_pixels(rem) + fit(rem, "id", &["1", "2"]) / 2.;
         let row0 = window
             .find(ElementId::NamedInteger("row".into(), 0))
             .bounds();
@@ -335,8 +343,7 @@ fn leaving_a_modified_row_requests_a_commit(cx: &mut TestAppContext) {
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
         let rem = window.rem_size();
-        let x = tokens::grid::ROW_NUMBER_WIDTH.to_pixels(rem)
-            + tokens::grid::COLUMN_WIDTH.to_pixels(rem) / 2.;
+        let x = tokens::grid::ROW_NUMBER_WIDTH.to_pixels(rem) + fit(rem, "id", &["1", "2"]) / 2.;
         window.click_at(
             gpui_kit::ElementId::NamedInteger("row".into(), 1),
             gpui_kit::point(x, rem / 2.),
@@ -411,7 +418,8 @@ fn right_click_focuses_the_grid_so_the_menu_item_runs(cx: &mut TestAppContext) {
         let rem = window.rem_size();
         // The name column, past the marker and the id column
         let x = tokens::grid::ROW_NUMBER_WIDTH.to_pixels(rem)
-            + tokens::grid::COLUMN_WIDTH.to_pixels(rem) * 1.5;
+            + fit(rem, "id", &["1"])
+            + fit(rem, "name", &["a"]) / 2.;
         window.click_with_options(
             gpui_kit::ElementId::NamedInteger("row".into(), 0),
             ClickOptions::new()

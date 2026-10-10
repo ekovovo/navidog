@@ -19,8 +19,10 @@ pub struct GridDelegate {
     pub(super) find: Option<(SharedString, bool)>,
     /// Display order and which columns are frozen (F-DATA-009)
     pub(super) layout: ColumnLayout,
-    /// Resized widths by column name, so a refresh does not snap back to the default
+    /// Resized widths by column name, so a refresh does not snap back to the fit
     pub(super) widths: BTreeMap<SharedString, Pixels>,
+    /// Fitted widths for columns the user has not resized. Not written to settings.
+    pub(super) auto: BTreeMap<SharedString, Pixels>,
     /// The row a plain click or key move settled on. Leaving it while it is dirty commits.
     pub(super) settled: Option<usize>,
     /// The pointer dragged the selection, so the mouse-up (not SelectCell) settles the row.
@@ -102,13 +104,18 @@ impl GridDelegate {
             if ix >= pinned {
                 break;
             }
-            span += self
-                .widths
-                .get(&col.name)
-                .copied()
-                .unwrap_or_else(|| self.width(tokens::grid::COLUMN_WIDTH));
+            span += self.column_width(&col.name);
         }
         span
+    }
+
+    /// User-resized width, otherwise the width fitted when the page loaded, otherwise 140pt.
+    pub(super) fn column_width(&self, name: &SharedString) -> Pixels {
+        self.widths
+            .get(name)
+            .or_else(|| self.auto.get(name))
+            .copied()
+            .unwrap_or_else(|| self.width(tokens::grid::COLUMN_WIDTH))
     }
 }
 
@@ -230,11 +237,7 @@ impl TableDelegate for GridDelegate {
             Some((c, false)) if c + 1 == ix => ColumnSort::Descending,
             _ => ColumnSort::Default,
         };
-        let width = self
-            .widths
-            .get(&col.name)
-            .copied()
-            .unwrap_or_else(|| self.width(tokens::grid::COLUMN_WIDTH));
+        let width = self.column_width(&col.name);
         let mut column = Column::new(SharedString::from(ix.to_string()), col.name.clone())
             .width(width)
             .sort(sort)

@@ -198,6 +198,7 @@ impl ResultGrid {
             find: None,
             layout: ColumnLayout::default(),
             widths: BTreeMap::new(),
+            auto: BTreeMap::new(),
             settled: None,
             dragged: false,
             selecting: false,
@@ -331,6 +332,7 @@ impl ResultGrid {
             d.settled = Some(d.model.head().0);
             d.dragged = false;
             d.commit_requested = false;
+            refit_auto(d, cx);
             t.refresh(cx);
             cx.notify();
         });
@@ -378,20 +380,26 @@ impl ResultGrid {
             .iter()
             .map(|c| c.name.clone())
             .collect();
-        let saved = width_pairs(&names, reported);
+        let mut changed = BTreeMap::new();
         self.table.update(cx, |t, _| {
+            let shown: Vec<Pixels> = {
+                let d = t.delegate();
+                names.iter().map(|name| d.column_width(name)).collect()
+            };
+            changed = widths_the_drag_changed(&names, &shown, reported);
             let map = &mut t.delegate_mut().widths;
-            for (name, width) in &saved {
+            for (name, width) in &changed {
                 // raw-px: persisted column widths are already pixels
                 map.insert(SharedString::from(name.as_str()), px(*width));
             }
         });
-        if cx.has_global::<Settings>() {
-            let key = width_key(&target.scope, &target.table);
-            Settings::update(cx, |s| {
-                s.column_widths.insert(key, saved);
-            });
+        if changed.is_empty() || !cx.has_global::<Settings>() {
+            return;
         }
+        let key = width_key(&target.scope, &target.table);
+        Settings::update(cx, |s| {
+            s.column_widths.entry(key).or_default().extend(changed);
+        });
     }
 
     pub fn scroll_to_row(&self, row: usize, cx: &mut App) {
@@ -720,12 +728,98 @@ fn load_widths(target: &GridTarget, cx: &App) -> BTreeMap<SharedString, Pixels> 
         .unwrap_or_default()
 }
 
-/// `reported` is every column including the marker at index 0.
-fn width_pairs(names: &[SharedString], reported: &[Pixels]) -> BTreeMap<String, f32> {
+/// How many leading rows to measure. A table page is already bounded; a query result can be the
+/// whole set, so stop here. ponytail: a longer value past this row stays clipped until a resize
+/// or the next page; measuring every row is the upgrade.
+const FIT_ROWS: usize = 64;
+/// Characters of painted cell text that count toward the fit.
+const FIT_CHARS: usize = 64;
+/// Latin glyphs are about this many em wide. A non-ASCII character counts as one em.
+const LATIN_EM: f32 = 0.62;
+/// A reported width within this many pixels of the one on screen was not dragged.
+const DRAG_EPSILON: f32 = 1.;
+
+fn char_units(c: char) -> f32 {
+    if c.is_ascii() { 1. } else { 1. / LATIN_EM }
+}
+
+/// Units of the text a cell paints: newlines become spaces, then at most [`FIT_CHARS`].
+fn painted_units(s: &str) -> f32 {
+    s.chars()
+        .take(FIT_CHARS)
+        .map(|c| char_units(if c == '\n' || c == '\r' { ' ' } else { c }))
+        .sum()
+}
+
+/// Width that fits `header` (plus the sort icon) and `values`, in the grid font.
+/// `em` is that font size in pixels.
+pub fn auto_width<'a>(header: &str, values: impl IntoIterator<Item = &'a str>, em: f32) -> Pixels {
+    let mut units = header.chars().map(char_units).sum::<f32>() + 3.;
+    for value in values {
+        units = units.max(painted_units(value));
+    }
+    // raw-px: padding, sort icon, floor and ceiling are a character estimate, not a nib
+    const PAD: f32 = 26.;
+    const MIN: f32 = 56.;
+    const MAX: f32 = 460.;
+    px((units * em * LATIN_EM + PAD).clamp(MIN, MAX))
+}
+
+fn grid_em(rem: Pixels, cx: &App) -> Pixels {
+    let pt = grid_font_pt(cx).unwrap_or(tokens::font::SIZE_BODY.value());
+    tokens::Pt(pt).to_pixels(rem)
+}
+
+/// Text the cell paints, so the fit matches the grid rather than the stored value.
+fn cell_text(model: &GridModel, r: usize, c: usize, raw: bool, dialect: Dialect) -> String {
+    match model.value(r, c) {
+        Some(Some(_)) => model.shown_text(r, c, raw, dialect).to_string(),
+        Some(None) => "(NULL)".to_string(),
+        None => String::new(),
+    }
+}
+
+/// Columns the user has not resized, fitted to the header and the first loaded rows.
+fn refit_auto(d: &mut GridDelegate, cx: &App) {
+    let em = grid_em(d.rem, cx).as_f32();
+    let rows = d.model.row_count().min(FIT_ROWS);
+    let raw = d.raw;
+    let dialect = d.dialect;
+    let columns: Vec<(usize, SharedString)> = d
+        .model
+        .columns
+        .iter()
+        .enumerate()
+        .map(|(c, col)| (c, col.name.clone()))
+        .collect();
+    let mut auto = BTreeMap::new();
+    for (c, name) in columns {
+        if d.widths.contains_key(&name) {
+            continue;
+        }
+        let texts: Vec<String> = (0..rows)
+            .map(|r| cell_text(&d.model, r, c, raw, dialect))
+            .collect();
+        auto.insert(
+            name.clone(),
+            auto_width(&name, texts.iter().map(String::as_str), em),
+        );
+    }
+    d.auto = auto;
+}
+
+/// `reported` includes the marker column at index 0. Only columns that moved are returned.
+fn widths_the_drag_changed(
+    names: &[SharedString],
+    shown: &[Pixels],
+    reported: &[Pixels],
+) -> BTreeMap<String, f32> {
     names
         .iter()
+        .zip(shown)
         .zip(reported.iter().skip(1))
-        .map(|(name, width)| (name.to_string(), width.as_f32()))
+        .filter(|((_, shown), next)| (shown.as_f32() - next.as_f32()).abs() >= DRAG_EPSILON)
+        .map(|((name, _), next)| (name.to_string(), next.as_f32()))
         .collect()
 }
 
@@ -734,12 +828,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn resized_widths_skip_the_marker_column() {
+    fn content_width_tracks_the_longest_text_and_stays_bounded() {
+        let narrow = auto_width("id", ["1", "22"], 13.);
+        let wide = auto_width("email", ["someone.long@example.com"], 13.);
+        assert!(narrow < wide);
+        assert!(narrow.as_f32() >= 56.);
+        let huge = "x".repeat(500);
+        assert!(auto_width("t", [huge.as_str()], 13.).as_f32() <= 460.);
+        // A CJK character is about one em, not 0.62.
+        let ascii = auto_width("n", ["abcd"], 13.);
+        let cjk = auto_width("n", ["中文中文"], 13.);
+        assert!(cjk > ascii);
+    }
+
+    #[test]
+    fn a_drag_keeps_columns_that_did_not_move() {
         let names = ["id", "name"].map(SharedString::from);
-        // raw-px: arbitrary widths; the first is the marker column and is dropped
-        let saved = width_pairs(&names, &[px(20.), px(80.), px(140.)]);
-        assert_eq!(saved.get("id"), Some(&80.));
-        assert_eq!(saved.get("name"), Some(&140.));
-        assert_eq!(saved.len(), 2);
+        // raw-px: arbitrary widths; the first reported width is the marker column
+        let shown = [px(80.), px(140.)];
+        let reported = [px(20.), px(80.), px(200.)];
+        let changed = widths_the_drag_changed(&names, &shown, &reported);
+        assert_eq!(changed.get("id"), None);
+        assert_eq!(changed.get("name"), Some(&200.));
+        assert_eq!(changed.len(), 1);
     }
 }

@@ -6,9 +6,9 @@ use std::time::{Duration, Instant};
 
 use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{
-    EntityInputHandler as _,
-    AnyWindowHandle, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render,
-    Styled as _, TestAppContext, Window, WindowBounds, WindowOptions, div, size,
+    AnyWindowHandle, AppContext as _, Context, Entity, EntityInputHandler as _, IntoElement,
+    ParentElement as _, Render, Styled as _, TestAppContext, Window, WindowBounds, WindowOptions,
+    div, size,
 };
 use navidog_core::connection::Connection;
 use navidog_core::crypto::Key;

@@ -20,6 +20,14 @@ use navidog_db::{ConnectParams, Secrets, connect, runtime};
 use navidog_grid::TableViewer;
 use navidog_ui::tokens;
 
+fn fit(rem: gpui_kit::Pixels, header: &str, values: &[&str]) -> gpui_kit::Pixels {
+    navidog_grid::grid::auto_width(
+        header,
+        values.iter().copied(),
+        tokens::font::SIZE_BODY.to_pixels(rem).as_f32(),
+    )
+}
+
 struct Host {
     viewer: Entity<TableViewer>,
 }
@@ -151,9 +159,10 @@ fn paging_commits_first_and_auto_transaction_still_loads(cx: &mut TestAppContext
     cx.update_window(first, |_, window, cx| {
         window.render_frame(cx);
         let rem = window.rem_size();
-        let col = tokens::grid::COLUMN_WIDTH.to_pixels(rem);
         // The name column: past the marker column and id
-        let x = tokens::grid::ROW_NUMBER_WIDTH.to_pixels(rem) + col + col / 2.;
+        let x = tokens::grid::ROW_NUMBER_WIDTH.to_pixels(rem)
+            + fit(rem, "id", &["1"])
+            + fit(rem, "name", &["a"]) / 2.;
         window.click_at(
             ElementId::NamedInteger("row".into(), 0),
             gpui_kit::point(x, rem / 2.),
@@ -186,8 +195,9 @@ fn paging_commits_first_and_auto_transaction_still_loads(cx: &mut TestAppContext
     cx.update_window(first, |_, window, cx| {
         window.render_frame(cx);
         let rem = window.rem_size();
-        let col = tokens::grid::COLUMN_WIDTH.to_pixels(rem);
-        let x = tokens::grid::ROW_NUMBER_WIDTH.to_pixels(rem) + col + col / 2.;
+        let x = tokens::grid::ROW_NUMBER_WIDTH.to_pixels(rem)
+            + fit(rem, "id", &["1"])
+            + fit(rem, "name", &["a"]) / 2.;
         window.click_at(
             ElementId::NamedInteger("row".into(), 0),
             gpui_kit::point(x, rem / 2.),

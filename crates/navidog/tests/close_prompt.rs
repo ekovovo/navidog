@@ -19,6 +19,14 @@ use navidog_db::{ConnectParams, Secrets, connect, runtime};
 use navidog_ui::tabs::{self, CloseTab};
 use navidog_ui::tokens;
 
+fn fit(rem: gpui_kit::Pixels, header: &str, values: &[&str]) -> gpui_kit::Pixels {
+    navidog_grid::grid::auto_width(
+        header,
+        values.iter().copied(),
+        tokens::font::SIZE_BODY.to_pixels(rem).as_f32(),
+    )
+}
+
 fn wait(cx: &mut TestAppContext, what: &str, done: impl Fn(&mut TestAppContext) -> bool) {
     let deadline = Instant::now() + Duration::from_secs(10);
     while !done(cx) {
@@ -133,8 +141,9 @@ fn closing_a_tab_with_an_edit_asks_and_commits(cx: &mut TestAppContext) {
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
         let rem = window.rem_size();
-        let col = tokens::grid::COLUMN_WIDTH.to_pixels(rem);
-        let x = tokens::grid::ROW_NUMBER_WIDTH.to_pixels(rem) + col + col / 2.;
+        let x = tokens::grid::ROW_NUMBER_WIDTH.to_pixels(rem)
+            + fit(rem, "id", &["1"])
+            + fit(rem, "name", &["a"]) / 2.;
         window.click_at(
             ElementId::NamedInteger("row".into(), 0),
             gpui_kit::point(x, rem / 2.),
