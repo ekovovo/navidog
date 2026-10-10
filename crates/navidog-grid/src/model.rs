@@ -47,6 +47,9 @@ pub struct GridModel {
     /// hiding the primary key (or any column of a table without one) does not widen a WHERE.
     hidden_columns: Vec<GridColumn>,
     hidden_rows: Vec<Vec<Cell>>,
+    /// While a commit or a load is running, edits are refused: the commit's success reloads the
+    /// page (or marks every change committed), and a load replaces the rows, either way losing them.
+    pub locked: bool,
     anchor: Pos,
     head: Pos,
 }
@@ -156,7 +159,7 @@ impl GridModel {
     }
 
     fn write(&mut self, r: usize, c: usize, v: Cell, raw: bool) {
-        if self.columns.get(c).is_some_and(|col| col.read_only) {
+        if self.locked || self.columns.get(c).is_some_and(|col| col.read_only) {
             return;
         }
         let stored = match r.checked_sub(self.rows.len()) {
@@ -209,8 +212,11 @@ impl GridModel {
         self.edits.contains_key(&(r, c)) || (r >= self.rows.len() && self.value(r, c).is_some())
     }
 
-    /// Appends an empty row, selects it and returns its row number.
+    /// Appends an empty row, selects it and returns its row number. Locked, it returns the current row.
     pub fn insert_row(&mut self) -> usize {
+        if self.locked {
+            return self.head.0;
+        }
         self.new_rows.push(vec![None; self.columns.len()]);
         let r = self.row_count() - 1;
         self.select((r, 0), false);
@@ -219,6 +225,9 @@ impl GridModel {
 
     /// Deletes the rows the selection covers: inserted rows go away, existing rows are marked pending.
     pub fn delete_selected_rows(&mut self) {
+        if self.locked {
+            return;
+        }
         let rows = self.selection().0;
         for r in rows.clone().rev() {
             match r.checked_sub(self.rows.len()) {
@@ -575,6 +584,9 @@ impl GridModel {
         replacement: &str,
         case_sensitive: bool,
     ) -> bool {
+        if self.locked {
+            return false;
+        }
         let Some(Some(current)) = self.value(pos.0, pos.1).cloned() else {
             return false;
         };
@@ -598,6 +610,9 @@ impl GridModel {
 
     /// Writes tab-separated text starting at the selection's top left, appending rows past the end.
     pub fn paste(&mut self, text: &str, raw: bool) {
+        if self.locked {
+            return;
+        }
         let (rows, cols) = self.selection();
         let (r0, c0) = (*rows.start(), *cols.start());
         let lines: Vec<&str> = text.trim_end_matches(['\n', '\r']).split('\n').collect();
@@ -943,6 +958,23 @@ mod tests {
         assert_eq!(text(&m, 0, 0), Some("2".into()));
         assert_eq!(text(&m, 0, 1), Some("b".into()));
         assert_eq!(text(&m, 1, 1), Some("c".into()));
+    }
+
+    #[test]
+    fn a_locked_grid_refuses_edits() {
+        let mut m = model(true);
+        m.locked = true;
+        m.set_value(0, 1, Some("b".into()));
+        m.insert_row();
+        m.select((0, 0), false);
+        m.delete_selected_rows();
+        m.paste("x", false);
+        assert!(!m.replace_cell((0, 1), "a", "z", true));
+        assert!(!m.has_changes());
+        assert_eq!(m.row_count(), 2);
+        m.locked = false;
+        m.set_value(0, 1, Some("b".into()));
+        assert!(m.has_changes());
     }
 
     #[test]

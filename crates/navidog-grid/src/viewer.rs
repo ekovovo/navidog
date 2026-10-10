@@ -580,7 +580,7 @@ impl TableViewer {
             return;
         };
         let (scope, table) = (self.object.scope.clone(), self.object.name.clone());
-        self.busy = true;
+        self.set_busy(true, cx);
         self.task = Some(cx.spawn(async move |this, cx| {
             let session = match job.await {
                 Ok(Ok(s)) => s,
@@ -629,7 +629,7 @@ impl TableViewer {
                 // Back after a reopen with edits pending: keep the rows they belong to; they
                 // commit on the new session. A reload would discard them.
                 if this.grid.read(cx).model(cx).has_changes() {
-                    this.busy = false;
+                    this.set_busy(false, cx);
                     this.status = SharedString::default();
                 } else {
                     this.reload(true, cx);
@@ -708,8 +708,15 @@ impl TableViewer {
         });
     }
 
+    /// `busy` also locks the grid: an edit made while a commit or a load runs would be lost
+    /// when it finishes (see `GridModel::locked`).
+    fn set_busy(&mut self, busy: bool, cx: &mut Context<Self>) {
+        self.busy = busy;
+        self.grid.update(cx, |g, cx| g.set_locked(busy, cx));
+    }
+
     fn fail(&mut self, message: String, cx: &mut Context<Self>) {
-        self.busy = false;
+        self.set_busy(false, cx);
         self.status = message.into();
         cx.notify();
     }
@@ -734,7 +741,7 @@ impl TableViewer {
         );
         let count_sql = count.then(|| d.count(scope, table, &filter));
         self.status = sql.clone().into();
-        self.busy = true;
+        self.set_busy(true, cx);
         cx.notify();
         let page = run_on(session.clone(), move |rel| {
             Box::pin(async move { rel.execute(&sql).await })
@@ -750,7 +757,7 @@ impl TableViewer {
                 .map_err(|e| e.to_string())
                 .and_then(|r| r.map_err(|e| e.to_string()));
             let _ = this.update(cx, |this, cx| {
-                this.busy = false;
+                this.set_busy(false, cx);
                 match result {
                     Ok(mut sets) if !sets.is_empty() => {
                         let set = sets.swap_remove(0);
@@ -818,6 +825,7 @@ impl TableViewer {
     /// (F-DATA-003), pending edits are committed first and the page loads once that succeeds; a
     /// failed commit keeps the edits and the rows they belong to.
     fn reload_committed(&mut self, count: bool, window: &mut Window, cx: &mut Context<Self>) {
+        self.grid.update(cx, |g, cx| g.commit_edit(window, cx));
         if !self.grid.read(cx).model(cx).has_changes() {
             self.reload(count, cx);
             return;
@@ -862,6 +870,8 @@ impl TableViewer {
         if self.busy {
             return;
         }
+        // The cell being typed in belongs to this commit; once the grid locks it could not be written
+        self.grid.update(cx, |g, cx| g.commit_edit(window, cx));
         self.flush_form(cx);
         let commit = self.commit_statements(cx);
         if commit.statements.is_empty() && !end_transaction {
@@ -878,7 +888,7 @@ impl TableViewer {
         }
         let in_tx = self.in_transaction;
         self.status = commit.statements.join(";\n").into();
-        self.busy = true;
+        self.set_busy(true, cx);
         let job = run_on(session, move |rel| {
             Box::pin(apply(rel, commit, in_tx, end_transaction))
         });
@@ -888,7 +898,7 @@ impl TableViewer {
                 .map_err(|e| e.to_string())
                 .and_then(|r| r.map_err(|e| e.to_string()));
             let _ = this.update_in(cx, |this, window, cx| {
-                this.busy = false;
+                this.set_busy(false, cx);
                 match result {
                     Ok(()) => {
                         if end_transaction {
@@ -2580,7 +2590,7 @@ impl TableViewer {
             )
             .child(
                 icon_button("row-discard", "x", t!("viewer.discard_changes").to_string())
-                    .disabled(!dirty)
+                    .disabled(!dirty || self.busy)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.grid
                             .update(cx, |g, cx| g.update_model(cx, |m| m.discard()));

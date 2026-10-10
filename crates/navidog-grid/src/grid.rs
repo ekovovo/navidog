@@ -879,6 +879,14 @@ impl ResultGrid {
         });
     }
 
+    /// See `GridModel::locked`. A locked grid also does not open the in-place editor.
+    pub fn set_locked(&mut self, locked: bool, cx: &mut Context<Self>) {
+        self.table.update(cx, |t, cx| {
+            t.delegate_mut().model.locked = locked;
+            cx.notify();
+        });
+    }
+
     /// Raw data mode: string cells gain SQL quotes, and later edits are expressions.
     pub fn set_raw_mode(&mut self, raw: bool, cx: &mut Context<Self>) {
         self.raw = raw;
@@ -1220,12 +1228,8 @@ impl ResultGrid {
 
     pub fn start_edit(&mut self, pos: Pos, window: &mut Window, cx: &mut Context<Self>) {
         self.commit_edit(window, cx);
-        if self
-            .model(cx)
-            .columns
-            .get(pos.1)
-            .is_some_and(|col| col.read_only)
-        {
+        let m = self.model(cx);
+        if m.locked || m.columns.get(pos.1).is_some_and(|col| col.read_only) {
             return;
         }
         let kind = self
@@ -1270,7 +1274,7 @@ impl ResultGrid {
 
     /// Ends in-place editing and writes back to the model; an unchanged value is not a change (a NULL
     /// that is still an empty string after editing stays NULL).
-    fn commit_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn commit_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(((r, c), input)) = self
             .table
             .update(cx, |t, _| t.delegate_mut().editing.take())
