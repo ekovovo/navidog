@@ -77,6 +77,9 @@
 | --- | --- | --- |
 | `grid.header.height` | 28 | nib:GridViewController/NSTableHeaderView（高 28） |
 | `grid.type_header.height` | 34 | 暂定。显示类型时表头单独用这个高度（`DataTable::header_row_height`）；28 放不下字段名加类型。数据行仍用 `grid.row.height` |
+| `grid.header.name_line` | 15 | 暂定。表头第一行（字段名）的行高 |
+| `grid.header.type_line` | 13 | 暂定。表头第二行（类型图标和类型名）的行高，与上一行合起来放进 34 |
+| `grid.header.type_gap` | 3 | 暂定。类型图标与类型名之间的间距 |
 | `grid.row_number_width` | 20 | nib:GridViewController/行号 NSScrollView（宽 20） |
 | `grid.row.height` | 20 | 暂定，待 AX |
 | `grid.date_picker.width` | 317 | nib:NAVDateTimePicker/NSWindowRect（317 × 247） |
