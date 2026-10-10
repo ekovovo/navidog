@@ -586,8 +586,7 @@ impl ConnectionForm {
                     .ok_text(t!("conn.reopen_now").to_string())
                     .cancel_text(t!("conn.later").to_string())
                     .on_ok(move |_, window, cx| {
-                        Sessions::global(cx).update(cx, |s, cx| s.close(&id, cx));
-                        crate::open_connection(id.clone(), window, cx);
+                        crate::reopen_connection(id.clone(), window, cx);
                         true
                     })
             });

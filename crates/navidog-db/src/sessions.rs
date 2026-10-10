@@ -1,6 +1,7 @@
-//! 已打开连接的运行时状态（11-connection.md 第 4 节）。
-//! 打开连接时缓存解析后的连接参数（含秘密），之后为表查看器、查询编辑器另开会话无需再次询问密码。
-//! PostgreSQL 的会话只能访问一个数据库，浏览其他数据库时按需另开元数据会话。
+//! Runtime state of open connections (11-connection.md §4).
+//! Opening caches the resolved parameters (secrets included), so later sessions for table viewers
+//! and query editors do not ask for passwords again.
+//! A PostgreSQL session reaches one database; browsing another opens a metadata session on demand.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -18,7 +19,7 @@ use crate::{
     ConnectParams, DbError, DbResult, Driver, DriverRegistry, Relational, Secrets, Session, runtime,
 };
 
-/// 关闭时取出会话，其余持有者之后拿到 `None`。
+/// Closing takes the session out; other holders get `None` afterwards.
 pub type SharedSession = Arc<Mutex<Option<Box<dyn Session>>>>;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -42,6 +43,9 @@ pub enum SessionsEvent {
     Opened(ConnectionId),
     Failed(ConnectionId, String),
     Closed(ConnectionId),
+    /// Closed only to open again with new settings (profile switch, "Reopen Now"). Sessions and
+    /// caches go as with `Closed`, but editor tabs stay and reconnect on `Opened`.
+    Reopening(ConnectionId),
 }
 
 struct Live {
@@ -49,7 +53,7 @@ struct Live {
     params: ConnectParams,
     dialect: Option<Dialect>,
     primary: SharedSession,
-    /// 主会话所连的数据库（PostgreSQL）
+    /// The database the primary session is connected to (PostgreSQL)
     primary_db: Option<String>,
     per_db: Arc<Mutex<HashMap<String, SharedSession>>>,
     keepalive: Option<JoinHandle<()>>,
@@ -78,7 +82,7 @@ impl Live {
 pub struct Sessions {
     states: HashMap<ConnectionId, ConnState>,
     live: HashMap<ConnectionId, Live>,
-    /// 进行中的打开任务；关闭连接或重复打开时丢弃，结果随之作废
+    /// Opens in flight; closing or opening again drops the task, so its result is discarded
     tasks: HashMap<ConnectionId, Task<()>>,
 }
 
@@ -117,7 +121,7 @@ impl Sessions {
         self.live.keys()
     }
 
-    /// 打开连接。秘密字段由调用方解析（可能需要弹出询问密码对话框）。
+    /// Opens a connection. The caller resolves the secret fields (possibly asking for a password).
     pub fn open(&mut self, id: ConnectionId, secrets: Secrets, cx: &mut Context<Self>) {
         let store = ConnectionStore::global(cx);
         let Some(conn) = store.read(cx).get(&id).cloned() else {
@@ -202,16 +206,27 @@ impl Sessions {
     }
 
     pub fn close(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.shut(id);
+        cx.emit(SessionsEvent::Closed(id.to_string()));
+        cx.notify();
+    }
+
+    /// Closes before opening again with new settings; see `SessionsEvent::Reopening`.
+    pub fn close_for_reopen(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.shut(id);
+        cx.emit(SessionsEvent::Reopening(id.to_string()));
+        cx.notify();
+    }
+
+    fn shut(&mut self, id: &str) {
         self.tasks.remove(id);
         if let Some(live) = self.live.remove(id) {
             live.close_all();
         }
         self.states.insert(id.to_string(), ConnState::Closed);
-        cx.emit(SessionsEvent::Closed(id.to_string()));
-        cx.notify();
     }
 
-    /// 重新列出数据库。
+    /// Lists the databases again.
     pub fn refresh(&mut self, id: &str, cx: &mut Context<Self>) {
         let Some(job) = self.run_rel(id, None, |r| r.list_databases()) else {
             return;
@@ -231,8 +246,8 @@ impl Sessions {
         self.tasks.insert(id.to_string(), task);
     }
 
-    /// 在连接的元数据会话上执行。`database` 为 PostgreSQL 指定要访问的数据库，必要时另开会话；
-    /// 其他方言忽略它（同一会话即可访问所有数据库）。
+    /// Runs on the connection's metadata session. `database` picks the PostgreSQL database to reach,
+    /// opening another session when needed; other dialects ignore it (one session reaches them all).
     pub fn run_rel<T: Send + 'static>(
         &self,
         id: &str,
@@ -268,7 +283,7 @@ impl Sessions {
         }))
     }
 
-    /// 另开一个独立会话（表查看器、查询编辑器），由调用方持有并负责关闭。
+    /// Opens a separate session (table viewer, query editor); the caller holds and closes it.
     pub fn new_session(
         &self,
         id: &str,
@@ -286,7 +301,7 @@ impl Sessions {
     }
 }
 
-/// 在调用方自己持有的会话上执行（表查看器、查询编辑器）。
+/// Runs on a session the caller holds (table viewer, query editor).
 pub fn run_on<T: Send + 'static>(
     shared: SharedSession,
     f: impl for<'a> FnOnce(&'a mut dyn Relational) -> BoxFuture<'a, DbResult<T>> + Send + 'static,

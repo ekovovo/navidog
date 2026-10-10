@@ -490,7 +490,9 @@ impl TableViewer {
                         {
                             this.connect(cx)
                         }
-                        SessionsEvent::Closed(id) if *id == this.object.scope.connection => {
+                        SessionsEvent::Closed(id) | SessionsEvent::Reopening(id)
+                            if *id == this.object.scope.connection =>
+                        {
                             if let Some(s) = this.session.take() {
                                 close_session(s);
                             }
@@ -624,7 +626,14 @@ impl TableViewer {
                 this.session = Some(shared);
                 this.cancel = cancel;
                 this.load_foreign_keys(cx);
-                this.reload(true, cx);
+                // Back after a reopen with edits pending: keep the rows they belong to; they
+                // commit on the new session. A reload would discard them.
+                if this.grid.read(cx).model(cx).has_changes() {
+                    this.busy = false;
+                    this.status = SharedString::default();
+                } else {
+                    this.reload(true, cx);
+                }
                 if Settings::global(cx).auto_begin_transaction {
                     this.begin_transaction(cx);
                 }

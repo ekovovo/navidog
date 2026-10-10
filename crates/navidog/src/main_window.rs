@@ -175,7 +175,8 @@ impl MainWindow {
                         }
                     }
                     SessionsEvent::Closed(id) => this.close_connection_editors(id, window, cx),
-                    SessionsEvent::Failed(_, _) => {}
+                    // Editors stay through a reopen and reconnect when it opens
+                    SessionsEvent::Reopening(_) | SessionsEvent::Failed(_, _) => {}
                 },
             ),
             cx.observe_window_appearance(window, |_, window, cx| {

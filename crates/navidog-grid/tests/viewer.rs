@@ -176,6 +176,48 @@ fn paging_commits_first_and_auto_transaction_still_loads(cx: &mut TestAppContext
         sql(&file, "SELECT name FROM t WHERE id = 1") == [vec![Some("z".to_string())]]
     });
 
+    // A reopen (profile switch, "Reopen Now") keeps the tab and its pending edit, which then
+    // commits on the new session. Page 2 holds row 3; let its load finish before editing.
+    for _ in 0..20 {
+        cx.run_until_parked();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    wait(cx, "page 2", |cx| has_rows(cx, first));
+    cx.update_window(first, |_, window, cx| {
+        window.render_frame(cx);
+        let rem = window.rem_size();
+        let col = tokens::grid::COLUMN_WIDTH.to_pixels(rem);
+        let x = tokens::grid::ROW_NUMBER_WIDTH.to_pixels(rem) + col + col / 2.;
+        window.click_at(
+            ElementId::NamedInteger("row".into(), 0),
+            gpui_kit::point(x, rem / 2.),
+            cx,
+        );
+        window.press("enter", cx);
+        window.render_frame(cx);
+        window.press("cmd-a", cx);
+        window.input("y", cx);
+        window.press("enter", cx);
+        window.render_frame(cx);
+    })
+    .unwrap();
+    cx.update(|cx| {
+        Sessions::global(cx).update(cx, |s, cx| {
+            s.close_for_reopen(&id, cx);
+            s.open(id.clone(), Secrets::default(), cx);
+        })
+    });
+    // ✓ stays disabled until the viewer has its new session, so keep clicking it
+    wait(cx, "the edit to commit after the reopen", |cx| {
+        cx.update_window(first, |_, window, cx| {
+            window.render_frame(cx);
+            window.click("row-apply", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        sql(&file, "SELECT name FROM t WHERE id = 3") == [vec![Some("y".to_string())]]
+    });
+
     // Opening a table with "auto begin transaction" sends BEGIN right after the first SELECT
     cx.update(|cx| Settings::update(cx, |s| s.auto_begin_transaction = true));
     let second = open_viewer(cx, table);

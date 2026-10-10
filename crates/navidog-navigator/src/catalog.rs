@@ -249,7 +249,10 @@ impl Catalog {
 pub(crate) fn init(cx: &mut App) {
     let catalog = cx.new(|cx: &mut Context<Catalog>| {
         cx.subscribe(&Sessions::global(cx), |this, _, e: &SessionsEvent, cx| {
-            if let SessionsEvent::Closed(id) | SessionsEvent::Opened(id) = e {
+            if let SessionsEvent::Closed(id)
+            | SessionsEvent::Reopening(id)
+            | SessionsEvent::Opened(id) = e
+            {
                 this.invalidate_connection(id, cx);
             }
         })

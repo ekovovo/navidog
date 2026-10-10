@@ -197,6 +197,13 @@ pub fn open_connection(id: String, window: &mut Window, cx: &mut App) {
     });
 }
 
+/// Closes and opens again so new settings take effect. Editor tabs stay and reconnect, unlike a
+/// real close (`SessionsEvent::Reopening`).
+pub(crate) fn reopen_connection(id: String, window: &mut Window, cx: &mut App) {
+    Sessions::global(cx).update(cx, |s, cx| s.close_for_reopen(&id, cx));
+    open_connection(id, window, cx);
+}
+
 fn confirm_delete_connection(window: &mut Window, cx: &mut App) {
     let Some(id) = selected_connection(cx) else {
         return;

@@ -35,8 +35,7 @@ fn change(
     let open = Sessions::global(cx).read(cx).state(id).is_open();
     ConnectionStore::global(cx).update(cx, |s, cx| s.update(id, f, cx));
     if open {
-        Sessions::global(cx).update(cx, |s, cx| s.close(id, cx));
-        crate::open_connection(id.to_string(), window, cx);
+        crate::reopen_connection(id.to_string(), window, cx);
     }
 }
 
