@@ -117,26 +117,25 @@ impl GridModel {
     /// literal (`'PENELOPE'`), including quotes. A value already typed as an expression is left as
     /// typed. NULL and an unfilled cell are empty; the grid paints NULL itself.
     pub fn raw_text(&self, r: usize, c: usize, raw_mode: bool, dialect: Dialect) -> String {
-        if self.raw.contains(&(r, c)) {
-            return self
-                .value(r, c)
-                .cloned()
-                .flatten()
-                .unwrap_or_default()
-                .to_string();
-        }
-        match self.value(r, c) {
-            Some(Some(s))
-                if raw_mode
-                    && self
-                        .columns
-                        .get(c)
-                        .is_some_and(|col| is_string_type(&col.type_name)) =>
-            {
-                dialect.string_literal(s)
-            }
-            Some(Some(s)) => s.to_string(),
-            _ => String::new(),
+        self.shown_text(r, c, raw_mode, dialect).to_string()
+    }
+
+    /// `raw_text` for painting: shares the cell's string unless raw data mode quotes it, so a
+    /// frame does not copy every visible value.
+    pub fn shown_text(&self, r: usize, c: usize, raw_mode: bool, dialect: Dialect) -> SharedString {
+        let Some(Some(s)) = self.value(r, c) else {
+            return SharedString::default();
+        };
+        let quote = raw_mode
+            && !self.raw.contains(&(r, c))
+            && self
+                .columns
+                .get(c)
+                .is_some_and(|col| is_string_type(&col.type_name));
+        if quote {
+            dialect.string_literal(s).into()
+        } else {
+            s.clone()
         }
     }
 
@@ -784,6 +783,12 @@ fn contains(hay: &str, needle: &str, case_sensitive: bool) -> bool {
     }
     if case_sensitive {
         hay.contains(needle)
+    } else if hay.is_ascii() && needle.is_ascii() {
+        // The usual case, without the per-cell `Vec<char>`s below (the grid checks every visible cell)
+        let n = needle.as_bytes();
+        hay.as_bytes()
+            .windows(n.len())
+            .any(|w| w.eq_ignore_ascii_case(n))
     } else {
         let n: Vec<char> = needle.chars().collect();
         let h: Vec<char> = hay.chars().collect();

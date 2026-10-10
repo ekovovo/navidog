@@ -13,13 +13,15 @@ pub enum TypeKind {
 }
 
 /// `varchar(255)`, `bigint unsigned`, `integer[]` and `MYSQL_TYPE_LONG` all classify by the base name.
+/// Compares ignoring ASCII case instead of lowercasing a copy: the grid calls this per cell per frame.
 pub fn type_kind(type_name: &str) -> TypeKind {
-    let t = type_name.trim().to_ascii_lowercase();
-    let base = t
+    let base = type_name
+        .trim()
         .split(|ch: char| ch == '(' || ch.is_whitespace())
         .next()
         .unwrap_or("")
         .trim_end_matches("[]");
+    let is = |list: &[&str]| list.iter().any(|name| name.eq_ignore_ascii_case(base));
     const JSON: &[&str] = &["json", "jsonb", "mysql_type_json"];
     const TIME: &[&str] = &[
         "date",
@@ -123,17 +125,17 @@ pub fn type_kind(type_name: &str) -> TypeKind {
         "mysql_type_enum",
         "mysql_type_set",
     ];
-    if JSON.contains(&base) {
+    if is(JSON) {
         TypeKind::Json
-    } else if TIME.contains(&base) {
+    } else if is(TIME) {
         TypeKind::Time
-    } else if BOOL.contains(&base) {
+    } else if is(BOOL) {
         TypeKind::Bool
-    } else if BINARY.contains(&base) {
+    } else if is(BINARY) {
         TypeKind::Binary
-    } else if NUMBER.contains(&base) {
+    } else if is(NUMBER) {
         TypeKind::Number
-    } else if TEXT.contains(&base) {
+    } else if is(TEXT) {
         TypeKind::Text
     } else {
         TypeKind::Other
@@ -143,44 +145,7 @@ pub fn type_kind(type_name: &str) -> TypeKind {
 /// Character types are quoted in raw data mode. Accepts SQL names (`varchar(45)`,
 /// `character varying`) and the MySQL protocol names the driver puts on a result column.
 pub fn is_string_type(type_name: &str) -> bool {
-    let t = type_name.to_ascii_lowercase();
-    if t.contains("mysql_type_string")
-        || t.contains("mysql_type_var_string")
-        || t.contains("mysql_type_varchar")
-        || t.contains("mysql_type_enum")
-        || t.contains("mysql_type_set")
-        || t.contains("mysql_type_json")
-    {
-        return true;
-    }
-    let base = t
-        .split(|ch: char| ch == '(' || ch.is_whitespace())
-        .next()
-        .unwrap_or("");
-    matches!(
-        base,
-        "char"
-            | "varchar"
-            | "nchar"
-            | "nvarchar"
-            | "character"
-            | "bpchar"
-            | "text"
-            | "tinytext"
-            | "mediumtext"
-            | "longtext"
-            | "ntext"
-            | "clob"
-            | "citext"
-            | "string"
-            | "enum"
-            | "set"
-            | "json"
-            | "jsonb"
-            | "xml"
-            | "uuid"
-            | "name"
-    )
+    matches!(type_kind(type_name), TypeKind::Text | TypeKind::Json)
 }
 
 /// Date, time, or timestamp. `None` for every other type.

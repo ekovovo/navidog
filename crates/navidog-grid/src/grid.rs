@@ -658,14 +658,14 @@ impl TableDelegate for GridDelegate {
             .find
             .as_ref()
             .is_some_and(|(query, case)| self.model.cell_matches(r, c, query, *case));
-        let shown = self.model.raw_text(r, c, self.raw, self.dialect);
+        let shown = self.model.shown_text(r, c, self.raw, self.dialect);
         // Unfilled cells of a new row show Navicat's literal "(Default)" and are not written.
         let (text, tone): (SharedString, Option<gpui_kit::Hsla>) = match self.model.value(r, c) {
             // A cell shows one line, like Navicat; the cell editor shows the full value
             Some(Some(_)) if shown.contains('\n') => {
                 (shown.replace(['\r', '\n'], " ").into(), None)
             }
-            Some(Some(_)) => (shown.into(), None),
+            Some(Some(_)) => (shown, None),
             Some(None) => ("(NULL)".into(), Some(p.label_tertiary)),
             None if state == RowState::Inserted => ("(Default)".into(), Some(p.label_secondary)),
             None => ("".into(), None),
