@@ -407,6 +407,28 @@ fn query_editor_driver_features() {
         }
         assert!(sets.iter().filter(|s| !s.columns.is_empty()).count() >= 2);
 
+        let outline = navidog_db::outline::fetch(
+            &mut *rel,
+            &navidog_core::object::Scope::new("c", "sakila", None),
+            false,
+        )
+        .await
+        .unwrap();
+        assert!(
+            outline
+                .table("actor")
+                .unwrap()
+                .columns
+                .iter()
+                .any(|(c, _)| c == "first_name")
+        );
+        assert!(outline.table("actor_info").unwrap().view);
+        assert!(outline.schemas.contains(&"sakila".to_string()));
+        assert!(
+            !outline.schemas.contains(&"mysql".to_string()),
+            "system databases are off"
+        );
+
         let e = rel.execute("SELECT SLEEP(5)").await.unwrap_err();
         assert!(e.message.contains("超时"), "{e}");
         // The session survives the kill
@@ -439,6 +461,25 @@ fn query_editor_driver_features() {
             .await
             .unwrap();
         assert_eq!(sets.last().unwrap().notices, ["NOTICE: hello 1"]);
+        let outline = navidog_db::outline::fetch(
+            &mut *rel,
+            &navidog_core::object::Scope::new("c", "pagila", Some("public".into())),
+            true,
+        )
+        .await
+        .unwrap();
+        let actor = outline.table("actor").unwrap();
+        assert!(
+            actor
+                .columns
+                .iter()
+                .any(|(c, t)| c == "first_name" && !t.is_empty()),
+            "{actor:?}"
+        );
+        assert!(
+            outline.table("pg_class").is_some(),
+            "system objects when asked"
+        );
         pg.close().await.unwrap();
     });
 }

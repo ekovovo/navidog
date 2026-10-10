@@ -13,6 +13,7 @@ pub mod paths;
 pub mod queries;
 pub mod registry;
 pub mod settings;
+pub mod snippets;
 pub mod store;
 pub mod uri;
 pub mod vgroups;
@@ -28,5 +29,6 @@ pub fn init(cx: &mut App) {
     store::init(cx);
     favorites::init(cx);
     vgroups::init(cx);
+    snippets::init(cx);
     workspace::init(cx);
 }

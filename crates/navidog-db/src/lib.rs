@@ -3,9 +3,11 @@
 
 pub mod dialect;
 pub mod driver;
+mod keywords;
 pub mod log;
 mod metadata;
 pub mod mysql;
+pub mod outline;
 pub mod params;
 pub mod postgres;
 pub mod runtime;
@@ -43,6 +45,7 @@ pub fn init(cx: &mut App) {
     }
     cx.set_global(registry);
     sessions::init(cx);
+    outline::init(cx);
 }
 
 /// Open a session. With SSH, open the tunnel first and connect the driver to its local port.

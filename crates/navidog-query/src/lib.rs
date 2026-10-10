@@ -6,6 +6,7 @@ extern crate gpui_kit as gpui;
 
 rust_i18n::i18n!("locales", fallback = "en");
 
+mod completion;
 mod editor;
 mod explain;
 mod explain_visual;

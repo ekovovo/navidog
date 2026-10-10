@@ -10,7 +10,8 @@ use gpui_kit::component::dock::{
     register_panel,
 };
 use gpui_kit::component::input::{
-    Copy, Cut, Editor, EditorState, Escape, IndentInline, InputEvent, OutdentInline, TabSize,
+    Copy, Cut, Editor, EditorState, Enter, Escape, IndentInline, InputEvent, MoveDown, MoveUp,
+    OutdentInline, TabSize,
 };
 use gpui_kit::component::native_menu::NativeMenu;
 use gpui_kit::component::resizable::{h_resizable, resizable_panel, v_resizable};
@@ -195,6 +196,10 @@ pub struct QueryEditor {
     pub(crate) results_page: bool,
     /// Snippet placeholders being tabbed through
     pub(crate) tab_stops: Option<crate::snippet::TabStops>,
+    /// Snippet codes the completion menu offered last
+    pub(crate) offered_snippets: std::rc::Rc<std::cell::RefCell<Vec<String>>>,
+    /// An arrow key moved the completion menu since it opened (for "auto select first item")
+    pub(crate) menu_moved: bool,
     pub(crate) find: crate::find::Find,
     pub(crate) stack_paste: Option<crate::format::StackPaste>,
     /// Bracket highlight frames and the caret they were computed for
@@ -351,9 +356,10 @@ impl QueryEditor {
         editor.update(cx, |e, cx| e.set_value(text, window, cx));
         let this = cx.new(|cx: &mut Context<Self>| {
             let subs = vec![
-                cx.subscribe_in(&editor, window, |this, _, e: &InputEvent, _, cx| {
+                cx.subscribe_in(&editor, window, |this, _, e: &InputEvent, window, cx| {
                     if matches!(e, InputEvent::Change) {
                         this.on_text_changed(cx);
+                        this.expand_inserted_snippet(window, cx);
                     }
                 }),
                 cx.subscribe_in(
@@ -367,6 +373,16 @@ impl QueryEditor {
             ];
             let results = Results::new(window, cx);
             let find = crate::find::Find::new(window, cx);
+            let offered: std::rc::Rc<std::cell::RefCell<Vec<String>>> = Default::default();
+            let provider = crate::completion::Provider {
+                editor: cx.entity().downgrade(),
+                offered: offered.clone(),
+            };
+            editor.update(cx, |e, _| {
+                e.lsp_mut().completion_provider = Some(std::rc::Rc::new(provider));
+                // raw-px: room for "column · type" labels
+                e.lsp_mut().completion_menu.max_width = px(420.);
+            });
             Self {
                 focus_handle: cx.focus_handle(),
                 id,
@@ -384,6 +400,8 @@ impl QueryEditor {
                 results,
                 results_page: false,
                 tab_stops: None,
+                offered_snippets: offered,
+                menu_moved: false,
                 find,
                 stack_paste: None,
                 brackets: None,
@@ -400,6 +418,7 @@ impl QueryEditor {
                 .file_path()
                 .and_then(|p| navidog_core::queries::modified(&p));
             this.load_schemas(cx);
+            this.ensure_outline(false, cx);
         });
         crate::save::register(this.downgrade(), cx);
         this
@@ -559,6 +578,7 @@ impl QueryEditor {
     }
 
     fn on_text_changed(&mut self, cx: &mut Context<Self>) {
+        self.menu_moved = false;
         if !self.dirty {
             self.dirty = true;
             cx.notify();
@@ -586,6 +606,7 @@ impl QueryEditor {
         match e {
             SessionsEvent::Opened(id) if *id == conn => {
                 self.load_schemas(cx);
+                self.ensure_outline(false, cx);
                 if let Some(kind) = self.pending_run.take() {
                     self.run(kind, window, cx);
                 }
@@ -646,11 +667,13 @@ impl QueryEditor {
         self.target.schema = None;
         self.schemas.clear();
         self.load_schemas(cx);
+        self.ensure_outline(false, cx);
         cx.notify();
     }
 
     pub(crate) fn pick_schema(&mut self, name: String, cx: &mut Context<Self>) {
         self.target.schema = Some(name);
+        self.ensure_outline(false, cx);
         cx.notify();
     }
 
@@ -678,6 +701,7 @@ impl QueryEditor {
                     .collect();
                 if this.target.schema.is_none() && user.iter().any(|s| s == "public") {
                     this.target.schema = Some("public".into());
+                    this.ensure_outline(false, cx);
                 }
                 this.schemas = user;
                 cx.notify();
@@ -775,6 +799,15 @@ impl QueryEditor {
         self.editor
             .update(cx, |e, cx| e.set_soft_wrap(wrap, window, cx));
         cx.notify();
+    }
+
+    pub(crate) fn completion_open(&self, cx: &App) -> bool {
+        self.editor.read(cx).completion_menu_state().open
+    }
+
+    /// With "auto select first item" off, Enter and Tab accept only after an arrow key.
+    fn accepts_completion(&self, cx: &App) -> bool {
+        Settings::global(cx).auto_select_first || self.menu_moved
     }
 
     pub(crate) fn editor_focused(&self, window: &Window, cx: &App) -> bool {
@@ -1333,10 +1366,53 @@ impl Render for QueryEditor {
                 }
             }))
             .capture_action(cx.listener(|this, _: &IndentInline, window, cx| {
-                if this.editor_focused(window, cx) && this.step_tab_stop(true, window, cx) {
+                if !this.editor_focused(window, cx) {
+                    return;
+                }
+                // Tab accepts the completion like Enter (30 §4)
+                if this.completion_open(cx) {
+                    if this.accepts_completion(cx) {
+                        this.editor.update(cx, |e, cx| {
+                            e.route_overlay_action(
+                                Box::new(Enter {
+                                    secondary: false,
+                                    shift: false,
+                                }),
+                                window,
+                                cx,
+                            );
+                        });
+                        cx.stop_propagation();
+                    } else {
+                        this.editor
+                            .update(cx, |e, cx| e.dismiss_completion_overlay(cx));
+                    }
+                    return;
+                }
+                if this.step_tab_stop(true, window, cx) {
                     cx.stop_propagation();
                 }
             }))
+            .capture_action(cx.listener(|this, _: &Enter, window, cx| {
+                if this.editor_focused(window, cx)
+                    && this.completion_open(cx)
+                    && !this.accepts_completion(cx)
+                {
+                    this.editor
+                        .update(cx, |e, cx| e.dismiss_completion_overlay(cx));
+                }
+            }))
+            .capture_action(cx.listener(|this, _: &MoveUp, _, cx| {
+                if this.completion_open(cx) {
+                    this.menu_moved = true;
+                }
+            }))
+            .capture_action(cx.listener(|this, _: &MoveDown, _, cx| {
+                if this.completion_open(cx) {
+                    this.menu_moved = true;
+                }
+            }))
+            .on_action(cx.listener(|this, _: &UpdateOutline, _, cx| this.ensure_outline(true, cx)))
             .capture_action(cx.listener(|this, _: &OutdentInline, window, cx| {
                 if this.editor_focused(window, cx) && this.step_tab_stop(false, window, cx) {
                     cx.stop_propagation();
@@ -1346,8 +1422,16 @@ impl Render for QueryEditor {
                 if this.tab_stops.is_some() {
                     this.end_tab_stops(cx);
                     cx.stop_propagation();
-                } else if this.find.open {
+                } else if this.find.open && !this.completion_open(cx) {
                     this.close_find(window, cx);
+                    cx.stop_propagation();
+                } else if this.editor_focused(window, cx)
+                    && !this.completion_open(cx)
+                    && crate::completion::completion_on(this, cx)
+                {
+                    // Esc with the menu closed opens it (30 §4)
+                    this.editor
+                        .update(cx, |e, cx| e.show_completions(window, cx));
                     cx.stop_propagation();
                 }
             }))

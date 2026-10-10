@@ -16,6 +16,8 @@ thiserror.workspace = true
 tokio.workspace = true
 futures.workspace = true
 tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 # rustls 后端：客户端证书直接使用 PEM（native-tls 后端只接受 PKCS#12）
 mysql_async = { version = "0.37", default-features = false, features = ["default-rustls-ring"] }
 tokio-postgres = "0.7"

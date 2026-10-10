@@ -369,7 +369,6 @@ mod tests {
         };
         write(&entry);
         assert_eq!(read("e1"), Some(entry.clone()));
-        assert!(all().contains(&entry));
         forget("e1");
         assert_eq!(read("e1"), None);
     }

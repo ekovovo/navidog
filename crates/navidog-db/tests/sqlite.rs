@@ -47,6 +47,17 @@ fn sqlite_create_attach_execute_and_error_codes() {
         assert_eq!((origin.schema.as_str(), origin.table.as_str(), origin.column.as_str()), ("main", "t", "name"));
         assert!(sets[0].columns[1].origin.is_none());
         assert!(session.session_id().is_none());
+        // Code completion info: tables, views and their columns in one go
+        let outline = navidog_db::outline::fetch(
+            session.relational().unwrap(),
+            &navidog_core::object::Scope::new("c", "main", None),
+            false,
+        )
+        .await
+        .unwrap();
+        let t = outline.table("t").unwrap();
+        assert_eq!(t.columns, [("id".to_string(), "INTEGER".to_string()), ("name".to_string(), "TEXT".to_string())]);
+        assert_eq!(outline.schemas, ["main", "other"]);
         // Every statement lands in the history log
         let (log, _) = navidog_db::log::since(0);
         assert!(log.iter().any(|e| e.sql == "SELECT name AS n, id + 1 FROM t" && e.kind == "SQLITE"));
