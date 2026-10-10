@@ -288,16 +288,20 @@ fn predicate(rule: &Rule, dialect: Dialect) -> Option<String> {
         if text.is_empty() {
             return None;
         }
-        return Some(if rule.negate {
-            format!("NOT ({text})")
-        } else {
-            text.to_string()
-        });
+        // Parenthesized, so an OR inside cannot regroup the rules around it
+        let not = if rule.negate { "NOT " } else { "" };
+        return Some(format!("{not}({text})"));
     }
     if rule.field.is_empty() {
         return None;
     }
     let field = dialect.quote_ident(&rule.field);
+    // PostgreSQL has no LIKE for numbers or dates; the cast makes "contains" work on any column
+    let text_field = if dialect == Dialect::Postgres {
+        format!("{field}::text")
+    } else {
+        field.clone()
+    };
     let body = match rule.op {
         Op::Eq => format!("{field} = {}", sql_value(dialect, &rule.value)),
         Op::Ne => format!("{field} != {}", sql_value(dialect, &rule.value)),
@@ -305,14 +309,49 @@ fn predicate(rule: &Rule, dialect: Dialect) -> Option<String> {
         Op::Le => format!("{field} <= {}", sql_value(dialect, &rule.value)),
         Op::Gt => format!("{field} > {}", sql_value(dialect, &rule.value)),
         Op::Ge => format!("{field} >= {}", sql_value(dialect, &rule.value)),
-        Op::Contains => like(&field, dialect, &rule.value, Like::Contains, false, false),
-        Op::NotContains => like(&field, dialect, &rule.value, Like::Contains, true, false),
-        Op::ContainsI => like(&field, dialect, &rule.value, Like::Contains, false, true),
-        Op::NotContainsI => like(&field, dialect, &rule.value, Like::Contains, true, true),
-        Op::Starts => like(&field, dialect, &rule.value, Like::Starts, false, false),
-        Op::NotStarts => like(&field, dialect, &rule.value, Like::Starts, true, false),
-        Op::Ends => like(&field, dialect, &rule.value, Like::Ends, false, false),
-        Op::NotEnds => like(&field, dialect, &rule.value, Like::Ends, true, false),
+        Op::Contains => like(
+            &text_field,
+            dialect,
+            &rule.value,
+            Like::Contains,
+            false,
+            false,
+        ),
+        Op::NotContains => like(
+            &text_field,
+            dialect,
+            &rule.value,
+            Like::Contains,
+            true,
+            false,
+        ),
+        Op::ContainsI => like(
+            &text_field,
+            dialect,
+            &rule.value,
+            Like::Contains,
+            false,
+            true,
+        ),
+        Op::NotContainsI => like(
+            &text_field,
+            dialect,
+            &rule.value,
+            Like::Contains,
+            true,
+            true,
+        ),
+        Op::Starts => like(
+            &text_field,
+            dialect,
+            &rule.value,
+            Like::Starts,
+            false,
+            false,
+        ),
+        Op::NotStarts => like(&text_field, dialect, &rule.value, Like::Starts, true, false),
+        Op::Ends => like(&text_field, dialect, &rule.value, Like::Ends, false, false),
+        Op::NotEnds => like(&text_field, dialect, &rule.value, Like::Ends, true, false),
         Op::IsNull => format!("{field} IS NULL"),
         Op::NotNull => format!("{field} IS NOT NULL"),
         Op::Empty => format!("{field} = ''"),
@@ -379,27 +418,11 @@ fn in_list(dialect: Dialect, value: &str) -> String {
         .join(", ")
 }
 
+/// Always a string literal: all three databases convert it to the column's type, while a bare
+/// number fails on a PostgreSQL text column, matches every non-numeric string in MySQL, and turns
+/// `007` into 7.
 fn sql_value(dialect: Dialect, raw: &str) -> String {
-    let t = raw.trim();
-    if is_number(t) {
-        t.to_string()
-    } else {
-        dialect.string_literal(t)
-    }
-}
-
-fn is_number(s: &str) -> bool {
-    let s = s
-        .strip_prefix('+')
-        .or_else(|| s.strip_prefix('-'))
-        .unwrap_or(s);
-    let mut parts = s.split('.');
-    let whole = parts.next().unwrap_or("");
-    let frac = parts.next();
-    parts.next().is_none()
-        && !whole.is_empty()
-        && whole.bytes().all(|b| b.is_ascii_digit())
-        && frac.is_none_or(|f| !f.is_empty() && f.bytes().all(|b| b.is_ascii_digit()))
+    dialect.string_literal(raw.trim())
 }
 
 fn unwrap_group(sql: &str, dialect: Dialect) -> (String, bool, bool) {
@@ -567,6 +590,11 @@ fn parse_pred(sql: &str, dialect: Dialect) -> Option<Rule> {
         (sql.to_string(), false)
     };
     let (field, rest) = parse_ident(sql.trim(), dialect)?;
+    // The cast `predicate` writes before LIKE on PostgreSQL
+    let rest = match rest.strip_prefix("::") {
+        Some(cast) if dialect == Dialect::Postgres => eat_kw(cast, "text")?,
+        _ => rest,
+    };
     let rest = rest.trim_start();
     let (op, value, value2, rest) = parse_op(rest, dialect)?;
     if !rest.trim().is_empty() {
@@ -723,7 +751,8 @@ fn parse_in(rest: &str, dialect: Dialect, negated: bool) -> Option<(Op, String, 
     let mut values = Vec::new();
     for part in split_commas(inner, dialect) {
         let (v, left) = parse_sql_value(part.trim(), dialect)?;
-        if !left.trim().is_empty() {
+        // The builder separates list values with commas; a comma inside one stays in text mode
+        if !left.trim().is_empty() || v.contains(',') {
             return None;
         }
         values.push(v);
@@ -1088,11 +1117,62 @@ mod tests {
             ..Filter::default()
         };
         let sql = where_sql(&filter, dialect);
-        assert_eq!(sql, "\"a\"\"b\" = 1");
+        assert_eq!(sql, "\"a\"\"b\" = '1'");
         assert_eq!(parse_where(&sql, dialect).unwrap().rules[0].field, "a\"b");
         assert!(parse_where("1 = 1; DROP TABLE t", dialect).is_none());
         assert!(parse_where("name = 'x' OR 1", dialect).is_none());
         assert!(parse_order("name ASC LIMIT 1", dialect).is_none());
+    }
+
+    #[test]
+    fn values_are_literals_and_postgres_like_casts() {
+        let one = |rule: Rule, dialect| {
+            where_sql(
+                &Filter {
+                    rules: vec![rule],
+                    ..Filter::default()
+                },
+                dialect,
+            )
+        };
+        // A number-looking value stays a literal, so '007' keeps its zeros through a round trip
+        let sql = one(rule("code", Op::Eq, "007", ""), Dialect::MySql);
+        assert_eq!(sql, "`code` = '007'");
+        assert_eq!(
+            parse_where(&sql, Dialect::MySql).unwrap().rules[0].value,
+            "007"
+        );
+        // Text a user typed with a bare number still parses
+        assert_eq!(
+            parse_where("id = 5", Dialect::MySql).unwrap().rules[0].value,
+            "5"
+        );
+        // PostgreSQL casts before LIKE so integer columns work, and the cast parses back
+        let sql = one(rule("id", Op::Contains, "1", ""), Dialect::Postgres);
+        assert_eq!(sql, "\"id\"::text LIKE '%1%' ESCAPE '\\'");
+        let parsed = parse_where(&sql, Dialect::Postgres).unwrap();
+        assert_eq!(
+            (parsed.rules[0].op, parsed.rules[0].field.as_str()),
+            (Op::Contains, "id")
+        );
+        assert_eq!(
+            one(rule("id", Op::Contains, "1", ""), Dialect::MySql),
+            "`id` LIKE '%1%' ESCAPE '\\\\'"
+        );
+        // A list value with a comma in it cannot come back as builder values
+        assert!(parse_where("name IN ('a,b', 'c')", Dialect::MySql).is_none());
+        // A custom condition keeps its own OR together
+        let filter = Filter {
+            rules: vec![
+                rule("a", Op::Eq, "1", ""),
+                rule("", Op::Custom, "x = 1 OR y = 2", ""),
+            ],
+            ..Filter::default()
+        };
+        assert_eq!(
+            where_sql(&filter, Dialect::Sqlite),
+            "\"a\" = '1' AND (x = 1 OR y = 2)"
+        );
     }
 
     #[test]

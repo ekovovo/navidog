@@ -18,7 +18,7 @@ use crate::model::Pos;
 
 pub(crate) use navidog_util::sql_type::{Temporal, temporal_kind};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct Parts {
     y: i32,
     m: u32,
@@ -26,11 +26,13 @@ struct Parts {
     h: u32,
     min: u32,
     s: u32,
+    /// What followed the seconds (fraction, time zone), written back as it was
+    tail: String,
 }
 
-fn format_parts(kind: Temporal, p: Parts) -> String {
+fn format_parts(kind: Temporal, p: &Parts) -> String {
     let date = format!("{:04}-{:02}-{:02}", p.y, p.m, p.d);
-    let time = format!("{:02}:{:02}:{:02}", p.h, p.min, p.s);
+    let time = format!("{:02}:{:02}:{:02}{}", p.h, p.min, p.s, p.tail);
     match kind {
         Temporal::Date => date,
         Temporal::Time => time,
@@ -46,6 +48,7 @@ fn parse_parts(text: &str, kind: Temporal) -> Parts {
         h: 0,
         min: 0,
         s: 0,
+        tail: String::new(),
     };
     let (ty, tm, td) = utc_today();
     if kind != Temporal::Time {
@@ -67,19 +70,34 @@ fn parse_parts(text: &str, kind: Temporal) -> Parts {
         p.m = m.clamp(1, 12);
         p.d = d.clamp(1, days_in_month(p.y, p.m));
     }
-    if let Some((h, min, s)) = split3(time, ':') {
-        p.h = (h as u32).min(23);
+    let (hms, tail) = split_time_tail(time);
+    if let Some((h, min, s)) = split3(hms, ':') {
+        p.h = h.clamp(0, 23) as u32;
         p.min = min.min(59);
         p.s = s.min(59);
+        p.tail = tail.to_string();
     }
     p
+}
+
+/// `HH:MM:SS` and what follows it: `09:34:33.5+00` is `09:34:33` and `.5+00`.
+fn split_time_tail(time: &str) -> (&str, &str) {
+    let mut colons = 0;
+    for (i, ch) in time.char_indices() {
+        if ch == ':' {
+            colons += 1;
+        } else if colons == 2 && !ch.is_ascii_digit() {
+            return time.split_at(i);
+        }
+    }
+    (time, "")
 }
 
 fn split3(text: &str, sep: char) -> Option<(i32, u32, u32)> {
     let mut it = text.split(sep);
     let a = it.next()?.parse().ok()?;
     let b = it.next()?.parse().ok()?;
-    let c = it.next()?.split('.').next()?.parse().ok()?;
+    let c = it.next()?.parse().ok()?;
     Some((a, b, c))
 }
 
@@ -148,7 +166,13 @@ pub(crate) fn open(
     cx: &mut App,
 ) {
     let parts = parse_parts(current, kind);
-    let input = cx.new(|cx| InputState::new(window, cx).default_value(format_parts(kind, parts)));
+    // The field starts from the cell's own text, so OK without a change writes it back unchanged
+    // (a negative or 100-hour MySQL TIME, a value the calendar cannot show)
+    let start = match current.trim() {
+        "" => format_parts(kind, &parts),
+        text => text.to_string(),
+    };
+    let input = cx.new(|cx| InputState::new(window, cx).default_value(start));
     let view = cx.new(|_| DateDialog {
         kind,
         parts,
@@ -178,7 +202,7 @@ struct DateDialog {
 
 impl DateDialog {
     fn write_input(&self, window: &mut Window, cx: &mut Context<Self>) {
-        let text = format_parts(self.kind, self.parts);
+        let text = format_parts(self.kind, &self.parts);
         self.input.update(cx, |s, cx| s.set_value(text, window, cx));
     }
 
@@ -322,10 +346,24 @@ mod tests {
                 d: 7,
                 h: 16,
                 min: 5,
-                s: 9
+                s: 9,
+                tail: ".12".into(),
             }
         );
-        assert_eq!(format_parts(Temporal::DateTime, p), "2026-10-07 16:05:09");
+        assert_eq!(
+            format_parts(Temporal::DateTime, &p),
+            "2026-10-07 16:05:09.12"
+        );
+        // A PostgreSQL timestamptz keeps its zone and fraction through the picker
+        let tz = "2026-10-10 09:34:33.5+05:30";
+        assert_eq!(
+            format_parts(Temporal::DateTime, &parse_parts(tz, Temporal::DateTime)),
+            tz
+        );
+        let p = parse_parts("2026-10-10T09:34:33+00", Temporal::DateTime);
+        assert_eq!((p.h, p.min, p.s, p.tail.as_str()), (9, 34, 33, "+00"));
+        // A negative MySQL TIME does not wrap around to 23 hours of u32
+        assert_eq!(parse_parts("-01:00:00", Temporal::Time).h, 0);
         // 2026-10-01 is a Thursday, so Monday-first has three blanks
         let cells = month_cells(2026, 10);
         assert_eq!(cells[..4], [None, None, None, Some(1)]);

@@ -628,8 +628,14 @@ pub fn referenced_values_sql(
             .replace('\\', "\\\\")
             .replace('%', "\\%")
             .replace('_', "\\_");
+        // PostgreSQL has no LIKE for integers, and most foreign keys are integers
+        let cast = if dialect == Dialect::Postgres {
+            "::text"
+        } else {
+            ""
+        };
         sql.push_str(&format!(
-            " WHERE {column} LIKE {} ESCAPE {}",
+            " WHERE {column}{cast} LIKE {} ESCAPE {}",
             dialect.string_literal(&format!("%{escaped}%")),
             dialect.string_literal("\\")
         ));
@@ -697,5 +703,8 @@ mod tests {
             sql,
             "SELECT DISTINCT `actor_id` FROM `sakila`.`actor` WHERE `actor_id` LIKE '%a\\\\%\\\\_%' ESCAPE '\\\\' ORDER BY 1 LIMIT 1000"
         );
+        // Integer keys on PostgreSQL are searched as text
+        let sql = referenced_values_sql(Dialect::Postgres, &keys[0], "1", None);
+        assert!(sql.contains("\"actor_id\"::text LIKE '%1%'"), "{sql}");
     }
 }

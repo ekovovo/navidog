@@ -86,6 +86,23 @@ fn sqlite_metadata_and_change_sets() {
         );
         let role = rel.table_children(&scope, "role").await.unwrap();
         assert_eq!(role.foreign_keys, ["→ actor"]);
+        // The picker's catalog query and value query run, not just render
+        let keys = rel.foreign_keys(&scope, "role").await.unwrap();
+        assert_eq!(
+            (
+                keys[0].column.as_str(),
+                keys[0].table.as_str(),
+                keys[0].referenced.as_str()
+            ),
+            ("actor_id", "actor", "id")
+        );
+        rel.execute("INSERT INTO actor(name) VALUES ('a'), ('b')")
+            .await
+            .unwrap();
+        let sql = navidog_db::referenced_values_sql(Dialect::Sqlite, &keys[0], "1", Some(10));
+        let sets = rel.execute(&sql).await.unwrap();
+        assert_eq!(sets[0].rows, [vec![Some("1".to_string())]], "{sql}");
+        rel.execute("DELETE FROM actor").await.unwrap();
         // Duplicating rewrites the CREATE TABLE statement, keeping the primary key
         let ddl = rel
             .object_ddl(&scope, ObjectKind::Table, "role")

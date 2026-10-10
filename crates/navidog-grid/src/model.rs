@@ -509,7 +509,8 @@ impl GridModel {
             from
         };
         let total = self.row_count() * cols;
-        let start_i = (start.0 * cols + start.1).min(total.saturating_sub(1));
+        // Past the last cell wraps to the first, so Find Next from the last hit starts over
+        let start_i = (start.0 * cols + start.1) % total;
         (0..total).find_map(|step| {
             let i = (start_i + step) % total;
             let pos = (i / cols, i % cols);
@@ -1039,6 +1040,10 @@ mod tests {
         assert_eq!(m.find_cell("nope", (0, 0), false, false), None);
         assert_eq!(m.find_cell("a", (0, 1), true, true), Some((0, 1)));
         assert_eq!(m.find_cell("2", (0, 1), true, true), Some((1, 0)));
+        // Find Next from a hit in the last cell goes back to the first hit, not the same cell
+        let mut last = model(true);
+        last.set_value(1, 1, Some("1".into()));
+        assert_eq!(last.find_cell("1", (1, 1), true, true), Some((0, 0)));
         assert_eq!(m.find_column_name("na", 0, false, false), Some(1));
         assert!(m.replace_cell((0, 1), "a", "z", true));
         assert_eq!(m.value(0, 1), Some(&Some("z".into())));
