@@ -186,7 +186,7 @@ impl MainWindow {
                     .is_dark()
                     .is_none()
                 {
-                    navidog_ui::theme::apply_appearance(None, Some(window), cx);
+                    crate::apply_theme(Some(window), cx);
                 }
             }),
         ];

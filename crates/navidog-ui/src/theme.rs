@@ -41,6 +41,79 @@ pub fn apply_appearance(dark: Option<bool>, window: Option<&mut Window>, cx: &mu
     }
 }
 
+/// Syntax color keys the Editor preferences can override (F-PREF-004).
+pub const SYNTAX_KEYS: [&str; 6] = [
+    "text",
+    "keyword",
+    "comment",
+    "string",
+    "number",
+    "background",
+];
+
+/// Puts the user's syntax colors (`#rrggbb` by key) over the active theme's editor colors.
+/// Theme switches reload the theme, so call this after every appearance change.
+pub fn apply_syntax_colors(colors: &std::collections::BTreeMap<String, String>, cx: &mut App) {
+    if colors.is_empty() {
+        return;
+    }
+    let mut theme = (*Theme::global(cx).highlight_theme).clone();
+    for (key, hex) in colors {
+        let Some(color) = parse_hex(hex) else {
+            continue;
+        };
+        let style = || serde_json::from_value(serde_json::json!({ "color": hex })).ok();
+        let syntax = &mut theme.style.syntax;
+        match key.as_str() {
+            "text" => theme.style.editor_foreground = Some(color),
+            "background" => theme.style.editor_background = Some(color),
+            "keyword" => syntax.keyword = style(),
+            "comment" => {
+                syntax.comment = style();
+                syntax.comment_doc = style();
+            }
+            "string" => syntax.string = style(),
+            "number" => syntax.number = style(),
+            _ => {}
+        }
+    }
+    Theme::global_mut(cx).highlight_theme = std::sync::Arc::new(theme);
+    cx.refresh_windows();
+}
+
+/// The color of a syntax key in the active theme, for the color pickers.
+pub fn syntax_color(key: &str, cx: &App) -> Option<gpui_kit::Hsla> {
+    let style = &Theme::global(cx).highlight_theme.style;
+    let pick = |s: &Option<gpui_kit::component::highlighter::ThemeStyle>| {
+        s.clone()
+            .and_then(|s| gpui_kit::HighlightStyle::from(s).color)
+    };
+    match key {
+        "text" => style.editor_foreground,
+        "background" => style.editor_background,
+        "keyword" => pick(&style.syntax.keyword),
+        "comment" => pick(&style.syntax.comment),
+        "string" => pick(&style.syntax.string),
+        "number" => pick(&style.syntax.number),
+        _ => None,
+    }
+}
+
+pub fn parse_hex(hex: &str) -> Option<gpui_kit::Hsla> {
+    let digits = hex.trim().trim_start_matches('#');
+    if digits.len() != 6 {
+        return None;
+    }
+    let v = u32::from_str_radix(digits, 16).ok()?;
+    Some(gpui_kit::rgb(v).into())
+}
+
+pub fn to_hex(color: gpui_kit::Hsla) -> String {
+    let c = gpui_kit::Rgba::from(color);
+    let byte = |f: f32| (f.clamp(0., 1.) * 255.).round() as u8;
+    format!("#{:02x}{:02x}{:02x}", byte(c.r), byte(c.g), byte(c.b))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -54,6 +127,35 @@ mod tests {
         assert_eq!(names, [LIGHT, DARK]);
         assert!(set.themes.iter().all(|t| t.font_size == Some(13.)));
         assert!(set.themes[1].mode.is_dark());
+    }
+
+    #[test]
+    fn hex_round_trips() {
+        let c = parse_hex("#0433ff").unwrap();
+        assert_eq!(to_hex(c), "#0433ff");
+        assert!(parse_hex("blue").is_none());
+    }
+
+    /// The user's colors replace the theme's editor colors.
+    #[gpui_kit::test]
+    fn syntax_colors_override_the_theme(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            init(cx);
+            let colors = std::collections::BTreeMap::from([
+                ("keyword".to_string(), "#ff0000".to_string()),
+                ("background".to_string(), "#000000".to_string()),
+            ]);
+            apply_syntax_colors(&colors, cx);
+            assert_eq!(
+                syntax_color("keyword", cx).map(to_hex).as_deref(),
+                Some("#ff0000")
+            );
+            assert_eq!(
+                syntax_color("background", cx).map(to_hex).as_deref(),
+                Some("#000000")
+            );
+        });
     }
 
     /// A theme without `highlight` keeps the previous mode's editor colors (white DDL in dark mode).

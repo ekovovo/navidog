@@ -98,6 +98,19 @@ pub fn init(cx: &mut App) {
     cx.set_global(AppState::load());
 }
 
+/// The appearance from the settings, then the user's syntax colors over its editor colors.
+pub fn apply_theme(window: Option<&mut gpui_kit::Window>, cx: &mut App) {
+    use gpui_kit::component::ActiveTheme as _;
+    let s = Settings::global(cx).clone();
+    navidog_ui::theme::apply_appearance(s.appearance.is_dark(), window, cx);
+    let colors = if cx.theme().is_dark() {
+        &s.syntax_colors.dark
+    } else {
+        &s.syntax_colors.light
+    };
+    navidog_ui::theme::apply_syntax_colors(colors, cx);
+}
+
 /// Shell commands shown on the main toolbar.
 fn register_commands(cx: &mut App) {
     use navidog_core::registry::{CommandInfo, CommandRegistry, Source};
@@ -130,9 +143,8 @@ fn open_main_window(
     cx: &mut App,
 ) -> (gpui_kit::AnyWindowHandle, gpui_kit::Entity<MainWindow>) {
     let options = main_window_options(&state, cx);
-    let appearance = Settings::global(cx).appearance;
     gpui_kit::open_window(options, cx, move |window, cx| {
-        navidog_ui::theme::apply_appearance(appearance.is_dark(), Some(window), cx);
+        apply_theme(Some(window), cx);
         let view = cx.new(|cx| MainWindow::new(state, window, cx));
         if Settings::global(cx).auto_connect_on_startup {
             navidog_connection::auto_connect(window, cx);

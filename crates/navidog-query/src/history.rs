@@ -111,7 +111,7 @@ impl Panel for HistoryLog {
     fn title(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         tabs::title(
             PanelId::from(cx.entity_id()),
-            Some(lucide("history")),
+            Some(lucide("file-clock")),
             t!("query.history_log").to_string(),
             None,
             false,

@@ -13,7 +13,7 @@ icon_assets!(pub ExtraIcons, [
     Eraser, Scissors, List, TableProperties, Zap, KeyRound, ListOrdered, CircleX, Info, Code,
     Columns3, Check, RotateCcw, Play, Square, ChevronFirst, ChevronLast, ChevronLeft, ChevronRight,
     Funnel, ArrowUpDown, Clipboard, Undo2, Save, FileText, GitCommitHorizontal, CircleStop,
-    Hash, Binary, Braces, Key,
+    Hash, Binary, Braces, Key, Blocks, FileClock, Pin, ScrollText, ZoomIn, ZoomOut,
 ]);
 
 /// Our own color icons, drawn with `img()` (`svg()` can only tint in one color).

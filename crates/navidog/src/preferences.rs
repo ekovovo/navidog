@@ -1,4 +1,7 @@
-//! Preferences window (10-shell.md §10): general, tabs, records and advanced pages.
+//! Preferences window (10-shell.md §10): general, tabs, records, editor, code completion, auto
+//! recovery and advanced pages.
+
+mod query;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
@@ -52,6 +55,9 @@ enum Page {
     General,
     Tabs,
     Records,
+    Editor,
+    CodeCompletion,
+    AutoRecovery,
     Advanced,
 }
 
@@ -59,6 +65,7 @@ struct Preferences {
     page: Page,
     records_per_page: Entity<InputState>,
     grid_font_pt: Entity<InputState>,
+    query: query::QueryPrefs,
 }
 
 impl Preferences {
@@ -108,10 +115,12 @@ impl Preferences {
             },
         )
         .detach();
+        let query = query::QueryPrefs::new(window, cx);
         Self {
             page: Page::General,
             records_per_page,
             grid_font_pt,
+            query,
         }
     }
 
@@ -292,7 +301,7 @@ impl Preferences {
                     .on_click(move |ix: &usize, window, cx| {
                         let appearance = appearances[*ix];
                         Settings::update(cx, |s| s.appearance = appearance);
-                        navidog_ui::theme::apply_appearance(appearance.is_dark(), Some(window), cx);
+                        crate::apply_theme(Some(window), cx);
                     }),
             ))
             .child(Self::setting_row(
@@ -406,12 +415,15 @@ impl Preferences {
 }
 
 impl Render for Preferences {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
         let pages = [
             (Page::General, t!("prefs.general")),
             (Page::Tabs, t!("prefs.tabs")),
             (Page::Records, t!("prefs.records")),
+            (Page::Editor, t!("prefs.editor")),
+            (Page::CodeCompletion, t!("prefs.code_completion_page")),
+            (Page::AutoRecovery, t!("prefs.auto_recovery")),
             (Page::Advanced, t!("prefs.advanced")),
         ];
         let page = self.page;
@@ -419,7 +431,14 @@ impl Render for Preferences {
             Page::General => self.render_general(cx).into_any_element(),
             Page::Tabs => self.render_tabs(cx).into_any_element(),
             Page::Records => self.render_records(cx).into_any_element(),
-            Page::Advanced => self.render_advanced(cx).into_any_element(),
+            Page::Editor => self.render_editor(window, cx).into_any_element(),
+            Page::CodeCompletion => self.render_completion(cx).into_any_element(),
+            Page::AutoRecovery => self.render_recovery(cx).into_any_element(),
+            Page::Advanced => v_flex()
+                .gap(tokens::form::ROW_GAP.rems())
+                .child(self.render_advanced(cx))
+                .child(self.render_logs(cx))
+                .into_any_element(),
         };
         v_flex()
             .size_full()

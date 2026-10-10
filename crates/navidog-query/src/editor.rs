@@ -194,6 +194,8 @@ pub struct QueryEditor {
     pub(crate) results: Results,
     /// "Show results in a new page": the results page is showing instead of the editor
     pub(crate) results_page: bool,
+    /// Editor preferences last applied (line numbers, folding, tab width, spaces)
+    applied: Option<(bool, bool, u8, bool)>,
     /// Snippet placeholders being tabbed through
     pub(crate) tab_stops: Option<crate::snippet::TabStops>,
     /// Snippet codes the completion menu offered last
@@ -374,6 +376,10 @@ impl QueryEditor {
                 cx.observe(&ConnectionStore::global(cx), |_, _, cx| cx.notify()),
                 // Caret moves only notify the editor; bracket frames follow them from here
                 cx.observe(&editor, |this, _, cx| this.sync_brackets(cx)),
+                // Editor preferences apply to open editors right away (30 §9)
+                cx.observe_global_in::<Settings>(window, |this, window, cx| {
+                    this.apply_settings(window, cx)
+                }),
             ];
             let results = Results::new(window, cx);
             let find = crate::find::Find::new(window, cx);
@@ -403,6 +409,12 @@ impl QueryEditor {
                 params: HashMap::new(),
                 results,
                 results_page: false,
+                applied: Some((
+                    s.show_line_numbers,
+                    s.code_folding,
+                    s.tab_width,
+                    s.insert_spaces,
+                )),
                 tab_stops: None,
                 offered_snippets: offered,
                 menu_moved: false,
@@ -581,8 +593,51 @@ impl QueryEditor {
         })
     }
 
+    /// Line numbers, folding, tabs and highlighting follow the preferences.
+    fn apply_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let s = Settings::global(cx).clone();
+        let lang = language_for(&s, self.editor.read(cx).text().len());
+        let wanted = (
+            s.show_line_numbers,
+            s.code_folding,
+            s.tab_width,
+            s.insert_spaces,
+        );
+        if self.applied == Some(wanted) && self.editor.read(cx).language_name() == lang {
+            return;
+        }
+        self.applied = Some(wanted);
+        self.editor.update(cx, |e, cx| {
+            e.set_line_number(s.show_line_numbers, window, cx);
+            e.set_folding(s.code_folding, window, cx);
+            e.set_tab_size(
+                TabSize {
+                    tab_size: s.tab_width.clamp(1, 16) as usize,
+                    hard_tabs: !s.insert_spaces,
+                },
+                cx,
+            );
+            if e.language_name() != lang {
+                e.set_highlighter(lang, cx);
+            }
+        });
+        if !s.bracket_highlight
+            && let Some(d) = &self.brackets
+        {
+            d.clear(cx);
+            self.bracket_caret = None;
+        }
+        cx.notify();
+    }
+
     fn on_text_changed(&mut self, cx: &mut Context<Self>) {
         self.menu_moved = false;
+        // Past the size limit the editor turns plain text and completion stops (F-PREF-004)
+        let s = Settings::global(cx);
+        let lang = language_for(s, self.editor.read(cx).text().len());
+        if self.editor.read(cx).language_name() != lang {
+            self.editor.update(cx, |e, cx| e.set_highlighter(lang, cx));
+        }
         if !self.dirty {
             self.dirty = true;
             cx.notify();

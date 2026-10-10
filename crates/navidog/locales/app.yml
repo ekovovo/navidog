@@ -362,6 +362,123 @@ prefs:
   advanced:
     en: Advanced
     zh-CN: 高级
+  editor:
+    en: Editor
+    zh-CN: 编辑器
+  code_completion_page:
+    en: Code Completion
+    zh-CN: 代码补全
+  auto_recovery:
+    en: Auto Recovery
+    zh-CN: 自动恢复
+  highlight_limit:
+    en: "Disable syntax highlighting and code completion if SQL is larger than:"
+    zh-CN: 如果 SQL 大于此值时，禁用语法高亮显示和代码补全：
+  display:
+    en: Display
+    zh-CN: 显示
+  show_line_numbers:
+    en: Show line numbers
+    zh-CN: 显示行号
+  code_folding:
+    en: Use code folding
+    zh-CN: 使用代码折叠
+  bracket_highlight:
+    en: Use bracket highlighting
+    zh-CN: 使用括号高亮显示
+  syntax_highlight:
+    en: Use syntax highlighting
+    zh-CN: 使用语法高亮显示
+  text_layout:
+    en: Text Layout
+    zh-CN: 文本布局
+  insert_spaces:
+    en: Insert spaces when pressing Tab
+    zh-CN: 按下 Tab 键时插入空格
+  tab_width:
+    en: Tab width
+    zh-CN: 制表符宽度
+  word_wrap:
+    en: Use word wrap
+    zh-CN: 使用自动换行
+  font_colors:
+    en: Font and Colors
+    zh-CN: 字体和颜色
+  syntax_colors:
+    en: Syntax Colors
+    zh-CN: 语法颜色
+  color_text:
+    en: Common
+    zh-CN: 常规
+  color_keyword:
+    en: Keyword
+    zh-CN: 关键字
+  color_comment:
+    en: Comment
+    zh-CN: 注释
+  color_string:
+    en: String
+    zh-CN: 字符串
+  color_number:
+    en: Number
+    zh-CN: 数字
+  color_background:
+    en: Background
+    zh-CN: 背景
+  reset_colors:
+    en: Restore Theme Colors
+    zh-CN: 恢复主题颜色
+  preview:
+    en: Preview
+    zh-CN: 预览
+  code_completion:
+    en: Use code completion
+    zh-CN: 使用代码补全
+  clear_outline:
+    en: Clear Code Completion Info
+    zh-CN: 清除代码补全的信息
+  auto_update_outline:
+    en: Update code completion info automatically
+    zh-CN: 自动更新代码补全的信息
+  outline_system:
+    en: Include system objects when updating code completion info
+    zh-CN: 更新代码补全的信息时包括系统对象
+  auto_select_first:
+    en: Select the first suggestion automatically
+    zh-CN: 自动选择第一个建议项目
+  autosave_queries:
+    en: Autosave modified queries
+    zh-CN: 自动保存已修改的查询
+  every_15s:
+    en: Every 15 seconds
+    zh-CN: 每 15 秒
+  every_30s:
+    en: Every 30 seconds
+    zh-CN: 每 30 秒
+  every_minute:
+    en: Every minute
+    zh-CN: 每分钟
+  every_3m:
+    en: Every 3 minutes
+    zh-CN: 每 3 分钟
+  every_5m:
+    en: Every 5 minutes
+    zh-CN: 每 5 分钟
+  never:
+    en: Never
+    zh-CN: 永不
+  log_folder:
+    en: Log Files Location
+    zh-CN: 日志路径
+  choose:
+    en: Choose…
+    zh-CN: 选择…
+  diagnostic_log:
+    en: Enable diagnostic logging
+    zh-CN: 启用诊断日志
+  diagnostic_hint:
+    en: Applies to the app log at the next start; QueryExec.log moves right away.
+    zh-CN: 应用日志在下次启动时生效；QueryExec.log 立即换到新位置。
   appearance:
     en: Appearance
     zh-CN: 外观
