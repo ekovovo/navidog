@@ -296,6 +296,21 @@ impl GridModel {
         }
     }
 
+    /// Whether the grid will not know what a commit stored: an inserted row left a column to the
+    /// server (a default, a generated key), or a value was written as an SQL expression. Those rows
+    /// show the wrong values and cannot be located again until the page reloads.
+    pub fn commit_needs_reload(&self) -> bool {
+        let unfilled = self
+            .new_rows
+            .iter()
+            .filter(|row| row.iter().any(Option::is_some))
+            .any(|row| {
+                (0..self.columns.len())
+                    .any(|c| !self.columns[c].read_only && row.get(c).is_none_or(Option::is_none))
+            });
+        unfilled || !self.raw.is_empty()
+    }
+
     pub fn has_primary_key(&self) -> bool {
         self.columns
             .iter()
@@ -923,6 +938,27 @@ mod tests {
         assert_eq!(text(&m, 0, 0), Some("2".into()));
         assert_eq!(text(&m, 0, 1), Some("b".into()));
         assert_eq!(text(&m, 1, 1), Some("c".into()));
+    }
+
+    #[test]
+    fn commits_the_grid_cannot_mirror_need_a_reload() {
+        let mut m = model(true);
+        m.set_value(0, 1, Some("b".into()));
+        assert!(!m.commit_needs_reload(), "a plain edit is mirrored");
+        // A new row that leaves the key to the server
+        let r = m.insert_row();
+        m.set_value(r, 1, Some("c".into()));
+        assert!(m.commit_needs_reload());
+        m.discard();
+        // Every column typed: the grid knows the row
+        let r = m.insert_row();
+        m.set_value(r, 0, Some("9".into()));
+        m.set_value(r, 1, Some("c".into()));
+        assert!(!m.commit_needs_reload());
+        m.discard();
+        // An SQL expression stores what the server computes
+        m.set_raw(0, 1, Some("UPPER('x')".into()));
+        assert!(m.commit_needs_reload());
     }
 
     #[test]

@@ -15,8 +15,9 @@ use gpui_kit::component::WindowExt as _;
 use gpui_kit::{App, InteractiveElement, SharedString, Window};
 use navidog_core::actions::*;
 use navidog_core::connection::SecretField;
+use navidog_core::crypto::CryptoError;
 use navidog_core::registry::{CommandInfo, CommandRegistry, Source};
-use navidog_core::store::ConnectionStore;
+use navidog_core::store::{ConnectionStore, StoreError};
 use navidog_core::workspace::{Selection, Workspace};
 use navidog_db::sessions::Sessions;
 use rust_i18n::t;
@@ -63,8 +64,8 @@ pub fn bind_actions<E: InteractiveElement>(el: E) -> E {
             let result = store.update(cx, |s, cx| s.duplicate(&id, &t!("conn.copy_suffix"), cx));
             if let Err(e) = result {
                 show_error(
-                    t!("conn.open_failed").into(),
-                    e.to_string().into(),
+                    t!("conn.duplicate_failed").into(),
+                    store_error_message(&e).into(),
                     window,
                     cx,
                 );
@@ -256,6 +257,22 @@ fn confirm_delete_group(window: &mut Window, cx: &mut App) {
                 true
             })
     });
+}
+
+/// A store or key error in the interface language. The errors' own text is English, for logs.
+pub fn store_error_message(e: &StoreError) -> String {
+    match e {
+        StoreError::Locked => t!("conn.store_locked").to_string(),
+        StoreError::Crypto(CryptoError::Decrypt | CryptoError::Format) => {
+            t!("conn.secret_unreadable").to_string()
+        }
+        StoreError::Crypto(CryptoError::Keychain(detail)) => {
+            t!("conn.keychain_failed", detail = detail).to_string()
+        }
+        StoreError::Crypto(CryptoError::Kdf(detail)) => {
+            t!("conn.kdf_failed", detail = detail).to_string()
+        }
+    }
 }
 
 pub(crate) fn show_error(

@@ -20,13 +20,13 @@ pub struct Secret {
 
 #[derive(Debug, thiserror::Error)]
 pub enum CryptoError {
-    #[error("密钥不正确或数据已损坏")]
+    #[error("wrong key or corrupted data")]
     Decrypt,
-    #[error("密文格式无效")]
+    #[error("invalid ciphertext format")]
     Format,
-    #[error("无法访问钥匙串：{0}")]
+    #[error("cannot access the keychain: {0}")]
     Keychain(String),
-    #[error("主密码派生失败：{0}")]
+    #[error("master password derivation failed: {0}")]
     Kdf(String),
 }
 

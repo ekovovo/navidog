@@ -541,7 +541,7 @@ impl TableDelegate for GridDelegate {
                         .child(
                             truncated(("grid-th", ix), title)
                                 .text_color(p.label)
-                                .line_height(tokens::Pt(15.).rems()),
+                                .line_height(tokens::grid::HEADER_NAME_LINE.rems()),
                         )
                         .when(show_type && !type_label.is_empty(), |d| {
                             d.child(
@@ -549,9 +549,9 @@ impl TableDelegate for GridDelegate {
                                     .w_full()
                                     .min_w_0()
                                     .items_center()
-                                    .gap(tokens::Pt(3.).rems())
+                                    .gap(tokens::grid::HEADER_TYPE_GAP.rems())
                                     .text_size(tokens::font::SIZE_SMALL.rems())
-                                    .line_height(tokens::Pt(13.).rems())
+                                    .line_height(tokens::grid::HEADER_TYPE_LINE.rems())
                                     .text_color(tint)
                                     .child(
                                         type_glyph(kind)

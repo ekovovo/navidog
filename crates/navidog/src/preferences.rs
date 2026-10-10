@@ -392,7 +392,8 @@ impl Preferences {
                                     if let Err(e) =
                                         store.update(cx, |s, cx| s.set_master_password(None, cx))
                                     {
-                                        window.push_notification(e.to_string(), cx);
+                                        let message = navidog_connection::store_error_message(&e);
+                                        window.push_notification(message, cx);
                                     }
                                 }),
                         )
@@ -514,7 +515,7 @@ impl MasterDialog {
         match store.update(cx, |s, cx| s.set_master_password(Some(&a), cx)) {
             Ok(()) => window.close_dialog(cx),
             Err(e) => {
-                self.error = Some(e.to_string().into());
+                self.error = Some(navidog_connection::store_error_message(&e).into());
                 cx.notify();
             }
         }

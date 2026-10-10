@@ -164,7 +164,7 @@ impl ConnectionsFile {
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
-    #[error("已设置主密码，需要先解锁")]
+    #[error("a master password is set; unlock first")]
     Locked,
     #[error(transparent)]
     Crypto(#[from] CryptoError),

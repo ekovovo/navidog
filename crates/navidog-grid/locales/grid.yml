@@ -355,6 +355,9 @@ viewer:
   close_pending:
     en: "\"%{name}\" has uncommitted changes. Commit them?"
     zh-CN: "“%{name}”有未提交的更改，是否提交？"
+  row_not_found:
+    en: "No row matched, so nothing was changed. The row may have changed elsewhere; refresh and try again.\n%{sql}"
+    zh-CN: "没有匹配的行，没有做任何修改。这一行可能已在别处被修改，请刷新后再试。\n%{sql}"
   close_commit_failed:
     en: "The changes to \"%{name}\" were not saved"
     zh-CN: "“%{name}”的更改没有保存"

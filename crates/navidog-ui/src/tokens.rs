@@ -119,6 +119,11 @@ pub mod grid {
     /// Header height while the type line is shown. Body rows stay at `ROW_HEIGHT`.
     /// Taller than `HEADER_HEIGHT` because two lines do not fit in the nib's 28pt.
     pub const TYPE_HEADER_HEIGHT: Pt = Pt(34.);
+    /// Provisional. Line heights of the two header lines (name, then type) and the gap between
+    /// the type glyph and its label; together they fit `TYPE_HEADER_HEIGHT`.
+    pub const HEADER_NAME_LINE: Pt = Pt(15.);
+    pub const HEADER_TYPE_LINE: Pt = Pt(13.);
+    pub const HEADER_TYPE_GAP: Pt = Pt(3.);
     pub const ROW_NUMBER_WIDTH: Pt = Pt(20.);
     // Provisional until measured with AX
     pub const ROW_HEIGHT: Pt = Pt(20.);

@@ -36,6 +36,7 @@ use navidog_ui::skin::{FormRow, confirm_with, truncated};
 use navidog_ui::{palette, tabs, tokens};
 use navidog_util::format::{decode_hex, encode_hex, pretty_json};
 use navidog_util::sql_type::{Choices, choices};
+use navidog_util::starts_with_ignore_ascii_case;
 use rust_i18n::t;
 
 use crate::editor::{self, Kind};
@@ -301,10 +302,12 @@ impl Panel for TableViewer {
 struct Commit {
     statements: Vec<String>,
     begin: &'static str,
+    dialect: Dialect,
 }
 
-/// Applies the changes. Without an open transaction they are wrapped in one and rolled back on
-/// failure, so either all succeed or none take effect.
+/// Applies the changes; either all take effect or none. Without an open transaction they run in
+/// one that is rolled back on failure; inside the user's transaction a savepoint does that, so a
+/// failed batch does not leave half its statements in the transaction.
 /// When `end` is true, the already open transaction is ended (committed).
 async fn apply(
     rel: &mut dyn navidog_db::Relational,
@@ -312,19 +315,39 @@ async fn apply(
     in_tx: bool,
     end: bool,
 ) -> DbResult<()> {
-    if !in_tx {
-        rel.execute(c.begin).await?;
-    }
+    const SAVEPOINT: &str = "SAVEPOINT navidog_apply";
+    let (start, undo) = if in_tx {
+        (SAVEPOINT, "ROLLBACK TO SAVEPOINT navidog_apply")
+    } else {
+        (c.begin, "ROLLBACK")
+    };
+    rel.execute(start).await?;
     for s in &c.statements {
-        if let Err(e) = rel.execute(s).await {
-            if !in_tx {
-                let _ = rel.execute("ROLLBACK").await;
-            }
+        let result = rel.execute(s).await;
+        if let Err(e) = result.and_then(|sets| matched_a_row(s, &sets, c.dialect)) {
+            let _ = rel.execute(undo).await;
             return Err(e);
         }
     }
+    if in_tx {
+        rel.execute("RELEASE SAVEPOINT navidog_apply").await?;
+    }
     if !in_tx || end {
         rel.execute("COMMIT").await?;
+    }
+    Ok(())
+}
+
+/// An UPDATE or DELETE that matched no row means the grid's old values no longer find it (changed
+/// elsewhere, or a value only the server knew). MySQL counts changed rather than matched rows for
+/// UPDATE, so an UPDATE to the same value is 0 there too: only its DELETE is checked.
+fn matched_a_row(sql: &str, sets: &[ResultSet], dialect: Dialect) -> DbResult<()> {
+    let delete = starts_with_ignore_ascii_case(sql, "DELETE");
+    let update = starts_with_ignore_ascii_case(sql, "UPDATE") && dialect != Dialect::MySql;
+    if (delete || update) && sets.last().and_then(|s| s.affected_rows) == Some(0) {
+        return Err(navidog_db::DbError::msg(
+            t!("viewer.row_not_found", sql = sql).to_string(),
+        ));
     }
     Ok(())
 }
@@ -810,6 +833,7 @@ impl TableViewer {
         Commit {
             statements,
             begin: d.begin_transaction(),
+            dialect: d,
         }
     }
 
@@ -865,7 +889,9 @@ impl TableViewer {
                         let reproject = this.hidden_revert.take().is_some();
                         let leaving = std::mem::take(&mut this.reload_after_commit);
                         let sync = !cx.has_global::<Settings>() || Settings::global(cx).sync_record;
-                        if sync || reproject || leaving {
+                        // Without sync, rows whose stored values only the server knows still reload
+                        let unknown = this.grid.read(cx).model(cx).commit_needs_reload();
+                        if sync || reproject || leaving || unknown {
                             this.reload(true, cx);
                         } else {
                             this.grid.update(cx, |g, cx| {
@@ -2569,16 +2595,11 @@ impl TableViewer {
                     .on_click(cx.listener(|this, _, window, cx| this.show_sql(window, cx))),
             )
             .child(
-                div()
-                    .id("viewer-status")
+                // The last SQL or error is often longer than the bar; hover shows all of it
+                truncated("viewer-status", self.status.clone())
                     .flex_1()
-                    .min_w_0()
                     .px_2()
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .text_color(p.label_secondary)
-                    .child(self.status.clone()),
+                    .text_color(p.label_secondary),
             )
             .when(
                 !self.columns.is_empty() && !self.columns.iter().any(|c| c.primary_key),
@@ -2906,5 +2927,29 @@ impl Render for FkPicker {
                         .child(self.note.clone()),
                 )
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_write_that_matched_no_row_fails() {
+        let affected = |n| {
+            vec![ResultSet {
+                columns: Vec::new(),
+                rows: Vec::new(),
+                affected_rows: Some(n),
+            }]
+        };
+        let update = "UPDATE \"t\" SET \"name\" = 'b' WHERE \"id\" IS NULL";
+        let delete = "DELETE FROM `t` WHERE `id` = 1 LIMIT 1";
+        assert!(matched_a_row(update, &affected(0), Dialect::Sqlite).is_err());
+        assert!(matched_a_row(update, &affected(1), Dialect::Postgres).is_ok());
+        assert!(matched_a_row(delete, &affected(0), Dialect::MySql).is_err());
+        // MySQL counts changed rows: an UPDATE to the same value is 0 and still fine
+        assert!(matched_a_row(update, &affected(0), Dialect::MySql).is_ok());
+        assert!(matched_a_row("INSERT INTO t VALUES (1)", &affected(0), Dialect::Sqlite).is_ok());
     }
 }

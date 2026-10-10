@@ -31,7 +31,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "sync", "
 futures = "0.3"
 uuid = { version = "1", features = ["v4"] }
 
-# gpui-kit 文档建议：debug 构建中优化渲染相关依赖，避免界面卡顿
+# Recommended by the gpui-kit docs: optimize the rendering dependencies in debug builds so the UI stays smooth
 [profile.dev.package.gpui-pre]
 opt-level = 3
 [profile.dev.package.gpui-component]
@@ -45,12 +45,9 @@ opt-level = 3
 codegen-units = 1
 strip = "symbols"
 lto = "fat"
-# opt-level = 3
-# lto = "thin"
-opt-level = "s"
-# panic = "abort"
+# The default opt-level 3: "s" scrolled the result grid about 20% slower (21-table-viewer.md §1)
 
-# #3420 已合入 main、尚未发版。钉住这次检出才能用 DataTable::header_row_height。
-# 上游发版后删掉这段，改回 crates.io。
+# #3420 is merged into main but not released. This checkout provides DataTable::header_row_height.
+# Remove this section and go back to crates.io once upstream releases it.
 [patch.crates-io]
 gpui-kit = { git = "https://github.com/longbridge/gpui-kit", rev = "9c4b175c6b7716d9df141544db6f6c4880501a78" }

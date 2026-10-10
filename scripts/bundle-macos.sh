@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 构建未签名的 navidog.app 与 .dmg。签名、公证与 Sparkle 在 M15 加入。
+# Builds an unsigned navidog.app and .dmg. Signing, notarization and Sparkle come in M15.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -39,4 +39,4 @@ cat > "$app/Contents/Info.plist" <<PLIST
 PLIST
 
 hdiutil create -volname Navidog -srcfolder "$app" -ov -format UDZO "$out/navidog-${version}.dmg"
-echo "已生成 $out/navidog-${version}.dmg"
+echo "Built $out/navidog-${version}.dmg"
