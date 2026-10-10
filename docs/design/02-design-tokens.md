@@ -114,6 +114,10 @@
 | `explain.node_info.width` | 171 | nib:QueryExplainVisualModule/节点信息框（171 × 212，标题栏高 30） |
 | `explain.node` | 160 × 56 | 暂定，待并排目测 |
 | `explain.node_gap` | 40 × 16 | 暂定。横向是层与层的间距，纵向是兄弟节点的间距 |
+| `explain.node_info.height` | 212 | nib:QueryExplainVisualModule/节点信息框（171 × 212） |
+| `query.picker_width` | 120 | 暂定：工具栏的连接、数据库、模式选择 |
+| `editor.font_range` | 8 ~ 72 | 30-query-editor 第 9 节 |
+| `result.tab_height` | 26 | 暂定：结果区选项卡条 |
 
 ## 6. 信息窗格
 

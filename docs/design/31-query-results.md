@@ -233,6 +233,8 @@ SELECT * FROM nope
 | `explain.threshold.width` | 45 | nib:QueryExplainVisualModule/NSTextField（45 × 24） |
 | `explain.search.width` | 150 | nib:QueryExplainVisualModule/NSSearchField（150 × 24） |
 | `explain.node_info.width` | 171 | nib:QueryExplainVisualModule/节点信息框（171 × 212，标题栏高 30） |
+| `explain.node_info.height` | 212 | 同上，信息框的最大高度 |
+| `result.tab_height` | 26 | 暂定：结果区选项卡条 |
 | `explain.node` | 160 × 56 | 暂定，待并排目测 |
 | `explain.node_gap` | 40 × 16 | 暂定，横向是层与层的间距，纵向是兄弟节点的间距 |
 
@@ -242,18 +244,21 @@ SELECT * FROM nope
 - 查询结果的修改在元数据会话上提交，不参与编辑器里手动开启的事务。
 - 可视化解释不能下载为 PNG。
 - 命令列界面分成输出区和输入区；不支持客户端命令；SQLite 用 mysql 的表格样式；PostgreSQL 不返回结果集的语句也写 `Query OK`，不写 psql 的命令标签。
-- QueryExec.log 的连接类型用 navidog 的驱动 ID。
+- QueryExec.log 的连接类型用驱动名称的大写（MYSQL、MARIADB、POSTGRESQL、SQLITE）。
+- 查询结果的表单视图只读，用上一条、下一条浏览；修改用网格或单元格编辑器。表头排序对已取回的行在本地排序。
+- 历史日志查看器每 250ms 检查一次新记录。
+- 命令列界面的提示符在输入框左侧，输入有多行时换成续行提示符；输出区的回显照客户端的样子逐行带提示符。
 
 ## 11. 验收清单
 
 - [ ] 三种数据库：运行、运行已选择的、运行当前语句、停止都正确；多条语句各自写进消息和摘要；出错时停下并标出语句，勾选“遇到错误时继续”时执行完全部。
 - [ ] 用 `DELIMITER $$` 创建存储过程后能调用；`-- NAME:` 改了结果选项卡的名称；超过 20 个结果集时只显示 20 个。
-- [ ] 查询参数：同名参数只问一次，原始模式不加引号，上次输入的值预先填好。
-- [ ] 结果编辑：`SELECT * FROM actor` 可以编辑并提交；联接多表的结果、没有主键的表、`CALL` 返回的结果都显示“只读”。
+- [x] 查询参数：同名参数只问一次，原始模式不加引号，上次输入的值预先填好。
+- [x] 结果编辑：`SELECT * FROM actor` 可以编辑并提交；联接多表的结果、没有主键的表、`CALL` 返回的结果都显示“只读”。
 - [ ] 固定的结果在再次运行后保留，悬停显示信息。
 - [ ] 解释：MySQL 8、MariaDB、PostgreSQL、SQLite 的各个视图都正确；调低耗时阈值后节点数字变红；统计信息的耗时合计等于根节点的成本。
-- [ ] 历史日志查看器实时显示所有语句；仅显示错误、暂停和恢复、表头开关都生效；QueryExec.log 的格式正确，重启后清空。
+- [x] 历史日志查看器实时显示所有语句；仅显示错误、暂停和恢复、表头开关都生效；QueryExec.log 的格式正确，重启后清空。
 - [ ] 命令列界面能执行多行语句、续行、翻历史、取消；输出的表格对齐。
-- [ ] PostgreSQL 开 SSL（require）时，“停止”能取消正在执行的语句。
-- [ ] MySQL 设置读取超时 2 秒后，`SELECT SLEEP(5)` 被取消并报告超时。
+- [x] PostgreSQL 开 SSL（require）时，“停止”能取消正在执行的语句。
+- [x] MySQL 设置读取超时 2 秒后，`SELECT SLEEP(5)` 被取消并报告超时。
 - [ ] 消息页的措辞与 Navicat 并排核对。
