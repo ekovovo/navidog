@@ -5239,6 +5239,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "navidog-query"
+version = "0.1.0"
+dependencies = [
+ "gpui-kit",
+ "navidog-core",
+ "navidog-db",
+ "navidog-grid",
+ "navidog-ui",
+ "navidog-util",
+ "rust-i18n",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "navidog-ui"
 version = "0.1.0"
 dependencies = [
