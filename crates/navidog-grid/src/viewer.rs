@@ -32,7 +32,7 @@ use navidog_db::dialect::Dialect;
 use navidog_db::sessions::{ConnState, Sessions, SessionsEvent, SharedSession, run_on};
 use navidog_db::{CancelHandle, ColumnInfo, DbResult, ResultSet};
 use navidog_ui::assets::lucide;
-use navidog_ui::skin::{FormRow, truncated};
+use navidog_ui::skin::{FormRow, confirm_with, truncated};
 use navidog_ui::{palette, tabs, tokens};
 use navidog_util::format::{decode_hex, encode_hex, pretty_json};
 use navidog_util::sql_type::{Choices, choices};
@@ -646,7 +646,8 @@ impl TableViewer {
             cx.new(|cx| FkPicker::new(key, dialect, session, viewer, (row, col), window, cx));
         picker.update(cx, |picker, cx| picker.reload(cx));
         window.open_dialog(cx, move |dialog, window, _| {
-            dialog
+            // Enter in the search field searches again and leaves the picker open
+            confirm_with(dialog, &picker, |p, _, cx| p.reload(cx))
                 .w(tokens::dialog::SMALL_WIDTH.to_pixels(window.rem_size()))
                 .title(t!("grid.fk_pick").to_string())
                 .child(picker.clone())
@@ -2708,7 +2709,6 @@ struct FkPicker {
     rows: Vec<Option<String>>,
     note: SharedString,
     all: bool,
-    _sub: Subscription,
 }
 
 impl FkPicker {
@@ -2723,11 +2723,6 @@ impl FkPicker {
     ) -> Self {
         let search =
             cx.new(|cx| InputState::new(window, cx).placeholder(t!("grid.fk_search").to_string()));
-        let _sub = cx.subscribe_in(&search, window, |this, _, event: &InputEvent, _, cx| {
-            if matches!(event, InputEvent::PressEnter { .. }) {
-                this.reload(cx);
-            }
-        });
         Self {
             key,
             dialect,
@@ -2738,7 +2733,6 @@ impl FkPicker {
             rows: Vec::new(),
             note: SharedString::default(),
             all: false,
-            _sub,
         }
     }
 

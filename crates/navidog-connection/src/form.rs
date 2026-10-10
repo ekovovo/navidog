@@ -19,7 +19,7 @@ use navidog_core::connection::{
 use navidog_core::store::ConnectionStore;
 use navidog_core::workspace::{Selection, Workspace};
 use navidog_db::{ConnectParams, DriverRegistry, Secrets, runtime};
-use navidog_ui::skin::{FormRow, form_note};
+use navidog_ui::skin::{FormRow, confirm_with, form_note};
 use navidog_ui::{palette, tokens};
 use rust_i18n::t;
 
@@ -70,7 +70,8 @@ pub fn open_edit(id: String, window: &mut Window, cx: &mut App) {
 fn open(conn: Connection, secrets: Option<[Option<String>; 3]>, window: &mut Window, cx: &mut App) {
     let form = cx.new(|cx| ConnectionForm::new(conn, secrets, window, cx));
     window.open_dialog(cx, move |dialog, window, _| {
-        dialog
+        // Enter in a single-line field saves, like OK, instead of closing and losing the input
+        confirm_with(dialog, &form, ConnectionForm::save)
             .w(tokens::conn_form::WIDTH.to_pixels(window.rem_size()))
             .close_button(false)
             .child(form.clone())

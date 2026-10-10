@@ -21,7 +21,7 @@ use navidog_core::object::Scope;
 use navidog_core::settings::{RowShade, Settings};
 use navidog_db::dialect::Dialect;
 use navidog_ui::assets::lucide;
-use navidog_ui::skin::truncated;
+use navidog_ui::skin::{confirm_with, truncated};
 use navidog_ui::{palette, tokens};
 use navidog_util::sql_type::{TypeKind, type_kind};
 use rust_i18n::t;
@@ -1201,16 +1201,20 @@ impl ResultGrid {
     fn set_row_height(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let current = self.row_height.0.to_string();
         let grid = cx.entity().downgrade();
-        let view = cx.new(|cx| {
-            let input = cx.new(|cx| InputState::new(window, cx).default_value(current));
-            input.update(cx, |s, cx| s.focus(window, cx));
-            RowHeight { input, grid }
+        let input = cx.new(|cx| InputState::new(window, cx).default_value(current));
+        let view = cx.new(|_| RowHeight {
+            input: input.clone(),
+            grid,
         });
         window.open_dialog(cx, move |dialog, window, _| {
-            dialog
+            confirm_with(dialog, &view, RowHeight::apply)
                 .w(tokens::dialog::SMALL_WIDTH.to_pixels(window.rem_size()))
                 .close_button(false)
                 .child(view.clone())
+        });
+        // `open_dialog` focuses the dialog itself, so a focus call before that does not stick
+        window.defer(cx, move |window, cx| {
+            input.update(cx, |s, cx| s.focus(window, cx));
         });
     }
 
@@ -1530,10 +1534,26 @@ struct RowHeight {
     grid: WeakEntity<ResultGrid>,
 }
 
+/// Accepted row heights in points. Below this the text does not fit; a tiny value would also lay
+/// out thousands of rows per frame.
+const ROW_HEIGHT_PT: std::ops::RangeInclusive<f32> = 8.0..=200.0;
+
+impl RowHeight {
+    fn apply(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let value = self.input.read(cx).value().trim().parse::<f32>().ok();
+        if let Some(n) = value.filter(|n| n.is_finite()) {
+            let n = n.clamp(*ROW_HEIGHT_PT.start(), *ROW_HEIGHT_PT.end());
+            let _ = self.grid.update(cx, |g, cx| {
+                g.row_height = tokens::Pt(n);
+                cx.notify();
+            });
+        }
+        window.close_dialog(cx);
+    }
+}
+
 impl Render for RowHeight {
-    fn render(&mut self, _: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        let grid = self.grid.clone();
-        let input = self.input.clone();
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .gap(tokens::form::ROW_GAP.rems())
             .child(t!("grid.row_height").to_string())
@@ -1551,22 +1571,7 @@ impl Render for RowHeight {
                         Button::new("row-height-ok")
                             .primary()
                             .label(t!("grid.ok").to_string())
-                            .on_click(move |_, window, cx| {
-                                let value = input
-                                    .read(cx)
-                                    .value()
-                                    .trim()
-                                    .parse::<f32>()
-                                    .ok()
-                                    .filter(|n| *n > 0.);
-                                if let Some(n) = value {
-                                    let _ = grid.update(cx, |g, cx| {
-                                        g.row_height = tokens::Pt(n);
-                                        cx.notify();
-                                    });
-                                }
-                                window.close_dialog(cx);
-                            }),
+                            .on_click(cx.listener(|this, _, window, cx| this.apply(window, cx))),
                     ),
             )
     }

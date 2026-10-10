@@ -9,13 +9,13 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyWindowHandle, App, AppContext as _, Context, Entity, Global, InteractiveElement as _,
     IntoElement, ParentElement as _, Render, SharedString, StatefulInteractiveElement as _,
-    Styled as _, Subscription, Window, WindowBounds, WindowOptions, div,
+    Styled as _, Window, WindowBounds, WindowOptions, div,
 };
 use navidog_core::object::ObjectRef;
 use navidog_core::settings::{Appearance, Language, RowShade, Settings};
 use navidog_core::store::ConnectionStore;
 use navidog_ui::assets::lucide;
-use navidog_ui::skin::{FormRow, form_note, heading, truncated};
+use navidog_ui::skin::{FormRow, confirm_with, form_note, heading, truncated};
 use navidog_ui::{palette, tokens};
 use rust_i18n::t;
 
@@ -457,45 +457,18 @@ impl Render for Preferences {
 
 /// Sets or changes the master password: the new password is entered twice.
 pub fn open_master_dialog(window: &mut Window, cx: &mut App) {
-    let view = cx.new(|cx| {
-        let first = cx.new(|cx| InputState::new(window, cx).masked(true));
-        let second = cx.new(|cx| InputState::new(window, cx).masked(true));
-        let on_enter = |this: &mut MasterDialog,
-                        _: &Entity<InputState>,
-                        e: &InputEvent,
-                        window: &mut Window,
-                        cx: &mut Context<MasterDialog>| {
-            if matches!(e, InputEvent::PressEnter { shift: false, .. }) {
-                this.confirm(window, cx);
-            }
-        };
-        let _subs = vec![
-            cx.subscribe_in(&first, window, on_enter),
-            cx.subscribe_in(&second, window, on_enter),
-        ];
-        MasterDialog {
-            first,
-            second,
-            error: None,
-            _subs,
-        }
+    let first = cx.new(|cx| InputState::new(window, cx).masked(true));
+    let second = cx.new(|cx| InputState::new(window, cx).masked(true));
+    let view = cx.new(|_| MasterDialog {
+        first: first.clone(),
+        second,
+        error: None,
     });
-    let first = view.read(cx).first.clone();
-    window.open_dialog(cx, {
-        let view = view.clone();
-        move |dialog, window, _| {
-            dialog
-                .w(tokens::dialog::SMALL_WIDTH.to_pixels(window.rem_size()))
-                .close_button(false)
-                .on_ok({
-                    let view = view.clone();
-                    move |_, window, cx| {
-                        view.update(cx, |this, cx| this.confirm(window, cx));
-                        false
-                    }
-                })
-                .child(view.clone())
-        }
+    window.open_dialog(cx, move |dialog, window, _| {
+        confirm_with(dialog, &view, MasterDialog::confirm)
+            .w(tokens::dialog::SMALL_WIDTH.to_pixels(window.rem_size()))
+            .close_button(false)
+            .child(view.clone())
     });
     window.defer(cx, move |window, cx| {
         first.update(cx, |state, cx| state.focus(window, cx));
@@ -506,7 +479,6 @@ struct MasterDialog {
     first: Entity<InputState>,
     second: Entity<InputState>,
     error: Option<SharedString>,
-    _subs: Vec<Subscription>,
 }
 
 impl MasterDialog {

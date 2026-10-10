@@ -9,6 +9,7 @@ use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render,
     SharedString, Styled as _, WeakEntity, Window, div,
 };
+use navidog_ui::skin::confirm_with;
 use navidog_ui::tokens;
 use rust_i18n::t;
 
@@ -147,23 +148,23 @@ pub(crate) fn open(
     cx: &mut App,
 ) {
     let parts = parse_parts(current, kind);
-    let view = cx.new(|cx| {
-        let input =
-            cx.new(|cx| InputState::new(window, cx).default_value(format_parts(kind, parts)));
-        input.update(cx, |s, cx| s.focus(window, cx));
-        DateDialog {
-            kind,
-            parts,
-            input,
-            pos,
-            grid,
-        }
+    let input = cx.new(|cx| InputState::new(window, cx).default_value(format_parts(kind, parts)));
+    let view = cx.new(|_| DateDialog {
+        kind,
+        parts,
+        input: input.clone(),
+        pos,
+        grid,
     });
     window.open_dialog(cx, move |dialog, window, _| {
-        dialog
+        confirm_with(dialog, &view, DateDialog::apply)
             .w(tokens::grid::DATE_PICKER_WIDTH.to_pixels(window.rem_size()))
             .close_button(false)
             .child(view.clone())
+    });
+    // `open_dialog` focuses the dialog itself, so a focus call before that does not stick
+    window.defer(cx, move |window, cx| {
+        input.update(cx, |s, cx| s.focus(window, cx));
     });
 }
 

@@ -31,6 +31,21 @@ pub fn truncated(
         .child(text)
 }
 
+/// Makes the dialog's Confirm (Enter in a single-line field, or on the dialog itself) call `ok` on
+/// `view`, the same method its OK button calls. `ok` closes the dialog itself when it succeeds.
+/// Do not also subscribe to the field's PressEnter: the input propagates Enter, so both would run.
+pub fn confirm_with<V: 'static>(
+    dialog: gpui_kit::component::dialog::Dialog,
+    view: &gpui_kit::Entity<V>,
+    ok: fn(&mut V, &mut Window, &mut gpui_kit::Context<V>),
+) -> gpui_kit::component::dialog::Dialog {
+    let view = view.clone();
+    dialog.on_ok(move |_, window, cx| {
+        view.update(cx, |v, cx| ok(v, window, cx));
+        false
+    })
+}
+
 /// Byte ranges of `query` in `text`, ignoring ASCII case (folding ASCII keeps byte offsets valid).
 pub fn find_matches(text: &str, query: &str) -> Vec<std::ops::Range<usize>> {
     let (t, q) = (text.as_bytes(), query.as_bytes());

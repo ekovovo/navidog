@@ -2,15 +2,15 @@
 //! The active profile is what the form edits and what opening connects with.
 
 use gpui_kit::component::WindowExt as _;
-use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::v_flex;
 use gpui_kit::{
     App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, SharedString,
-    Styled as _, Subscription, Window,
+    Styled as _, Window,
 };
 use navidog_core::store::ConnectionStore;
 use navidog_db::sessions::Sessions;
-use navidog_ui::skin::{FormRow, heading};
+use navidog_ui::skin::{FormRow, confirm_with, heading};
 use navidog_ui::tokens;
 use rust_i18n::t;
 
@@ -77,35 +77,16 @@ pub fn delete(id: String, window: &mut Window, cx: &mut App) {
 
 /// Asks for a name, adds the profile as a copy of the active settings and opens the form on it.
 pub fn new(id: String, window: &mut Window, cx: &mut App) {
-    let view = cx.new(|cx| {
-        let input = cx.new(|cx| InputState::new(window, cx));
-        let _sub = cx.subscribe_in(
-            &input,
-            window,
-            |this: &mut NewProfile, _, e: &InputEvent, window, cx| {
-                if matches!(e, InputEvent::PressEnter { shift: false, .. }) {
-                    this.confirm(window, cx);
-                }
-            },
-        );
-        NewProfile { id, input, _sub }
+    let input = cx.new(|cx| InputState::new(window, cx));
+    let view = cx.new(|_| NewProfile {
+        id,
+        input: input.clone(),
     });
-    let input = view.read(cx).input.clone();
-    window.open_dialog(cx, {
-        let view = view.clone();
-        move |dialog, window, _| {
-            dialog
-                .w(tokens::dialog::SMALL_WIDTH.to_pixels(window.rem_size()))
-                .close_button(false)
-                .on_ok({
-                    let view = view.clone();
-                    move |_, window, cx| {
-                        view.update(cx, |this, cx| this.confirm(window, cx));
-                        false
-                    }
-                })
-                .child(view.clone())
-        }
+    window.open_dialog(cx, move |dialog, window, _| {
+        confirm_with(dialog, &view, NewProfile::confirm)
+            .w(tokens::dialog::SMALL_WIDTH.to_pixels(window.rem_size()))
+            .close_button(false)
+            .child(view.clone())
     });
     window.defer(cx, move |window, cx| {
         input.update(cx, |state, cx| state.focus(window, cx));
@@ -115,7 +96,6 @@ pub fn new(id: String, window: &mut Window, cx: &mut App) {
 struct NewProfile {
     id: String,
     input: Entity<InputState>,
-    _sub: Subscription,
 }
 
 impl NewProfile {

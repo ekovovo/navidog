@@ -6,17 +6,17 @@ use std::rc::Rc;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
-use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::{WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, SharedString,
-    Styled as _, Subscription, Window, div,
+    Styled as _, Window, div,
 };
 use navidog_core::connection::{Connection, SecretField};
 use navidog_core::store::{ConnectionStore, StoreError};
 use navidog_db::Secrets;
-use navidog_ui::skin::{FormRow, heading};
+use navidog_ui::skin::{FormRow, confirm_with, heading};
 use navidog_ui::{palette, tokens};
 use rust_i18n::t;
 
@@ -77,21 +77,11 @@ fn resolve_inner(id: String, then: Then, window: &mut Window, cx: &mut App) {
     }
     let view = cx.new(|cx| AskPassword::new(conn, missing, secrets, then, window, cx));
     let first = view.read(cx).inputs.first().map(|(_, input)| input.clone());
-    window.open_dialog(cx, {
-        let view = view.clone();
-        move |dialog, window, _| {
-            dialog
-                .w(tokens::dialog::SMALL_WIDTH.to_pixels(window.rem_size()))
-                .close_button(false)
-                .on_ok({
-                    let view = view.clone();
-                    move |_, window, cx| {
-                        view.update(cx, |this, cx| this.confirm(window, cx));
-                        false
-                    }
-                })
-                .child(view.clone())
-        }
+    window.open_dialog(cx, move |dialog, window, _| {
+        confirm_with(dialog, &view, AskPassword::confirm)
+            .w(tokens::dialog::SMALL_WIDTH.to_pixels(window.rem_size()))
+            .close_button(false)
+            .child(view.clone())
     });
     if let Some(input) = first {
         window.defer(cx, move |window, cx| {
@@ -140,7 +130,6 @@ struct AskPassword {
     secrets: Secrets,
     save: bool,
     then: Then,
-    _subs: Vec<Subscription>,
 }
 
 impl AskPassword {
@@ -156,27 +145,12 @@ impl AskPassword {
             .into_iter()
             .map(|f| (f, cx.new(|cx| InputState::new(window, cx).masked(true))))
             .collect();
-        let _subs = inputs
-            .iter()
-            .map(|(_, input)| {
-                cx.subscribe_in(
-                    input,
-                    window,
-                    |this: &mut Self, _, e: &InputEvent, window, cx| {
-                        if matches!(e, InputEvent::PressEnter { shift: false, .. }) {
-                            this.confirm(window, cx);
-                        }
-                    },
-                )
-            })
-            .collect();
         Self {
             conn,
             inputs,
             secrets,
             save: false,
             then,
-            _subs,
         }
     }
 
@@ -263,50 +237,21 @@ struct Unlock {
     input: Entity<InputState>,
     error: Option<SharedString>,
     then: Then,
-    _sub: Subscription,
 }
 
 fn open_unlock(id: String, then: Then, window: &mut Window, cx: &mut App) {
-    let view = cx.new(|cx| {
-        let input = cx.new(|cx| InputState::new(window, cx).masked(true));
-        let _sub = cx.subscribe_in(
-            &input,
-            window,
-            |this: &mut Unlock, _, e: &InputEvent, window, cx| {
-                // A single-line input propagates Enter. The dialog also binds Enter
-                // to Confirm, which closes unless `on_ok` handles it. This covers
-                // the key while the field itself is focused.
-                if matches!(e, InputEvent::PressEnter { shift: false, .. }) {
-                    this.confirm(window, cx);
-                }
-            },
-        );
-        Unlock {
-            id,
-            input,
-            error: None,
-            then,
-            _sub,
-        }
+    let input = cx.new(|cx| InputState::new(window, cx).masked(true));
+    let view = cx.new(|_| Unlock {
+        id,
+        input: input.clone(),
+        error: None,
+        then,
     });
-    let input = view.read(cx).input.clone();
-    window.open_dialog(cx, {
-        let view = view.clone();
-        move |dialog, window, _| {
-            dialog
-                .w(tokens::dialog::SMALL_WIDTH.to_pixels(window.rem_size()))
-                .close_button(false)
-                .on_ok({
-                    let view = view.clone();
-                    move |_, window, cx| {
-                        view.update(cx, |this, cx| this.confirm(window, cx));
-                        // `confirm` closes the dialog on success. Returning true here
-                        // would close it again and could dismiss whatever opened next.
-                        false
-                    }
-                })
-                .child(view.clone())
-        }
+    window.open_dialog(cx, move |dialog, window, _| {
+        confirm_with(dialog, &view, Unlock::confirm)
+            .w(tokens::dialog::SMALL_WIDTH.to_pixels(window.rem_size()))
+            .close_button(false)
+            .child(view.clone())
     });
     // `open_dialog` focuses the dialog itself, so a focus call before that does not stick.
     window.defer(cx, move |window, cx| {

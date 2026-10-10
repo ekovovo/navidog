@@ -8,7 +8,7 @@ use gpui_kit::{
     App, AppContext as _, Context, IntoElement, ParentElement as _, Render, Styled as _, Window,
 };
 use navidog_db::sessions::Sessions;
-use navidog_ui::skin::{FormRow, heading};
+use navidog_ui::skin::{FormRow, confirm_with, heading};
 use navidog_ui::tokens;
 use rust_i18n::t;
 
@@ -24,7 +24,7 @@ pub fn open(id: String, window: &mut Window, cx: &mut App) {
         checked: [true, false, false, false, false],
     });
     window.open_dialog(cx, move |dialog, window, _| {
-        dialog
+        confirm_with(dialog, &view, Reload::run)
             .w(tokens::dialog::SMALL_WIDTH.to_pixels(window.rem_size()))
             .close_button(false)
             .child(view.clone())

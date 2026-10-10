@@ -13,14 +13,14 @@ use gpui_kit::{
 };
 use navidog_db::Family;
 use navidog_ui::assets::driver_icon;
-use navidog_ui::skin::heading;
+use navidog_ui::skin::{confirm_with, heading};
 use navidog_ui::{palette, tokens};
 use rust_i18n::t;
 
 pub fn open(window: &mut Window, cx: &mut App) {
     let view = cx.new(|cx| Picker::new(window, cx));
     window.open_dialog(cx, move |dialog, window, _| {
-        dialog
+        confirm_with(dialog, &view, Picker::confirm)
             .w(tokens::conn_type::WIDTH.to_pixels(window.rem_size()))
             .close_button(false)
             .child(view.clone())
@@ -67,6 +67,15 @@ impl Picker {
         };
         window.close_dialog(cx);
         crate::form::open_from_uri(uri, window, cx);
+    }
+
+    /// Enter: a typed URI goes on from the URI, otherwise from the selected type.
+    fn confirm(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.uri.read(cx).value().trim().is_empty() {
+            self.next(window, cx);
+        } else {
+            self.next_from_uri(window, cx);
+        }
     }
 
     fn next(&mut self, window: &mut Window, cx: &mut Context<Self>) {

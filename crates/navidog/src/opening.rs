@@ -1,8 +1,11 @@
 //! Dialogs that open or bookmark objects: Add to Favorites (F-APP-011) and Open navidog URI
 //! (F-APP-014), with the mapping from a URI to one of the saved connections.
 
+use std::rc::Rc;
+
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::{App, AppContext as _, Entity, ParentElement as _, Styled as _, Window};
@@ -16,7 +19,16 @@ use navidog_ui::skin::FormRow;
 use navidog_ui::tokens;
 use rust_i18n::t;
 
-fn footer(ok: impl Fn(&mut Window, &mut App) -> bool + 'static) -> impl gpui_kit::IntoElement {
+/// What OK does; `true` closes the dialog. Enter in a field reaches the dialog's Confirm, so the
+/// same closure goes to `on_ok` and to the footer's OK button.
+type Ok = Rc<dyn Fn(&mut Window, &mut App) -> bool>;
+
+fn confirm_on_enter(dialog: Dialog, ok: &Ok) -> Dialog {
+    let ok = ok.clone();
+    dialog.on_ok(move |_, window, cx| ok(window, cx))
+}
+
+fn footer(ok: Ok) -> impl gpui_kit::IntoElement {
     h_flex()
         .justify_end()
         .gap_2()
@@ -46,10 +58,25 @@ pub(crate) fn add_favorite(object: ObjectRef, window: &mut Window, cx: &mut App)
     let name = input(window, cx, object.name.clone());
     let id = input(window, cx, String::new());
     let focus = name.clone();
+    let (name_field, id_field) = (name.clone(), id.clone());
+    let ok: Ok = Rc::new(move |_, cx| {
+        let label = name.read(cx).value().trim().to_string();
+        if label.is_empty() {
+            return false;
+        }
+        let id = id
+            .read(cx)
+            .value()
+            .trim()
+            .parse::<u8>()
+            .ok()
+            .filter(|n| (1..=9).contains(n));
+        let object = object.clone();
+        Favorites::global(cx).update(cx, |f, cx| f.add(object, label, id, cx));
+        true
+    });
     window.open_dialog(cx, move |dialog, window, _| {
-        let (name, id, object) = (name.clone(), id.clone(), object.clone());
-        let (name_field, id_field) = (name.clone(), id.clone());
-        dialog
+        confirm_on_enter(dialog, &ok)
             .w(tokens::dialog::SMALL_WIDTH.to_pixels(window.rem_size()))
             .title(t!("fav.add_title").to_string())
             .child(
@@ -72,22 +99,7 @@ pub(crate) fn add_favorite(object: ObjectRef, window: &mut Window, cx: &mut App)
                         .hug_label(),
                     ),
             )
-            .footer(footer(move |_, cx| {
-                let label = name.read(cx).value().trim().to_string();
-                if label.is_empty() {
-                    return false;
-                }
-                let id = id
-                    .read(cx)
-                    .value()
-                    .trim()
-                    .parse::<u8>()
-                    .ok()
-                    .filter(|n| (1..=9).contains(n));
-                let object = object.clone();
-                Favorites::global(cx).update(cx, |f, cx| f.add(object, label, id, cx));
-                true
-            }))
+            .footer(footer(ok.clone()))
     });
     window.defer(cx, move |window, cx| {
         focus.update(cx, |state, cx| state.focus(window, cx));
@@ -101,34 +113,37 @@ pub(crate) fn open_uri(
     open: impl Fn(Selection, &mut Window, &mut App) + 'static,
 ) {
     let field = input(window, cx, String::new());
-    field.update(cx, |s, cx| s.focus(window, cx));
-    let open = std::rc::Rc::new(open);
+    let input_field = field.clone();
+    let ok: Ok = Rc::new(move |window, cx| {
+        let text = field.read(cx).value().to_string();
+        let resolved = ObjectUri::parse(&text)
+            .ok_or_else(|| t!("uri.invalid").to_string())
+            .and_then(|uri| {
+                resolve(&uri, cx)
+                    .ok_or_else(|| t!("uri.no_connection", name = uri.conn).to_string())
+            });
+        match resolved {
+            Ok(sel) => {
+                open(sel, window, cx);
+                true
+            }
+            Err(message) => {
+                window.push_notification(message, cx);
+                false
+            }
+        }
+    });
+    let focus = input_field.clone();
     window.open_dialog(cx, move |dialog, window, _| {
-        let (field, open) = (field.clone(), open.clone());
-        let input_field = field.clone();
-        dialog
+        confirm_on_enter(dialog, &ok)
             .w(tokens::form::FIELD_WIDTH_WIDE.to_pixels(window.rem_size()))
             .title(t!("uri.open_title").to_string())
             .child(Input::new(&input_field))
-            .footer(footer(move |window, cx| {
-                let text = field.read(cx).value().to_string();
-                let resolved = ObjectUri::parse(&text)
-                    .ok_or_else(|| t!("uri.invalid").to_string())
-                    .and_then(|uri| {
-                        resolve(&uri, cx)
-                            .ok_or_else(|| t!("uri.no_connection", name = uri.conn).to_string())
-                    });
-                match resolved {
-                    Ok(sel) => {
-                        open(sel, window, cx);
-                        true
-                    }
-                    Err(message) => {
-                        window.push_notification(message, cx);
-                        false
-                    }
-                }
-            }))
+            .footer(footer(ok.clone()))
+    });
+    // `open_dialog` focuses the dialog itself, so a focus call before that does not stick
+    window.defer(cx, move |window, cx| {
+        focus.update(cx, |s, cx| s.focus(window, cx));
     });
 }
 
