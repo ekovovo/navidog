@@ -363,3 +363,21 @@ query:
   kind_keyword:
     en: Keyword
     zh-CN: 关键字
+  history_log:
+    en: History Log
+    zh-CN: 历史日志
+  history_count:
+    en: "%{n} statements"
+    zh-CN: "%{n} 条语句"
+  pause:
+    en: Pause
+    zh-CN: 暂停
+  resume:
+    en: Resume
+    zh-CN: 恢复
+  console_title:
+    en: "%{name} - Console"
+    zh-CN: "%{name} - 命令列界面"
+  console_not_connected:
+    en: The connection is not open yet.
+    zh-CN: 连接尚未打开。

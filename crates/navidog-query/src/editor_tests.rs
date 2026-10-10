@@ -512,3 +512,113 @@ fn saves_untitled_queries_reloads_outside_edits_and_recovers(cx: &mut TestAppCon
         assert!(back.read(cx).dirty);
     });
 }
+
+#[gpui_kit::test]
+fn history_log_follows_the_log_and_the_console_runs_statements(cx: &mut TestAppContext) {
+    let home = std::env::temp_dir().join(format!("navidog-query-test-{}", std::process::id()));
+    std::fs::create_dir_all(&home).unwrap();
+    let file = home.join("console.db");
+    let _ = std::fs::remove_file(&file);
+    sql(
+        &file,
+        "CREATE TABLE c(id INTEGER PRIMARY KEY, v TEXT); INSERT INTO c(v) VALUES ('x')",
+    );
+    // SAFETY: every test of this binary sets the same value
+    unsafe { std::env::set_var("NAVIDOG_HOME", &home) };
+    let id = cx.update(|cx| {
+        gpui_kit::init(cx);
+        navidog_core::init(cx);
+        navidog_ui::theme::init(cx);
+        navidog_db::init(cx);
+        navidog_grid::init(cx);
+        crate::init(cx);
+        ConnectionStore::global(cx).update(cx, |s, cx| {
+            s.set_key(Key::random());
+            let mut c = Connection::new("sqlite");
+            c.name = "console".into();
+            c.general.file = Some(file.to_string_lossy().into_owned());
+            let id = c.id.clone();
+            s.upsert(c, &[], cx).unwrap();
+            id
+        })
+    });
+    cx.executor().allow_parking();
+    cx.update(|cx| {
+        Sessions::global(cx).update(cx, |s, cx| s.open(id.clone(), Secrets::default(), cx))
+    });
+    wait(cx, "the connection", |cx| {
+        cx.update(|cx| Sessions::global(cx).read(cx).state(&id).is_open())
+    });
+
+    struct Two {
+        log: Entity<crate::HistoryLog>,
+        console: Entity<crate::Console>,
+    }
+    impl Render for Two {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .size_full()
+                .child(self.log.clone())
+                .child(self.console.clone())
+        }
+    }
+    let (handle, log, console) = cx.update(|cx| {
+        let mut out = None;
+        let h = gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+            let log = crate::HistoryLog::new(window, cx);
+            let console = crate::Console::new(id.clone(), Some("main".into()), window, cx);
+            out = Some((log.clone(), console.clone()));
+            cx.new(|_| Two { log, console })
+        })
+        .unwrap();
+        let (l, c) = out.unwrap();
+        (h.0, l, c)
+    });
+    wait(cx, "the console session", |cx| {
+        cx.update(|cx| console.read(cx).has_session())
+    });
+
+    // An incomplete statement only gets a new line; with the terminator it runs
+    let type_and_enter = |cx: &mut TestAppContext, text: &str| {
+        let text = text.to_string();
+        cx.update_window(handle, |_, window, cx| {
+            let input = console.read(cx).input_state();
+            input.update(cx, |s, cx| {
+                let len = s.value().len();
+                s.set_selected_range(len..len, cx);
+                s.insert(text, window, cx);
+                s.focus(window, cx);
+            });
+            window.render_frame(cx);
+            window.press("enter", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+    };
+    type_and_enter(cx, "SELECT v FROM c");
+    assert_eq!(
+        cx.update(|cx| console.read(cx).input_state().read(cx).value().to_string()),
+        "SELECT v FROM c\n"
+    );
+    type_and_enter(cx, "WHERE id = 1;");
+    wait(cx, "the console output", |cx| {
+        cx.update(|cx| console.read(cx).output_text().contains("1 row in set"))
+    });
+    let out = cx.update(|cx| console.read(cx).output_text());
+    assert!(
+        out.contains("sqlite> SELECT v FROM c\n   ...> WHERE id = 1;"),
+        "{out}"
+    );
+    assert!(out.contains("| x |"), "{out}");
+
+    // The history log picks the statement up on its next poll
+    wait(cx, "the history log", |cx| {
+        cx.executor().advance_clock(Duration::from_millis(300));
+        cx.run_until_parked();
+        cx.update(|cx| {
+            log.read(cx)
+                .text(cx)
+                .contains("SELECT v FROM c\nWHERE id = 1")
+        })
+    });
+}

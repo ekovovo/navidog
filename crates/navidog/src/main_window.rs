@@ -15,8 +15,9 @@ use gpui_kit::{
     Render, Styled as _, Subscription, Window, div,
 };
 use navidog_core::actions::{
-    InsertText, NewQuery, OpenConnection, OpenExternalQuery, OpenObject, RunQuery, ToggleFocusMode,
-    ToggleHideObjectGroups, ToggleOnlyActive, ToggleShowHidden, ToggleShowTableProfile,
+    InsertText, NewQuery, OpenConnection, OpenConsole, OpenExternalQuery, OpenHistoryLog,
+    OpenObject, RunQuery, ToggleFocusMode, ToggleHideObjectGroups, ToggleOnlyActive,
+    ToggleShowHidden, ToggleShowTableProfile,
 };
 use navidog_core::favorites::Favorites;
 use navidog_core::object::{ObjectKind, ObjectRef};
@@ -209,6 +210,24 @@ impl MainWindow {
             focus_mode: None,
             _subscriptions: subs,
         }
+    }
+
+    /// History log (F-QRY-012): one tab, activated if it is open already.
+    fn open_history_log(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        for group in navidog_ui::tabs::tab_groups(cx) {
+            let found = group
+                .read(cx)
+                .panels()
+                .iter()
+                .find(|p| p.panel_name(cx) == navidog_query::HISTORY_PANEL)
+                .map(|p| p.panel_id(cx));
+            if let Some(id) = found {
+                self.dock.update(cx, |a, cx| a.select_panel(id, window, cx));
+                return;
+            }
+        }
+        let log = navidog_query::HistoryLog::new(window, cx);
+        self.add_editor(panel_handle(log), window, cx);
     }
 
     /// Auto recovery (F-APP-016): offers editors left unsaved by a crash.
@@ -603,185 +622,206 @@ impl Render for MainWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
         let status = navidog_navigator::status_text(cx);
-        let root = v_flex()
-            .id("main-window")
-            .key_context("MainWindow")
-            .track_focus(&self.focus_handle)
-            .size_full()
-            .bg(p.window_bg)
-            .text_color(p.label)
-            .on_action(cx.listener(|this, a: &OpenObject, window, cx| {
-                this.open_object(&a.object, window, cx)
-            }))
-            .on_action(cx.listener(|this, _: &NewQuery, window, cx| {
-                let editor = navidog_query::QueryEditor::untitled(window, cx);
-                this.add_editor(panel_handle(editor), window, cx);
-            }))
-            .on_action(cx.listener(|this, a: &RunQuery, window, cx| {
-                this.open_object(&a.object, window, cx);
-                if let Some(editor) = navidog_query::editor_for(&a.object, cx) {
-                    editor.update(cx, |e, cx| e.run_all(window, cx));
-                }
-            }))
-            .on_action(cx.listener(|_, _: &OpenExternalQuery, window, cx| {
-                let picked = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
-                    files: true,
-                    directories: false,
-                    multiple: true,
-                    prompt: None,
-                });
-                cx.spawn_in(window, async move |this, cx| {
-                    let Ok(Ok(Some(paths))) = picked.await else {
+        let root =
+            v_flex()
+                .id("main-window")
+                .key_context("MainWindow")
+                .track_focus(&self.focus_handle)
+                .size_full()
+                .bg(p.window_bg)
+                .text_color(p.label)
+                .on_action(cx.listener(|this, a: &OpenObject, window, cx| {
+                    this.open_object(&a.object, window, cx)
+                }))
+                .on_action(cx.listener(|this, _: &NewQuery, window, cx| {
+                    let editor = navidog_query::QueryEditor::untitled(window, cx);
+                    this.add_editor(panel_handle(editor), window, cx);
+                }))
+                .on_action(cx.listener(|this, a: &RunQuery, window, cx| {
+                    this.open_object(&a.object, window, cx);
+                    if let Some(editor) = navidog_query::editor_for(&a.object, cx) {
+                        editor.update(cx, |e, cx| e.run_all(window, cx));
+                    }
+                }))
+                .on_action(cx.listener(|this, _: &OpenHistoryLog, window, cx| {
+                    this.open_history_log(window, cx)
+                }))
+                .on_action(cx.listener(|this, _: &OpenConsole, window, cx| {
+                    let selection = Workspace::global(cx).read(cx).selection().clone();
+                    let Some(conn) = selection.connection_id().cloned() else {
                         return;
                     };
-                    let _ = this.update_in(cx, |this, window, cx| {
-                        for path in paths {
-                            let editor =
-                                navidog_query::QueryEditor::open_external(path, window, cx);
-                            this.add_editor(panel_handle(editor), window, cx);
-                        }
+                    if !Sessions::global(cx).read(cx).state(&conn).is_open() {
+                        window.dispatch_action(
+                            Box::new(navidog_core::actions::OpenConnectionId {
+                                id: conn.clone().into(),
+                            }),
+                            cx,
+                        );
+                    }
+                    let db = selection.scope().map(|s| s.database);
+                    let console = navidog_query::Console::new(conn, db, window, cx);
+                    this.add_editor(panel_handle(console), window, cx);
+                }))
+                .on_action(cx.listener(|_, _: &OpenExternalQuery, window, cx| {
+                    let picked = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
+                        files: true,
+                        directories: false,
+                        multiple: true,
+                        prompt: None,
                     });
+                    cx.spawn_in(window, async move |this, cx| {
+                        let Ok(Ok(Some(paths))) = picked.await else {
+                            return;
+                        };
+                        let _ = this.update_in(cx, |this, window, cx| {
+                            for path in paths {
+                                let editor =
+                                    navidog_query::QueryEditor::open_external(path, window, cx);
+                                this.add_editor(panel_handle(editor), window, cx);
+                            }
+                        });
+                    })
+                    .detach();
+                }))
+                .on_action(|a: &InsertText, window, cx| {
+                    if let Some(editor) = navidog_query::active_editor(cx) {
+                        editor.update(cx, |e, cx| e.insert_text(&a.text, a.snippet, window, cx));
+                    }
                 })
-                .detach();
-            }))
-            .on_action(|a: &InsertText, window, cx| {
-                if let Some(editor) = navidog_query::active_editor(cx) {
-                    editor.update(cx, |e, cx| e.insert_text(&a.text, a.snippet, window, cx));
-                }
-            })
-            .on_action(cx.listener(|this, _: &ToggleNavigator, window, cx| {
-                this.toggle_dock(DockPlacement::Left, window, cx)
-            }))
-            .on_action(cx.listener(|this, _: &ToggleInfoPane, window, cx| {
-                this.toggle_dock(DockPlacement::Right, window, cx)
-            }))
-            .on_action(cx.listener(|this, _: &ToggleToolbar, window, cx| {
-                this.toggle(|s| s.show_toolbar = !s.show_toolbar, window, cx)
-            }))
-            .on_action(cx.listener(|this, _: &ToggleStatusBar, window, cx| {
-                this.toggle(|s| s.show_status_bar = !s.show_status_bar, window, cx)
-            }))
-            .on_action(cx.listener(|this, _: &ToggleHideGroups, window, cx| {
-                this.toggle(|s| s.view.hide_groups = !s.view.hide_groups, window, cx)
-            }))
-            .on_action(cx.listener(|this, _: &ToggleFilterOnTop, window, cx| {
-                this.toggle(|s| s.view.filter_on_top = !s.view.filter_on_top, window, cx)
-            }))
-            .on_action(cx.listener(|this, _: &ToggleOnlyActive, window, cx| {
-                this.toggle(|s| s.view.only_active = !s.view.only_active, window, cx)
-            }))
-            .on_action(cx.listener(|this, _: &ToggleShowHidden, window, cx| {
-                this.toggle(|s| s.view.show_hidden = !s.view.show_hidden, window, cx)
-            }))
-            .on_action(cx.listener(|this, _: &ToggleHideObjectGroups, window, cx| {
-                this.toggle(
-                    |s| s.view.hide_object_groups = !s.view.hide_object_groups,
-                    window,
-                    cx,
+                .on_action(cx.listener(|this, _: &ToggleNavigator, window, cx| {
+                    this.toggle_dock(DockPlacement::Left, window, cx)
+                }))
+                .on_action(cx.listener(|this, _: &ToggleInfoPane, window, cx| {
+                    this.toggle_dock(DockPlacement::Right, window, cx)
+                }))
+                .on_action(cx.listener(|this, _: &ToggleToolbar, window, cx| {
+                    this.toggle(|s| s.show_toolbar = !s.show_toolbar, window, cx)
+                }))
+                .on_action(cx.listener(|this, _: &ToggleStatusBar, window, cx| {
+                    this.toggle(|s| s.show_status_bar = !s.show_status_bar, window, cx)
+                }))
+                .on_action(cx.listener(|this, _: &ToggleHideGroups, window, cx| {
+                    this.toggle(|s| s.view.hide_groups = !s.view.hide_groups, window, cx)
+                }))
+                .on_action(cx.listener(|this, _: &ToggleFilterOnTop, window, cx| {
+                    this.toggle(|s| s.view.filter_on_top = !s.view.filter_on_top, window, cx)
+                }))
+                .on_action(cx.listener(|this, _: &ToggleOnlyActive, window, cx| {
+                    this.toggle(|s| s.view.only_active = !s.view.only_active, window, cx)
+                }))
+                .on_action(cx.listener(|this, _: &ToggleShowHidden, window, cx| {
+                    this.toggle(|s| s.view.show_hidden = !s.view.show_hidden, window, cx)
+                }))
+                .on_action(cx.listener(|this, _: &ToggleHideObjectGroups, window, cx| {
+                    this.toggle(
+                        |s| s.view.hide_object_groups = !s.view.hide_object_groups,
+                        window,
+                        cx,
+                    )
+                }))
+                .on_action(cx.listener(|this, _: &ToggleShowTableProfile, window, cx| {
+                    this.toggle(
+                        |s| s.view.show_table_profile = !s.view.show_table_profile,
+                        window,
+                        cx,
+                    )
+                }))
+                .on_action(
+                    cx.listener(|this, _: &ResetLayout, window, cx| this.reset_layout(window, cx)),
                 )
-            }))
-            .on_action(cx.listener(|this, _: &ToggleShowTableProfile, window, cx| {
-                this.toggle(
-                    |s| s.view.show_table_profile = !s.view.show_table_profile,
-                    window,
-                    cx,
+                .on_action(|_: &ToggleFullScreen, window, _| window.toggle_fullscreen())
+                .on_action(|_: &Minimize, window, _| window.minimize_window())
+                .on_action(|_: &Zoom, window, _| window.zoom_window())
+                .on_action(cx.listener(|this, _: &CloseWindow, window, cx| {
+                    this.save_state(window, cx);
+                    window.remove_window();
+                }))
+                .on_action(
+                    cx.listener(|this, a: &navidog_ui::tabs::PopOutTab, window, cx| {
+                        this.pop_out(a.panel, window, cx)
+                    }),
                 )
-            }))
-            .on_action(
-                cx.listener(|this, _: &ResetLayout, window, cx| this.reset_layout(window, cx)),
-            )
-            .on_action(|_: &ToggleFullScreen, window, _| window.toggle_fullscreen())
-            .on_action(|_: &Minimize, window, _| window.minimize_window())
-            .on_action(|_: &Zoom, window, _| window.zoom_window())
-            .on_action(cx.listener(|this, _: &CloseWindow, window, cx| {
-                this.save_state(window, cx);
-                window.remove_window();
-            }))
-            .on_action(
-                cx.listener(|this, a: &navidog_ui::tabs::PopOutTab, window, cx| {
-                    this.pop_out(a.panel, window, cx)
-                }),
-            )
-            .on_action(cx.listener(|this, _: &ToggleFocusMode, window, cx| {
-                this.toggle_focus_mode(window, cx)
-            }))
-            // Favorites (F-APP-011)
-            .on_action(
-                cx.listener(|this, a: &navidog_ui::tabs::AddToFavorites, window, cx| {
-                    if let Some(o) = this.tab_object(a.panel, cx) {
+                .on_action(cx.listener(|this, _: &ToggleFocusMode, window, cx| {
+                    this.toggle_focus_mode(window, cx)
+                }))
+                // Favorites (F-APP-011)
+                .on_action(
+                    cx.listener(|this, a: &navidog_ui::tabs::AddToFavorites, window, cx| {
+                        if let Some(o) = this.tab_object(a.panel, cx) {
+                            crate::opening::add_favorite(o, window, cx);
+                        }
+                    }),
+                )
+                .on_action(cx.listener(|this, _: &AddActiveToFavorites, window, cx| {
+                    if let Some(o) = this.active_tab_object(cx) {
                         crate::opening::add_favorite(o, window, cx);
                     }
-                }),
-            )
-            .on_action(cx.listener(|this, _: &AddActiveToFavorites, window, cx| {
-                if let Some(o) = this.active_tab_object(cx) {
-                    crate::opening::add_favorite(o, window, cx);
-                }
-            }))
-            .on_action(cx.listener(|this, a: &AddFavoriteWithId, _, cx| {
-                if let Some(o) = this.active_tab_object(cx) {
-                    let name = o.name.clone();
-                    Favorites::global(cx).update(cx, |f, cx| f.add(o, name, Some(a.id), cx));
-                }
-            }))
-            .on_action(cx.listener(|this, a: &OpenFavoriteId, window, cx| {
-                let o = Favorites::global(cx)
-                    .read(cx)
-                    .with_id(a.id)
-                    .map(|f| f.object.clone());
-                if let Some(o) = o {
-                    this.open_selection(Selection::Object(o), window, cx);
-                }
-            }))
-            .on_action(cx.listener(|this, a: &OpenFavorite, window, cx| {
-                let o = Favorites::global(cx)
-                    .read(cx)
-                    .favorites()
-                    .get(a.ix)
-                    .map(|f| f.object.clone());
-                if let Some(o) = o {
-                    this.open_selection(Selection::Object(o), window, cx);
-                }
-            }))
-            .on_action(|a: &RemoveFavorite, _, cx| {
-                Favorites::global(cx).update(cx, |f, cx| f.remove(a.ix, cx))
-            })
-            .on_action(|_: &ClearFavorites, _, cx| {
-                Favorites::global(cx).update(cx, |f, cx| f.clear(cx))
-            })
-            // Recent objects (F-APP-013)
-            .on_action(cx.listener(|this, a: &OpenRecent, window, cx| {
-                let o = Favorites::global(cx).read(cx).recent().get(a.ix).cloned();
-                if let Some(o) = o {
-                    this.open_selection(Selection::Object(o), window, cx);
-                }
-            }))
-            .on_action(|_: &ClearRecent, _, cx| {
-                Favorites::global(cx).update(cx, |f, cx| f.clear_recent(cx))
-            })
-            // Startup screen (F-APP-012)
-            .on_action(
-                cx.listener(|this, a: &navidog_ui::tabs::AddToStartup, _, cx| {
-                    let Some(o) = this
-                        .tab_object(a.panel, cx)
-                        .and_then(|o| serde_json::to_value(o).ok())
-                    else {
-                        return;
-                    };
-                    Settings::update(cx, |s| {
-                        if !s.startup_tabs.contains(&o) {
-                            s.startup_tabs.push(o);
-                        }
+                }))
+                .on_action(cx.listener(|this, a: &AddFavoriteWithId, _, cx| {
+                    if let Some(o) = this.active_tab_object(cx) {
+                        let name = o.name.clone();
+                        Favorites::global(cx).update(cx, |f, cx| f.add(o, name, Some(a.id), cx));
+                    }
+                }))
+                .on_action(cx.listener(|this, a: &OpenFavoriteId, window, cx| {
+                    let o = Favorites::global(cx)
+                        .read(cx)
+                        .with_id(a.id)
+                        .map(|f| f.object.clone());
+                    if let Some(o) = o {
+                        this.open_selection(Selection::Object(o), window, cx);
+                    }
+                }))
+                .on_action(cx.listener(|this, a: &OpenFavorite, window, cx| {
+                    let o = Favorites::global(cx)
+                        .read(cx)
+                        .favorites()
+                        .get(a.ix)
+                        .map(|f| f.object.clone());
+                    if let Some(o) = o {
+                        this.open_selection(Selection::Object(o), window, cx);
+                    }
+                }))
+                .on_action(|a: &RemoveFavorite, _, cx| {
+                    Favorites::global(cx).update(cx, |f, cx| f.remove(a.ix, cx))
+                })
+                .on_action(|_: &ClearFavorites, _, cx| {
+                    Favorites::global(cx).update(cx, |f, cx| f.clear(cx))
+                })
+                // Recent objects (F-APP-013)
+                .on_action(cx.listener(|this, a: &OpenRecent, window, cx| {
+                    let o = Favorites::global(cx).read(cx).recent().get(a.ix).cloned();
+                    if let Some(o) = o {
+                        this.open_selection(Selection::Object(o), window, cx);
+                    }
+                }))
+                .on_action(|_: &ClearRecent, _, cx| {
+                    Favorites::global(cx).update(cx, |f, cx| f.clear_recent(cx))
+                })
+                // Startup screen (F-APP-012)
+                .on_action(
+                    cx.listener(|this, a: &navidog_ui::tabs::AddToStartup, _, cx| {
+                        let Some(o) = this
+                            .tab_object(a.panel, cx)
+                            .and_then(|o| serde_json::to_value(o).ok())
+                        else {
+                            return;
+                        };
+                        Settings::update(cx, |s| {
+                            if !s.startup_tabs.contains(&o) {
+                                s.startup_tabs.push(o);
+                            }
+                        });
+                    }),
+                )
+                // navidog URIs (F-APP-014)
+                .on_action(cx.listener(|_, _: &OpenUri, window, cx| {
+                    let main = cx.entity().downgrade();
+                    crate::opening::open_uri(window, cx, move |sel, window, cx| {
+                        let _ = main.update(cx, |this, cx| this.open_selection(sel, window, cx));
                     });
-                }),
-            )
-            // navidog URIs (F-APP-014)
-            .on_action(cx.listener(|_, _: &OpenUri, window, cx| {
-                let main = cx.entity().downgrade();
-                crate::opening::open_uri(window, cx, move |sel, window, cx| {
-                    let _ = main.update(cx, |this, cx| this.open_selection(sel, window, cx));
-                });
-            }));
+                }));
         let root = navidog_navigator::bind_actions(navidog_connection::bind_actions(root));
         let _ = window;
         root.child(

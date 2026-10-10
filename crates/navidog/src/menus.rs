@@ -321,6 +321,38 @@ pub fn set_menus(cx: &mut App) {
                 Box::new(query::ToggleProfile),
                 settings.show_profile,
             ),
+            MenuItem::submenu(Menu::new(t!("menu.history_log").to_string()).items([
+                checked(
+                    t!("menu.history_date").to_string(),
+                    Box::new(query::ToggleHistoryDate),
+                    settings.history_header.date,
+                ),
+                checked(
+                    t!("menu.history_time").to_string(),
+                    Box::new(query::ToggleHistoryTime),
+                    settings.history_header.time,
+                ),
+                checked(
+                    t!("menu.history_server").to_string(),
+                    Box::new(query::ToggleHistoryServer),
+                    settings.history_header.server,
+                ),
+                checked(
+                    t!("menu.history_session").to_string(),
+                    Box::new(query::ToggleHistorySession),
+                    settings.history_header.session,
+                ),
+                checked(
+                    t!("menu.history_kind").to_string(),
+                    Box::new(query::ToggleHistoryKind),
+                    settings.history_header.kind,
+                ),
+                checked(
+                    t!("menu.history_elapsed").to_string(),
+                    Box::new(query::ToggleHistoryElapsed),
+                    settings.history_header.elapsed,
+                ),
+            ])),
             MenuItem::separator(),
             checked(
                 t!("menu.show_status_bar").to_string(),

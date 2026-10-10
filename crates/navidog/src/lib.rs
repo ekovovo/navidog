@@ -26,13 +26,23 @@ use state::AppState;
 
 const REPO: &str = "https://github.com/xhofe/navidog";
 
+/// The app log goes to the log folder from the preferences; "diagnostic log" records debug
+/// messages too (F-PREF-010). A changed folder applies at the next start.
 fn init_logging() -> tracing_appender::non_blocking::WorkerGuard {
-    let appender = tracing_appender::rolling::daily(navidog_core::paths::log_dir(), "navidog.log");
+    let settings = Settings::load();
+    let dir = settings.log_dir();
+    navidog_db::log::set_dir(dir.clone());
+    let level = if settings.diagnostic_log {
+        "debug"
+    } else {
+        "info"
+    };
+    let appender = tracing_appender::rolling::daily(dir, "navidog.log");
     let (writer, guard) = tracing_appender::non_blocking(appender);
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_env("NAVIDOG_LOG")
-                .unwrap_or_else(|_| "info".into()),
+                .unwrap_or_else(|_| level.into()),
         )
         .with_writer(writer)
         .with_ansi(false)

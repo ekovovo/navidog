@@ -270,6 +270,24 @@ menu:
   history_log:
     en: History Log
     zh-CN: 历史日志
+  history_date:
+    en: Show Date
+    zh-CN: 显示日期
+  history_time:
+    en: Show Time
+    zh-CN: 显示时间
+  history_server:
+    en: Show Server Name
+    zh-CN: 显示服务器名称
+  history_session:
+    en: Show Session ID
+    zh-CN: 显示会话 ID
+  history_kind:
+    en: Show Connection Type
+    zh-CN: 显示连接类型
+  history_elapsed:
+    en: Show Execution Time
+    zh-CN: 显示运行时间
   window:
     en: Window
     zh-CN: 窗口

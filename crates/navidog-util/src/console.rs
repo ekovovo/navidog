@@ -104,9 +104,42 @@ pub fn psql_table(columns: &[String], rows: &[Vec<Option<String>>], numeric: &[b
     out
 }
 
+/// `1 row in set (0.00 sec)`, `2 rows in set …`, or `Empty set …`.
+pub fn mysql_rows_footer(rows: usize, secs: f64) -> String {
+    match rows {
+        0 => format!("Empty set ({secs:.2} sec)"),
+        1 => format!("1 row in set ({secs:.2} sec)"),
+        n => format!("{n} rows in set ({secs:.2} sec)"),
+    }
+}
+
+/// `Query OK, 1 row affected (0.01 sec)`.
+pub fn mysql_ok(affected: u64, secs: f64) -> String {
+    let rows = if affected == 1 { "row" } else { "rows" };
+    format!("Query OK, {affected} {rows} affected ({secs:.2} sec)")
+}
+
+/// psql's `(1 row)` / `(n rows)`.
+pub fn psql_rows_footer(rows: usize) -> String {
+    if rows == 1 {
+        "(1 row)".into()
+    } else {
+        format!("({rows} rows)")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn footers() {
+        assert_eq!(mysql_rows_footer(0, 0.001), "Empty set (0.00 sec)");
+        assert_eq!(mysql_rows_footer(1, 0.0), "1 row in set (0.00 sec)");
+        assert_eq!(mysql_rows_footer(3, 0.015), "3 rows in set (0.01 sec)");
+        assert_eq!(mysql_ok(1, 0.01), "Query OK, 1 row affected (0.01 sec)");
+        assert_eq!(psql_rows_footer(2), "(2 rows)");
+    }
 
     fn data() -> (Vec<String>, Vec<Vec<Option<String>>>) {
         (

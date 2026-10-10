@@ -95,12 +95,8 @@ impl NavigatorPanel {
                         true,
                         Box::new(Refresh),
                     )
-                    .menu_with_disabled(t!("nav.new_query").to_string(), true, Box::new(Refresh))
-                    .menu_with_disabled(
-                        t!("nav.console").to_string(),
-                        true,
-                        Box::new(Refresh),
-                    )
+                    .menu(t!("nav.new_query").to_string(), Box::new(NewQuery))
+                    .menu(t!("nav.console").to_string(), Box::new(OpenConsole))
                 } else {
                     menu.submenu(t!("nav.new_connection").to_string(), new_conn)
                         .menu(

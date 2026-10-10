@@ -27,6 +27,14 @@ pub fn first_keyword(sql: &str) -> &str {
     &rest[..end]
 }
 
+/// The text after a leading `keyword` (ignoring case) followed by whitespace or the end.
+pub fn strip_keyword<'a>(text: &'a str, keyword: &str) -> Option<&'a str> {
+    let rest = text.get(keyword.len()..)?;
+    (crate::starts_with_ignore_ascii_case(text, keyword)
+        && (rest.is_empty() || rest.starts_with(char::is_whitespace)))
+    .then_some(rest)
+}
+
 /// A result tab name from a leading `-- NAME:name` or `/*NAME:name*/` (31-query-results.md §4.1).
 pub fn name_hint(sql: &str) -> Option<String> {
     let rest = sql.trim_start();
@@ -169,6 +177,13 @@ mod tests {
         assert_eq!(first_keyword("-- x\n /* y */ select 1"), "select");
         assert_eq!(first_keyword("# z\nWITH a AS (SELECT 1)"), "WITH");
         assert_eq!(first_keyword("  "), "");
+    }
+
+    #[test]
+    fn keyword_prefix() {
+        assert_eq!(strip_keyword("delimiter $$", "DELIMITER"), Some(" $$"));
+        assert_eq!(strip_keyword("DELIMITER", "DELIMITER"), Some(""));
+        assert_eq!(strip_keyword("delimiters", "DELIMITER"), None);
     }
 
     #[test]
