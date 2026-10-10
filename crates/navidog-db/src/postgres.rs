@@ -1,20 +1,26 @@
 //! PostgreSQL driver (tokio-postgres, native-tls).
 
-use futures::FutureExt as _;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
 use futures::future::BoxFuture;
+use futures::{FutureExt as _, StreamExt as _};
 use native_tls::{Certificate, Identity, TlsConnector};
 use navidog_core::connection::{HostPreference, SslMode};
 use postgres_native_tls::MakeTlsConnector;
 use tokio_postgres::config::{SslMode as PgSslMode, TargetSessionAttrs};
 use tokio_postgres::tls::{MakeTlsConnect, TlsConnect};
-use tokio_postgres::{CancelToken, Client, Config, NoTls, SimpleQueryMessage, Socket};
-
-use std::sync::Arc;
-
-use crate::driver::{
-    CancelHandle, Column, DbError, DbResult, Driver, DriverInfo, Family, Relational, ResultSet,
-    Session,
+use tokio_postgres::types::Kind;
+use tokio_postgres::{
+    AsyncMessage, CancelToken, Client, Config, NoTls, SimpleQueryMessage, Socket,
 };
+
+use crate::dialect::Dialect;
+use crate::driver::{
+    CancelHandle, Column, ColumnOrigin, DbError, DbResult, Driver, DriverInfo, Family, Relational,
+    ResultSet, Session,
+};
+use crate::log::{Tag, logged};
 use crate::params::{ConnectParams, SslParams};
 
 pub struct PostgresDriver {
@@ -92,64 +98,70 @@ fn tls(ssl: &SslParams, verify_chain: bool, verify_host: bool) -> DbResult<MakeT
         b.identity(Identity::from_pkcs8(&cert, &key).map_err(tls_err)?);
     }
     if ssl.crl.is_some() {
-        tracing::warn!("native-tls 不支持证书撤消列表，已忽略");
+        tracing::warn!("native-tls does not support certificate revocation lists; ignored");
     }
     Ok(MakeTlsConnector::new(b.build().map_err(tls_err)?))
 }
 
-async fn connect_with<T>(cfg: &Config, tls: T) -> DbResult<Client>
+/// NOTICE and WARNING messages from the server, collected while a statement runs.
+type Notices = Arc<Mutex<Vec<String>>>;
+
+async fn connect_with<T>(cfg: &Config, tls: T, notices: Notices) -> DbResult<Client>
 where
     T: MakeTlsConnect<Socket> + 'static + Send,
     T::TlsConnect: Send,
     T::Stream: Send + 'static,
     <T::TlsConnect as TlsConnect<Socket>>::Future: Send,
 {
-    let (client, connection) = cfg.connect(tls).await.map_err(err)?;
+    let (client, mut connection) = cfg.connect(tls).await.map_err(err)?;
     tokio::spawn(async move {
-        if let Err(e) = connection.await {
-            tracing::debug!("PostgreSQL 连接结束: {e}");
+        let mut messages = futures::stream::poll_fn(move |cx| connection.poll_message(cx));
+        while let Some(message) = messages.next().await {
+            match message {
+                Ok(AsyncMessage::Notice(n)) => notices
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .push(format!("{}: {}", n.severity(), n.message())),
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::debug!("PostgreSQL connection ended: {e}");
+                    break;
+                }
+            }
         }
     });
     Ok(client)
 }
 
-/// Connects following libpq's sslmode semantics.
-async fn connect(p: &ConnectParams) -> DbResult<Client> {
+/// Connects following libpq's sslmode semantics. Returns the TLS connector when TLS may be in
+/// use, so cancel requests go the same way.
+async fn connect(
+    p: &ConnectParams,
+    notices: Notices,
+) -> DbResult<(Client, Option<MakeTlsConnector>)> {
     let mut cfg = base_config(p)?;
     let Some(ssl) = &p.ssl else {
         cfg.ssl_mode(PgSslMode::Disable);
-        return connect_with(&cfg, NoTls).await;
+        return Ok((connect_with(&cfg, NoTls, notices).await?, None));
     };
     // ponytail: through an SSH tunnel the host is 127.0.0.1, so verify-full only checks the chain
     let tunneled = p.tls_host.is_some();
-    match ssl.mode {
+    let (mode, connector) = match ssl.mode {
         SslMode::Allow => {
             cfg.ssl_mode(PgSslMode::Disable);
-            match connect_with(&cfg, NoTls).await {
-                Ok(c) => Ok(c),
-                Err(_) => {
-                    cfg.ssl_mode(PgSslMode::Require);
-                    connect_with(&cfg, tls(ssl, false, false)?).await
-                }
+            if let Ok(c) = connect_with(&cfg, NoTls, notices.clone()).await {
+                return Ok((c, None));
             }
+            (PgSslMode::Require, tls(ssl, false, false)?)
         }
-        SslMode::Prefer => {
-            cfg.ssl_mode(PgSslMode::Prefer);
-            connect_with(&cfg, tls(ssl, false, false)?).await
-        }
-        SslMode::Require => {
-            cfg.ssl_mode(PgSslMode::Require);
-            connect_with(&cfg, tls(ssl, false, false)?).await
-        }
-        SslMode::VerifyCa => {
-            cfg.ssl_mode(PgSslMode::Require);
-            connect_with(&cfg, tls(ssl, true, false)?).await
-        }
-        SslMode::VerifyFull => {
-            cfg.ssl_mode(PgSslMode::Require);
-            connect_with(&cfg, tls(ssl, true, !tunneled)?).await
-        }
-    }
+        SslMode::Prefer => (PgSslMode::Prefer, tls(ssl, false, false)?),
+        SslMode::Require => (PgSslMode::Require, tls(ssl, false, false)?),
+        SslMode::VerifyCa => (PgSslMode::Require, tls(ssl, true, false)?),
+        SslMode::VerifyFull => (PgSslMode::Require, tls(ssl, true, !tunneled)?),
+    };
+    cfg.ssl_mode(mode);
+    let client = connect_with(&cfg, connector.clone(), notices).await?;
+    Ok((client, Some(connector)))
 }
 
 impl Driver for PostgresDriver {
@@ -158,39 +170,55 @@ impl Driver for PostgresDriver {
     }
 
     fn connect(&self, params: ConnectParams) -> BoxFuture<'static, DbResult<Box<dyn Session>>> {
+        let mut tag = Tag::new(&params.name, &self.info.name);
         async move {
-            let client = tokio::time::timeout(params.timeout(), connect(&params))
-                .await
-                .map_err(|_| DbError::msg("连接超时"))??;
-            for q in crate::sql::split_statements(&params.initial_queries) {
+            let notices = Notices::default();
+            let (client, tls) =
+                tokio::time::timeout(params.timeout(), connect(&params, notices.clone()))
+                    .await
+                    .map_err(|_| DbError::msg("连接超时"))??;
+            for q in crate::sql::split_statements(&params.initial_queries, Dialect::Postgres) {
                 client.batch_execute(&q).await.map_err(err)?;
             }
-            let version = first_value(&client, "SHOW server_version")
-                .await?
+            let msgs = client
+                .simple_query("SELECT current_setting('server_version'), pg_backend_pid()")
+                .await
+                .map_err(err)?;
+            let (version, pid) = msgs
+                .into_iter()
+                .find_map(|m| match m {
+                    SimpleQueryMessage::Row(r) => Some((
+                        r.get(0).unwrap_or_default().to_string(),
+                        r.get(1).and_then(|p| p.parse().ok()).unwrap_or(0),
+                    )),
+                    _ => None,
+                })
                 .unwrap_or_default();
+            tag.session = pid;
             let cancel = client.cancel_token();
             Ok(Box::new(PgSession {
                 client,
                 cancel,
+                tls,
                 version,
+                notices,
+                tag,
+                origins: HashMap::new(),
             }) as Box<dyn Session>)
         }
         .boxed()
     }
 }
 
-async fn first_value(client: &Client, sql: &str) -> DbResult<Option<String>> {
-    let msgs = client.simple_query(sql).await.map_err(err)?;
-    Ok(msgs.into_iter().find_map(|m| match m {
-        SimpleQueryMessage::Row(r) => r.get(0).map(String::from),
-        _ => None,
-    }))
-}
-
 pub struct PgSession {
     client: Client,
     cancel: CancelToken,
+    tls: Option<MakeTlsConnector>,
     version: String,
+    notices: Notices,
+    tag: Tag,
+    /// `(table oid, column number)` → where a result column comes from; `None` when unknown
+    origins: HashMap<(u32, i16), Option<ColumnOrigin>>,
 }
 
 impl Session for PgSession {
@@ -210,12 +238,22 @@ impl Session for PgSession {
     }
 
     fn cancel_handle(&self) -> Option<CancelHandle> {
-        let token = self.cancel.clone();
+        let (token, tls) = (self.cancel.clone(), self.tls.clone());
         Some(Arc::new(move || {
-            let token = token.clone();
-            // ponytail: cancel requests go over plain TCP; servers that force SSL need the TLS connector
-            async move { token.cancel_query(NoTls).await.map_err(err) }.boxed()
+            let (token, tls) = (token.clone(), tls.clone());
+            async move {
+                match tls {
+                    Some(tls) => token.cancel_query(tls).await,
+                    None => token.cancel_query(NoTls).await,
+                }
+                .map_err(err)
+            }
+            .boxed()
         }))
+    }
+
+    fn session_id(&self) -> Option<u64> {
+        Some(self.tag.session)
     }
 
     fn close(self: Box<Self>) -> BoxFuture<'static, DbResult<()>> {
@@ -231,34 +269,103 @@ impl Session for PgSession {
     }
 }
 
-impl Relational for PgSession {
-    fn dialect(&self) -> crate::dialect::Dialect {
-        crate::dialect::Dialect::Postgres
-    }
+/// Statements `prepare` can describe; utility statements (SET, SHOW, DDL) cannot be prepared.
+fn describable(sql: &str) -> bool {
+    let word = navidog_util::sql_text::first_keyword(sql);
+    ["SELECT", "WITH", "VALUES", "TABLE"]
+        .iter()
+        .any(|k| word.eq_ignore_ascii_case(k))
+}
 
-    fn list_databases(&mut self) -> BoxFuture<'_, DbResult<Vec<String>>> {
-        async move {
-            let msgs = self
-                .client
-                .simple_query(
-                    "SELECT datname FROM pg_database WHERE NOT datistemplate ORDER BY datname",
-                )
-                .await
-                .map_err(err)?;
-            Ok(msgs
-                .into_iter()
-                .filter_map(|m| match m {
-                    SimpleQueryMessage::Row(r) => r.get(0).map(String::from),
-                    _ => None,
-                })
-                .collect())
+fn type_name(ty: &tokio_postgres::types::Type) -> String {
+    match ty.kind() {
+        Kind::Array(inner) => format!("{}[]", inner.name()),
+        _ => ty.name().to_string(),
+    }
+}
+
+impl PgSession {
+    /// Column types and origins of a SELECT, from its prepared form. `None` when it cannot be
+    /// prepared; the result is then shown without types and stays read-only.
+    async fn describe(&mut self, sql: &str) -> Option<Vec<Column>> {
+        let stmt = self.client.prepare(sql).await.ok()?;
+        let wanted: Vec<(u32, i16)> = stmt
+            .columns()
+            .iter()
+            .filter_map(|c| Some((c.table_oid()?, c.column_id()?)))
+            .filter(|key| !self.origins.contains_key(key))
+            .collect();
+        if !wanted.is_empty() {
+            let pairs = wanted
+                .iter()
+                .map(|(t, c)| format!("({t}, {c})"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "SELECT a.attrelid, a.attnum, n.nspname, c.relname, a.attname \
+                 FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid \
+                 JOIN pg_namespace n ON n.oid = c.relnamespace \
+                 WHERE (a.attrelid, a.attnum) IN ({pairs})"
+            );
+            let client = &self.client;
+            let msgs = logged(&self.tag, &sql, async {
+                client.simple_query(&sql).await.map_err(err)
+            })
+            .await
+            .ok()?;
+            for key in &wanted {
+                self.origins.insert(*key, None);
+            }
+            for m in msgs {
+                if let SimpleQueryMessage::Row(r) = m {
+                    let key = (
+                        r.get(0).and_then(|v| v.parse().ok()).unwrap_or(0),
+                        r.get(1).and_then(|v| v.parse().ok()).unwrap_or(0),
+                    );
+                    let text = |i| r.get(i).unwrap_or_default().to_string();
+                    self.origins.insert(
+                        key,
+                        Some(ColumnOrigin {
+                            schema: text(2),
+                            table: text(3),
+                            column: text(4),
+                        }),
+                    );
+                }
+            }
         }
-        .boxed()
+        Some(
+            stmt.columns()
+                .iter()
+                .map(|c| Column {
+                    name: c.name().to_string(),
+                    type_name: type_name(c.type_()),
+                    origin: c
+                        .table_oid()
+                        .zip(c.column_id())
+                        .and_then(|key| self.origins.get(&key).cloned().flatten()),
+                })
+                .collect(),
+        )
+    }
+}
+
+impl Relational for PgSession {
+    fn dialect(&self) -> Dialect {
+        Dialect::Postgres
     }
 
     fn execute<'a>(&'a mut self, sql: &'a str) -> BoxFuture<'a, DbResult<Vec<ResultSet>>> {
         async move {
-            let msgs = self.client.simple_query(sql).await.map_err(err)?;
+            self.notices
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .clear();
+            let client = &self.client;
+            let msgs = logged(&self.tag, sql, async {
+                client.simple_query(sql).await.map_err(err)
+            })
+            .await?;
             let mut sets = Vec::new();
             let mut current = ResultSet::default();
             for m in msgs {
@@ -268,7 +375,7 @@ impl Relational for PgSession {
                             .iter()
                             .map(|c| Column {
                                 name: c.name().to_string(),
-                                type_name: String::new(),
+                                ..Column::default()
                             })
                             .collect();
                     }
@@ -285,6 +392,37 @@ impl Relational for PgSession {
                     }
                     _ => {}
                 }
+            }
+            let notices =
+                std::mem::take(&mut *self.notices.lock().unwrap_or_else(|p| p.into_inner()));
+            if let Some(last) = sets.last_mut() {
+                last.notices = notices;
+            } else if !notices.is_empty() {
+                sets.push(ResultSet {
+                    notices,
+                    ..ResultSet::default()
+                });
+            }
+            Ok(sets)
+        }
+        .boxed()
+    }
+
+    fn execute_statement<'a>(
+        &'a mut self,
+        sql: &'a str,
+    ) -> BoxFuture<'a, DbResult<Vec<ResultSet>>> {
+        async move {
+            let described = if describable(sql) {
+                self.describe(sql).await
+            } else {
+                None
+            };
+            let mut sets = self.execute(sql).await?;
+            if let (Some(columns), Some(first)) = (described, sets.first_mut())
+                && columns.len() == first.columns.len()
+            {
+                first.columns = columns;
             }
             Ok(sets)
         }

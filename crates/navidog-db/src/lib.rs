@@ -3,6 +3,7 @@
 
 pub mod dialect;
 pub mod driver;
+pub mod log;
 mod metadata;
 pub mod mysql;
 pub mod params;
@@ -86,6 +87,9 @@ impl Session for Tunneled {
     }
     fn cancel_handle(&self) -> Option<CancelHandle> {
         self.inner.cancel_handle()
+    }
+    fn session_id(&self) -> Option<u64> {
+        self.inner.session_id()
     }
     fn close(self: Box<Self>) -> BoxFuture<'static, DbResult<()>> {
         let Tunneled { inner, _tunnel } = *self;

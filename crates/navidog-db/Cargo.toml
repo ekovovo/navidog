@@ -8,7 +8,9 @@ publish.workspace = true
 
 [dependencies]
 navidog-core.workspace = true
+navidog-util.workspace = true
 gpui-kit.workspace = true
+chrono.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
@@ -19,7 +21,7 @@ mysql_async = { version = "0.37", default-features = false, features = ["default
 tokio-postgres = "0.7"
 postgres-native-tls = "0.5"
 native-tls = "0.2"
-rusqlite = { version = "0.40", features = ["bundled", "column_decltype"] }
+rusqlite = { version = "0.40", features = ["bundled", "column_decltype", "column_metadata"] }
 russh = { version = "0.64", default-features = false, features = ["flate2", "ring", "rsa"] }
 
 [dev-dependencies]

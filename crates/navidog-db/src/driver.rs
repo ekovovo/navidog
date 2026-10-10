@@ -82,6 +82,9 @@ pub trait Session: Send + 'static {
     fn server_version(&self) -> &str;
     fn ping(&mut self) -> BoxFuture<'_, DbResult<()>>;
     fn cancel_handle(&self) -> Option<CancelHandle>;
+    /// The server's ID for this session (MySQL `CONNECTION_ID()`, PostgreSQL `pg_backend_pid()`),
+    /// shown in the history log; SQLite has none.
+    fn session_id(&self) -> Option<u64>;
     fn close(self: Box<Self>) -> BoxFuture<'static, DbResult<()>>;
 
     fn relational(&mut self) -> Option<&mut dyn Relational> {
@@ -95,11 +98,21 @@ pub trait Session: Send + 'static {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Column {
     pub name: String,
-    /// Type name; empty when the text protocol does not provide the type
+    /// SQL type name; empty when the protocol does not provide the type
     pub type_name: String,
+    /// The table column this result column reads, when the server reports it
+    pub origin: Option<ColumnOrigin>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ColumnOrigin {
+    /// MySQL database, PostgreSQL schema, or SQLite `main` / attached database
+    pub schema: String,
+    pub table: String,
+    pub column: String,
 }
 
 /// Result set in text form; `None` means NULL.
@@ -108,6 +121,8 @@ pub struct ResultSet {
     pub columns: Vec<Column>,
     pub rows: Vec<Vec<Option<String>>>,
     pub affected_rows: Option<u64>,
+    /// PostgreSQL NOTICE and WARNING messages received while the statement ran
+    pub notices: Vec<String>,
 }
 
 /// One entry in an object list (the List and Detail views of the Objects tab).
@@ -150,13 +165,23 @@ pub struct ForeignKey {
 
 pub trait Relational: Send {
     fn dialect(&self) -> Dialect;
-    fn list_databases(&mut self) -> BoxFuture<'_, DbResult<Vec<String>>>;
     /// Execute one or more statements over the text protocol; each returns one result set.
     fn execute<'a>(&'a mut self, sql: &'a str) -> BoxFuture<'a, DbResult<Vec<ResultSet>>>;
+    /// Execute one statement typed by the user (query editor), filling column types and origins
+    /// where the plain `execute` cannot (PostgreSQL's simple protocol reports neither).
+    fn execute_statement<'a>(
+        &'a mut self,
+        sql: &'a str,
+    ) -> BoxFuture<'a, DbResult<Vec<ResultSet>>> {
+        self.execute(sql)
+    }
 
     // Metadata: default implementations generate SQL per dialect and run it via `execute`
     // (metadata.rs)
 
+    fn list_databases(&mut self) -> BoxFuture<'_, DbResult<Vec<String>>> {
+        Box::pin(crate::metadata::list_databases(self))
+    }
     /// Schemas in the database this session is connected to; dialects without a schema level
     /// return an empty list.
     fn list_schemas(&mut self) -> BoxFuture<'_, DbResult<Vec<String>>> {

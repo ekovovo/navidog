@@ -1,4 +1,4 @@
-//! SQLite 驱动（rusqlite，bundled）。rusqlite 是阻塞 API，调用都放到 `spawn_blocking`。
+//! SQLite driver (rusqlite, bundled). rusqlite is blocking, so calls run in `spawn_blocking`.
 
 use std::sync::{Arc, Mutex};
 
@@ -7,10 +7,12 @@ use futures::future::BoxFuture;
 use rusqlite::types::ValueRef;
 use rusqlite::{OpenFlags, params};
 
+use crate::dialect::Dialect;
 use crate::driver::{
-    CancelHandle, Column, DbError, DbResult, Driver, DriverInfo, Family, Relational, ResultSet,
-    Session,
+    CancelHandle, Column, ColumnOrigin, DbError, DbResult, Driver, DriverInfo, Family, Relational,
+    ResultSet, Session,
 };
+use crate::log::{Tag, logged};
 use crate::params::ConnectParams;
 
 pub struct SqliteDriver {
@@ -61,6 +63,7 @@ impl Driver for SqliteDriver {
     }
 
     fn connect(&self, params: ConnectParams) -> BoxFuture<'static, DbResult<Box<dyn Session>>> {
+        let tag = Tag::new(&params.name, &self.info.name);
         async move {
             let file = params
                 .file
@@ -96,6 +99,7 @@ impl Driver for SqliteDriver {
                     conn: Arc::new(Mutex::new(conn)),
                     interrupt,
                     version,
+                    tag,
                 })
             })
             .await
@@ -110,6 +114,7 @@ pub struct SqliteSession {
     conn: Shared,
     interrupt: Arc<rusqlite::InterruptHandle>,
     version: String,
+    tag: Tag,
 }
 
 impl Session for SqliteSession {
@@ -130,6 +135,10 @@ impl Session for SqliteSession {
         }))
     }
 
+    fn session_id(&self) -> Option<u64> {
+        None
+    }
+
     fn close(self: Box<Self>) -> BoxFuture<'static, DbResult<()>> {
         async move {
             drop(self.conn);
@@ -144,43 +153,40 @@ impl Session for SqliteSession {
 }
 
 impl Relational for SqliteSession {
-    fn dialect(&self) -> crate::dialect::Dialect {
-        crate::dialect::Dialect::Sqlite
-    }
-
-    fn list_databases(&mut self) -> BoxFuture<'_, DbResult<Vec<String>>> {
-        async move {
-            blocking(&self.conn, |c| {
-                let mut stmt = c.prepare("PRAGMA database_list").map_err(err)?;
-                let names = stmt
-                    .query_map([], |r| r.get::<_, String>(1))
-                    .map_err(err)?
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(err)?;
-                Ok(names.into_iter().filter(|n| n != "temp").collect())
-            })
-            .await
-        }
-        .boxed()
+    fn dialect(&self) -> Dialect {
+        Dialect::Sqlite
     }
 
     fn execute<'a>(&'a mut self, sql: &'a str) -> BoxFuture<'a, DbResult<Vec<ResultSet>>> {
-        let sql = sql.to_string();
-        async move { blocking(&self.conn, move |c| execute_all(c, &sql)).await }.boxed()
+        let owned = sql.to_string();
+        let conn = self.conn.clone();
+        let tag = self.tag.clone();
+        async move { logged(&tag, sql, blocking(&conn, move |c| execute_all(c, &owned))).await }
+            .boxed()
     }
 }
 
-/// 逐条执行多语句 SQL，每条返回一个结果集。
+/// Runs a multi-statement script one statement at a time; each returns one result set.
 fn execute_all(conn: &mut rusqlite::Connection, sql: &str) -> DbResult<Vec<ResultSet>> {
     let mut sets = Vec::new();
-    for piece in crate::sql::split_statements(sql) {
+    for piece in crate::sql::split_statements(sql, Dialect::Sqlite) {
         let mut stmt = conn.prepare(&piece).map_err(err)?;
+        let origins = stmt.columns_with_metadata();
         let columns: Vec<Column> = stmt
             .columns()
             .iter()
-            .map(|c| Column {
+            .zip(origins)
+            .map(|(c, m)| Column {
                 name: c.name().to_string(),
                 type_name: c.decl_type().unwrap_or("").to_string(),
+                origin: match (m.database_name(), m.table_name(), m.origin_name()) {
+                    (Some(schema), Some(table), Some(column)) => Some(ColumnOrigin {
+                        schema: schema.to_string(),
+                        table: table.to_string(),
+                        column: column.to_string(),
+                    }),
+                    _ => None,
+                },
             })
             .collect();
         let mut set = ResultSet {

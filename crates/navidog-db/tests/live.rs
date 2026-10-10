@@ -363,6 +363,120 @@ fn object_operations_on_mysql_and_postgres() {
     });
 }
 
+/// Query editor needs (31-query-results.md §1): column origins and SQL type names, session IDs,
+/// PostgreSQL notices, DELIMITER scripts and the MySQL read timeout.
+#[test]
+fn query_editor_driver_features() {
+    use navidog_db::sql::split_script;
+    if !live() {
+        return;
+    }
+    runtime::runtime().block_on(async {
+        let mut params = mysql_params(13306);
+        params.database = Some("sakila".into());
+        params.read_timeout = Some(std::time::Duration::from_secs(1));
+        let mut my = connect(Arc::new(MySqlDriver::mysql()), params)
+            .await
+            .unwrap();
+        assert!(my.session_id().unwrap() > 0);
+        let rel = my.relational().unwrap();
+        let sets = rel
+            .execute_statement("SELECT a.actor_id, a.first_name AS n, 1 + 1 FROM actor a LIMIT 1")
+            .await
+            .unwrap();
+        let cols = &sets[0].columns;
+        let origin = cols[1].origin.clone().unwrap();
+        assert_eq!(
+            (
+                origin.schema.as_str(),
+                origin.table.as_str(),
+                origin.column.as_str()
+            ),
+            ("sakila", "actor", "first_name")
+        );
+        assert!(cols[0].type_name.contains("int"), "{:?}", cols[0]);
+        assert_eq!(cols[1].type_name, "varchar");
+        assert!(cols[2].origin.is_none());
+
+        let script = "DROP PROCEDURE IF EXISTS navidog_p;\nDELIMITER $$\n\
+                      CREATE PROCEDURE navidog_p() BEGIN SELECT 1; SELECT 2; END$$\n\
+                      DELIMITER ;\nCALL navidog_p();\nDROP PROCEDURE navidog_p";
+        let mut sets = Vec::new();
+        for stmt in split_script(script, Dialect::MySql) {
+            sets.extend(rel.execute(&stmt.text).await.unwrap());
+        }
+        assert!(sets.iter().filter(|s| !s.columns.is_empty()).count() >= 2);
+
+        let e = rel.execute("SELECT SLEEP(5)").await.unwrap_err();
+        assert!(e.message.contains("超时"), "{e}");
+        // The session survives the kill
+        let one = rel.execute("SELECT 1").await.unwrap();
+        assert_eq!(one[0].rows[0][0].as_deref(), Some("1"));
+        my.close().await.unwrap();
+
+        let mut pg = connect(Arc::new(PostgresDriver::default()), pg_params())
+            .await
+            .unwrap();
+        assert!(pg.session_id().unwrap() > 0);
+        let rel = pg.relational().unwrap();
+        let sets = rel
+            .execute_statement("SELECT actor_id, first_name AS n, now() FROM actor LIMIT 1")
+            .await
+            .unwrap();
+        let cols = &sets[0].columns;
+        assert_eq!(cols[0].type_name, "int4");
+        assert_eq!(
+            cols[1].origin.as_ref().map(|o| (
+                o.schema.as_str(),
+                o.table.as_str(),
+                o.column.as_str()
+            )),
+            Some(("public", "actor", "first_name"))
+        );
+        assert!(cols[2].origin.is_none());
+        let sets = rel
+            .execute("DO $$ BEGIN RAISE NOTICE 'hello %', 1; END $$")
+            .await
+            .unwrap();
+        assert_eq!(sets.last().unwrap().notices, ["NOTICE: hello 1"]);
+        pg.close().await.unwrap();
+    });
+}
+
+/// "Stop" on a PostgreSQL session that requires SSL: the cancel request goes over TLS too.
+#[test]
+fn postgres_cancel_over_tls() {
+    if !live() {
+        return;
+    }
+    runtime::runtime().block_on(async {
+        let mut p = pg_params();
+        p.ssl = Some(SslParams {
+            mode: SslMode::Require,
+            ..Default::default()
+        });
+        let mut pg = connect(Arc::new(PostgresDriver::default()), p)
+            .await
+            .unwrap();
+        let cancel = pg.cancel_handle().unwrap();
+        let canceller = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            cancel().await
+        });
+        let started = std::time::Instant::now();
+        let e = pg
+            .relational()
+            .unwrap()
+            .execute("SELECT pg_sleep(10)")
+            .await
+            .unwrap_err();
+        canceller.await.unwrap().unwrap();
+        assert_eq!(e.code.as_deref(), Some("57014"), "{e}");
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+        pg.close().await.unwrap();
+    });
+}
+
 #[test]
 fn ssh_tunnel_to_mysql_and_postgres() {
     if !live() {

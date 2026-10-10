@@ -1,16 +1,20 @@
-//! MySQL / MariaDB 驱动（mysql_async，rustls）。
+//! MySQL / MariaDB driver (mysql_async, rustls).
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
+use mysql_async::consts::{ColumnFlags, ColumnType};
 use mysql_async::prelude::Queryable as _;
 use mysql_async::{Conn, Opts, OptsBuilder, SslOpts};
 
+use crate::dialect::Dialect;
 use crate::driver::{
-    CancelHandle, Column, DbError, DbResult, Driver, DriverInfo, Family, Relational, ResultSet,
-    Session,
+    CancelHandle, Column, ColumnOrigin, DbError, DbResult, Driver, DriverInfo, Family, Relational,
+    ResultSet, Session,
 };
+use crate::log::{Tag, logged};
 use crate::params::ConnectParams;
 
 pub struct MySqlDriver {
@@ -55,7 +59,10 @@ fn build_opts(p: &ConnectParams) -> Opts {
         .user(Some(p.user.clone()))
         .pass(p.password.clone())
         .db_name(p.database.clone())
-        .init(crate::sql::split_statements(&p.initial_queries))
+        .init(crate::sql::split_statements(
+            &p.initial_queries,
+            Dialect::MySql,
+        ))
         .socket(p.socket.clone())
         .prefer_socket(p.socket.is_some());
     if p.compression {
@@ -63,7 +70,8 @@ fn build_opts(p: &ConnectParams) -> Opts {
     }
     if let Some(ssl) = &p.ssl {
         let mut opts = SslOpts::default()
-            // Navicat 的“验证针对 CA 的服务器证书”只校验证书链，不校验主机名（VERIFY_CA）
+            // Navicat's "verify server certificate against CA" checks the chain only, not the
+            // host name (VERIFY_CA)
             .with_danger_skip_domain_validation(true)
             .with_danger_accept_invalid_certs(!ssl.verify_server_cert);
         if let Some(ca) = &ssl.ca_cert {
@@ -86,6 +94,7 @@ impl Driver for MySqlDriver {
     }
 
     fn connect(&self, params: ConnectParams) -> BoxFuture<'static, DbResult<Box<dyn Session>>> {
+        let mut tag = Tag::new(&params.name, &self.info.name);
         async move {
             let opts = build_opts(&params);
             let mut conn = tokio::time::timeout(params.timeout(), Conn::new(opts.clone()))
@@ -94,10 +103,13 @@ impl Driver for MySqlDriver {
                 .map_err(err)?;
             let version: Option<String> =
                 conn.query_first("SELECT VERSION()").await.map_err(err)?;
+            tag.session = conn.id() as u64;
             Ok(Box::new(MySqlSession {
                 conn,
                 opts,
                 version: version.unwrap_or_default(),
+                read_timeout: params.read_timeout,
+                tag,
             }) as Box<dyn Session>)
         }
         .boxed()
@@ -108,6 +120,18 @@ pub struct MySqlSession {
     conn: Conn,
     opts: Opts,
     version: String,
+    read_timeout: Option<Duration>,
+    tag: Tag,
+}
+
+/// Kills the statement session `id` is running, from a separate session.
+async fn kill_query(opts: Opts, id: u32) -> DbResult<()> {
+    let mut killer = Conn::new(opts).await.map_err(err)?;
+    killer
+        .query_drop(format!("KILL QUERY {id}"))
+        .await
+        .map_err(err)?;
+    killer.disconnect().await.map_err(err)
 }
 
 impl Session for MySqlSession {
@@ -120,21 +144,13 @@ impl Session for MySqlSession {
     }
 
     fn cancel_handle(&self) -> Option<CancelHandle> {
-        // 另开一个会话执行 KILL QUERY
         let opts = self.opts.clone();
         let id = self.conn.id();
-        Some(Arc::new(move || {
-            let opts = opts.clone();
-            async move {
-                let mut killer = Conn::new(opts).await.map_err(err)?;
-                killer
-                    .query_drop(format!("KILL QUERY {id}"))
-                    .await
-                    .map_err(err)?;
-                killer.disconnect().await.map_err(err)
-            }
-            .boxed()
-        }))
+        Some(Arc::new(move || kill_query(opts.clone(), id).boxed()))
+    }
+
+    fn session_id(&self) -> Option<u64> {
+        Some(self.conn.id() as u64)
     }
 
     fn close(self: Box<Self>) -> BoxFuture<'static, DbResult<()>> {
@@ -147,46 +163,131 @@ impl Session for MySqlSession {
 }
 
 impl Relational for MySqlSession {
-    fn dialect(&self) -> crate::dialect::Dialect {
-        crate::dialect::Dialect::MySql
-    }
-
-    fn list_databases(&mut self) -> BoxFuture<'_, DbResult<Vec<String>>> {
-        async move { self.conn.query("SHOW DATABASES").await.map_err(err) }.boxed()
+    fn dialect(&self) -> Dialect {
+        Dialect::MySql
     }
 
     fn execute<'a>(&'a mut self, sql: &'a str) -> BoxFuture<'a, DbResult<Vec<ResultSet>>> {
+        let (opts, id, limit) = (self.opts.clone(), self.conn.id(), self.read_timeout);
+        let tag = self.tag.clone();
         async move {
-            let mut result = self.conn.query_iter(sql).await.map_err(err)?;
-            let mut sets = Vec::new();
-            while !result.is_empty() {
-                let columns: Vec<Column> = result
-                    .columns_ref()
-                    .iter()
-                    .map(|c| Column {
-                        name: c.name_str().into_owned(),
-                        type_name: format!("{:?}", c.column_type()),
-                    })
-                    .collect();
-                let rows: Vec<mysql_async::Row> = result.collect().await.map_err(err)?;
-                let rows = rows
-                    .into_iter()
-                    .map(|row| row.unwrap().into_iter().map(value_text).collect())
-                    .collect();
-                let affected = columns.is_empty().then(|| result.affected_rows());
-                sets.push(ResultSet {
-                    columns,
-                    rows,
-                    affected_rows: affected,
-                });
-            }
-            Ok(sets)
+            let run = query(&mut self.conn, sql);
+            let Some(limit) = limit else {
+                return logged(&tag, sql, run).await;
+            };
+            // On timeout the statement is killed and its interrupted result read off the wire,
+            // so the session stays usable
+            let guarded = async {
+                tokio::pin!(run);
+                tokio::select! {
+                    result = &mut run => result,
+                    _ = tokio::time::sleep(limit) => {
+                        if let Err(e) = kill_query(opts, id).await {
+                            tracing::warn!("KILL QUERY after the read timeout failed: {e}");
+                        }
+                        let _ = run.await;
+                        Err(DbError::msg(format!("读取超时（{} 秒）", limit.as_secs())))
+                    }
+                }
+            };
+            logged(&tag, sql, guarded).await
         }
         .boxed()
     }
 }
 
-/// 文本协议下除 NULL 外的值都是字节串。
+async fn query(conn: &mut Conn, sql: &str) -> DbResult<Vec<ResultSet>> {
+    let mut result = conn.query_iter(sql).await.map_err(err)?;
+    let mut sets = Vec::new();
+    while !result.is_empty() {
+        let columns: Vec<Column> = result
+            .columns_ref()
+            .iter()
+            .map(|c| {
+                let table = c.org_table_str();
+                Column {
+                    name: c.name_str().into_owned(),
+                    type_name: sql_type(c.column_type(), c.flags(), c.character_set()),
+                    origin: (!table.is_empty()).then(|| ColumnOrigin {
+                        schema: c.schema_str().into_owned(),
+                        table: table.into_owned(),
+                        column: c.org_name_str().into_owned(),
+                    }),
+                }
+            })
+            .collect();
+        let rows: Vec<mysql_async::Row> = result.collect().await.map_err(err)?;
+        let rows = rows
+            .into_iter()
+            .map(|row| row.unwrap().into_iter().map(value_text).collect())
+            .collect();
+        let affected = columns.is_empty().then(|| result.affected_rows());
+        sets.push(ResultSet {
+            columns,
+            rows,
+            affected_rows: affected,
+            notices: Vec::new(),
+        });
+    }
+    Ok(sets)
+}
+
+/// The SQL type name of a result column, so type icons and number alignment work for query
+/// results too. The protocol gives no length, so `varchar` has no `(n)`.
+fn sql_type(ty: ColumnType, flags: ColumnFlags, charset: u16) -> String {
+    use ColumnType::*;
+    // Charset 63 is `binary`: the column holds bytes, not text
+    let binary = charset == 63;
+    let text_or = |text: &'static str, bytes: &'static str| if binary { bytes } else { text };
+    let name = match ty {
+        MYSQL_TYPE_TINY => "tinyint",
+        MYSQL_TYPE_SHORT => "smallint",
+        MYSQL_TYPE_INT24 => "mediumint",
+        MYSQL_TYPE_LONG => "int",
+        MYSQL_TYPE_LONGLONG => "bigint",
+        MYSQL_TYPE_FLOAT => "float",
+        MYSQL_TYPE_DOUBLE => "double",
+        MYSQL_TYPE_DECIMAL | MYSQL_TYPE_NEWDECIMAL => "decimal",
+        MYSQL_TYPE_TIMESTAMP | MYSQL_TYPE_TIMESTAMP2 => "timestamp",
+        MYSQL_TYPE_DATE | MYSQL_TYPE_NEWDATE => "date",
+        MYSQL_TYPE_TIME | MYSQL_TYPE_TIME2 => "time",
+        MYSQL_TYPE_DATETIME | MYSQL_TYPE_DATETIME2 => "datetime",
+        MYSQL_TYPE_YEAR => "year",
+        MYSQL_TYPE_BIT => "bit",
+        MYSQL_TYPE_JSON => "json",
+        MYSQL_TYPE_GEOMETRY => "geometry",
+        MYSQL_TYPE_ENUM => "enum",
+        MYSQL_TYPE_SET => "set",
+        MYSQL_TYPE_VARCHAR | MYSQL_TYPE_VAR_STRING => text_or("varchar", "varbinary"),
+        MYSQL_TYPE_STRING if flags.contains(ColumnFlags::ENUM_FLAG) => "enum",
+        MYSQL_TYPE_STRING if flags.contains(ColumnFlags::SET_FLAG) => "set",
+        MYSQL_TYPE_STRING => text_or("char", "binary"),
+        MYSQL_TYPE_TINY_BLOB => text_or("tinytext", "tinyblob"),
+        MYSQL_TYPE_BLOB => text_or("text", "blob"),
+        MYSQL_TYPE_MEDIUM_BLOB => text_or("mediumtext", "mediumblob"),
+        MYSQL_TYPE_LONG_BLOB => text_or("longtext", "longblob"),
+        _ => "",
+    };
+    let numeric = matches!(
+        ty,
+        MYSQL_TYPE_TINY
+            | MYSQL_TYPE_SHORT
+            | MYSQL_TYPE_INT24
+            | MYSQL_TYPE_LONG
+            | MYSQL_TYPE_LONGLONG
+            | MYSQL_TYPE_FLOAT
+            | MYSQL_TYPE_DOUBLE
+            | MYSQL_TYPE_DECIMAL
+            | MYSQL_TYPE_NEWDECIMAL
+    );
+    if numeric && flags.contains(ColumnFlags::UNSIGNED_FLAG) {
+        format!("{name} unsigned")
+    } else {
+        name.to_string()
+    }
+}
+
+/// Over the text protocol every value except NULL is a byte string.
 fn value_text(v: mysql_async::Value) -> Option<String> {
     use mysql_async::Value::*;
     match v {
@@ -197,5 +298,29 @@ fn value_text(v: mysql_async::Value) -> Option<String> {
         Float(f) => Some(f.to_string()),
         Double(d) => Some(d.to_string()),
         other => Some(other.as_sql(true).trim_matches('\'').to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn protocol_types_become_sql_type_names() {
+        let none = ColumnFlags::empty();
+        assert_eq!(
+            sql_type(ColumnType::MYSQL_TYPE_LONG, ColumnFlags::UNSIGNED_FLAG, 63),
+            "int unsigned"
+        );
+        assert_eq!(
+            sql_type(ColumnType::MYSQL_TYPE_VAR_STRING, none, 255),
+            "varchar"
+        );
+        assert_eq!(sql_type(ColumnType::MYSQL_TYPE_BLOB, none, 63), "blob");
+        assert_eq!(sql_type(ColumnType::MYSQL_TYPE_BLOB, none, 255), "text");
+        assert_eq!(
+            sql_type(ColumnType::MYSQL_TYPE_STRING, ColumnFlags::ENUM_FLAG, 255),
+            "enum"
+        );
     }
 }

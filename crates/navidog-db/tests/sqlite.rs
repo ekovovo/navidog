@@ -41,6 +41,16 @@ fn sqlite_create_attach_execute_and_error_codes() {
         assert_eq!(sets[1].affected_rows, Some(2));
         assert_eq!(sets[2].columns[1].type_name, "TEXT");
         assert_eq!(sets[2].rows, vec![vec![Some("1".into()), Some("a".into())], vec![Some("2".into()), None]]);
+        // Result columns report the table column they read; expressions have no origin
+        let sets = rel.execute("SELECT name AS n, id + 1 FROM t").await.unwrap();
+        let origin = sets[0].columns[0].origin.clone().unwrap();
+        assert_eq!((origin.schema.as_str(), origin.table.as_str(), origin.column.as_str()), ("main", "t", "name"));
+        assert!(sets[0].columns[1].origin.is_none());
+        assert!(session.session_id().is_none());
+        // Every statement lands in the history log
+        let (log, _) = navidog_db::log::since(0);
+        assert!(log.iter().any(|e| e.sql == "SELECT name AS n, id + 1 FROM t" && e.kind == "SQLITE"));
+        let rel = session.relational().unwrap();
 
         let e = rel.execute("SELECT * FROM missing").await.unwrap_err();
         assert!(e.code.is_some(), "保留 SQLite 错误码: {e}");

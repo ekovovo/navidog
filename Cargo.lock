@@ -5184,11 +5184,13 @@ name = "navidog-db"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "futures",
  "gpui-kit",
  "mysql_async",
  "native-tls",
  "navidog-core",
+ "navidog-util",
  "postgres-native-tls",
  "rusqlite",
  "russh",

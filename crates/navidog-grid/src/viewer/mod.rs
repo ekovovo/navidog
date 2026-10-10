@@ -1665,9 +1665,8 @@ mod tests {
     fn a_write_that_matched_no_row_fails() {
         let affected = |n| {
             vec![ResultSet {
-                columns: Vec::new(),
-                rows: Vec::new(),
                 affected_rows: Some(n),
+                ..ResultSet::default()
             }]
         };
         let update = "UPDATE \"t\" SET \"name\" = 'b' WHERE \"id\" IS NULL";

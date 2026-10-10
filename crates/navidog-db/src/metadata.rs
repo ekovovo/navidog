@@ -19,6 +19,25 @@ fn cell(row: &[Option<String>], ix: usize) -> String {
     row.get(ix).cloned().flatten().unwrap_or_default()
 }
 
+pub async fn list_databases<R: Relational + ?Sized>(r: &mut R) -> DbResult<Vec<String>> {
+    let (sql, col) = match r.dialect() {
+        Dialect::MySql => ("SHOW DATABASES", 0),
+        Dialect::Postgres => (
+            "SELECT datname FROM pg_database WHERE NOT datistemplate ORDER BY datname",
+            0,
+        ),
+        // seq, name, file; `temp` is the per-connection temporary schema
+        Dialect::Sqlite => ("PRAGMA database_list", 1),
+    };
+    Ok(query(r, sql)
+        .await?
+        .rows
+        .iter()
+        .map(|row| cell(row, col))
+        .filter(|name| r.dialect() != Dialect::Sqlite || name != "temp")
+        .collect())
+}
+
 pub async fn list_schemas<R: Relational + ?Sized>(r: &mut R) -> DbResult<Vec<String>> {
     if !r.dialect().has_schemas() {
         return Ok(Vec::new());

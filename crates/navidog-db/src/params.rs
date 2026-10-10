@@ -7,6 +7,8 @@ use navidog_core::connection::{Connection, SslMode};
 
 #[derive(Clone, Debug, Default)]
 pub struct ConnectParams {
+    /// Connection name, stamped on history log entries
+    pub name: String,
     pub host: String,
     pub port: u16,
     pub user: String,
@@ -16,6 +18,8 @@ pub struct ConnectParams {
     pub create_new: bool,
     pub attached: Vec<(String, PathBuf)>,
     pub connect_timeout: Option<Duration>,
+    /// MySQL: a statement waiting longer than this is killed (F-CONN-003)
+    pub read_timeout: Option<Duration>,
     pub compression: bool,
     pub socket: Option<String>,
     /// PostgreSQL connection parameters (libpq `key=value` form)
@@ -129,6 +133,7 @@ impl ConnectParams {
                 .flatten(),
         });
         Self {
+            name: conn.name.clone(),
             host: g.host.clone(),
             port: g.port.unwrap_or(default_port),
             user: g.user.clone(),
@@ -144,6 +149,10 @@ impl ConnectParams {
                 .collect(),
             connect_timeout: a
                 .connect_timeout_secs
+                .map(|s| Duration::from_secs(s as u64)),
+            read_timeout: a
+                .read_timeout_secs
+                .filter(|s| *s > 0)
                 .map(|s| Duration::from_secs(s as u64)),
             compression: a.compression,
             socket: a.socket.clone().filter(|s| !s.is_empty()),

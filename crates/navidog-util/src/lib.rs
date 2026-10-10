@@ -1,6 +1,7 @@
 //! Pure helpers shared across crates. No UI and no database drivers.
 
 pub mod format;
+pub mod sql_text;
 pub mod sql_type;
 
 /// `s` starts with `prefix`, ignoring ASCII case. Compares bytes, so a multi-byte character at
