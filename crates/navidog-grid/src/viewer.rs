@@ -151,6 +151,8 @@ pub struct TableViewer {
     hidden_revert: Option<HashSet<String>>,
     /// Insert a row once the commit that made room for it succeeds
     add_after_commit: bool,
+    /// Load the page once the commit started by paging, sorting or filtering succeeds
+    reload_after_commit: bool,
     form: bool,
     /// Cell text is submitted as SQL (F-DATA-010)
     raw_data: bool,
@@ -222,24 +224,43 @@ impl BasePanel for TableViewer {
         window.open_alert_dialog(cx, move |alert, _, _| {
             let (ok_session, cancel_session, commit) =
                 (ok_session.clone(), cancel_session.clone(), commit.clone());
+            let name = name.clone();
             alert
                 .icon(lucide("info"))
                 .title(t!("viewer.close_pending", name = name).to_string())
                 .show_cancel(true)
                 .ok_text(t!("viewer.commit").to_string())
                 .cancel_text(t!("viewer.discard").to_string())
-                .on_ok(move |_, _, _| {
+                // The tab is already gone: Esc must not quietly pick "discard"
+                .keyboard(false)
+                .on_ok(move |_, window, cx| {
                     let (session, commit) = (ok_session.clone(), commit.clone());
-                    navidog_db::runtime::spawn(async move {
-                        let r = run_on(session.clone(), move |rel| {
-                            Box::pin(apply(rel, commit, in_tx, true))
-                        })
-                        .await;
-                        if let Ok(Err(e)) = r {
-                            tracing::warn!("commit on tab close failed: {e}");
-                        }
-                        close_session(session);
+                    let job = run_on(session.clone(), move |rel| {
+                        Box::pin(apply(rel, commit, in_tx, true))
                     });
+                    let name = name.clone();
+                    window
+                        .spawn(cx, async move |cx| {
+                            let result = job
+                                .await
+                                .map_err(|e| e.to_string())
+                                .and_then(|r| r.map_err(|e| e.to_string()));
+                            close_session(session);
+                            let Err(e) = result else { return };
+                            tracing::warn!("commit on tab close failed: {e}");
+                            let _ = cx.update(|window, cx| {
+                                window.open_alert_dialog(cx, move |alert, _, _| {
+                                    alert
+                                        .icon(lucide("circle-x"))
+                                        .title(
+                                            t!("viewer.close_commit_failed", name = name)
+                                                .to_string(),
+                                        )
+                                        .description(e.clone())
+                                });
+                            });
+                        })
+                        .detach();
                     true
                 })
                 .on_cancel(move |_, _, _| {
@@ -370,7 +391,7 @@ impl TableViewer {
                 cx.subscribe_in(
                     &limit_input,
                     window,
-                    |this, input, e: &InputEvent, _, cx| {
+                    |this, input, e: &InputEvent, window, cx| {
                         if matches!(e, InputEvent::PressEnter { .. }) {
                             this.limit = input
                                 .read(cx)
@@ -381,7 +402,7 @@ impl TableViewer {
                                 .filter(|n| *n > 0)
                                 .or(this.limit);
                             this.page = 0;
-                            this.reload(false, cx);
+                            this.reload_committed(false, window, cx);
                         }
                     },
                 ),
@@ -415,7 +436,7 @@ impl TableViewer {
                                 this.order.update(cx, |s, cx| s.set_value(text, window, cx));
                             }
                             this.page = 0;
-                            this.reload(false, cx);
+                            this.reload_committed(false, window, cx);
                         }
                         GridEvent::PickForeignKey => this.open_fk_picker(window, cx),
                         GridEvent::QuickFilter { column, op, value } => {
@@ -501,6 +522,7 @@ impl TableViewer {
                 hidden: HashSet::new(),
                 hidden_revert: None,
                 add_after_commit: false,
+                reload_after_commit: false,
                 form: false,
                 raw_data: false,
                 show_rowid: false,
@@ -760,6 +782,22 @@ impl TableViewer {
         }));
     }
 
+    /// Reloads after the page, sort, filter or limit changed. Like leaving a modified row
+    /// (F-DATA-003), pending edits are committed first and the page loads once that succeeds; a
+    /// failed commit keeps the edits and the rows they belong to.
+    fn reload_committed(&mut self, count: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.grid.read(cx).model(cx).has_changes() {
+            self.reload(count, cx);
+            return;
+        }
+        // A commit is already running; its success reloads with the new state
+        if self.busy {
+            return;
+        }
+        self.reload_after_commit = true;
+        self.apply_changes(false, window, cx);
+    }
+
     fn commit_statements(&self, cx: &App) -> Commit {
         let d = self.dialect.unwrap_or(Dialect::MySql);
         let m = self.grid.read(cx).model(cx);
@@ -786,12 +824,21 @@ impl TableViewer {
         let Some(session) = self.session.clone() else {
             return;
         };
+        // The statements of a running commit already went to the server; a second commit of the
+        // same changes would insert twice
+        if self.busy {
+            return;
+        }
         self.flush_form(cx);
         let commit = self.commit_statements(cx);
         if commit.statements.is_empty() && !end_transaction {
-            // Nothing to send. A hide still has to reproject; an empty new row stays as it is.
+            // Nothing to send. A hide still has to reproject; an empty new row stays as it is,
+            // unless the page is being left.
             self.add_after_commit = false;
-            if self.hidden_revert.take().is_some() {
+            if std::mem::take(&mut self.reload_after_commit) {
+                self.hidden_revert = None;
+                self.reload(true, cx);
+            } else if self.hidden_revert.take().is_some() {
                 self.reproject(cx);
             }
             return;
@@ -816,8 +863,9 @@ impl TableViewer {
                         }
                         // Hiding a column while dirty still reloads so the projection matches.
                         let reproject = this.hidden_revert.take().is_some();
+                        let leaving = std::mem::take(&mut this.reload_after_commit);
                         let sync = !cx.has_global::<Settings>() || Settings::global(cx).sync_record;
-                        if sync || reproject {
+                        if sync || reproject || leaving {
                             this.reload(true, cx);
                         } else {
                             this.grid.update(cx, |g, cx| {
@@ -831,6 +879,7 @@ impl TableViewer {
                     }
                     Err(e) => {
                         this.add_after_commit = false;
+                        this.reload_after_commit = false;
                         if let Some(old) = this.hidden_revert.take() {
                             this.hidden = old;
                         }
@@ -860,7 +909,9 @@ impl TableViewer {
         let job = run_on(session, move |rel| {
             Box::pin(async move { rel.execute(sql).await })
         });
-        self.task = Some(cx.spawn(async move |this, cx| {
+        // Not in `self.task`: replacing that drops the page load in flight (opening a table with
+        // "auto begin transaction" sends BEGIN right after the first SELECT)
+        cx.spawn(async move |this, cx| {
             let result = job
                 .await
                 .map_err(|e| e.to_string())
@@ -872,7 +923,8 @@ impl TableViewer {
                 }
                 cx.notify();
             });
-        }));
+        })
+        .detach();
     }
 
     fn begin_transaction(&mut self, cx: &mut Context<Self>) {
@@ -910,11 +962,11 @@ impl TableViewer {
         Some(total.saturating_sub(1) / limit.max(1))
     }
 
-    fn go_page(&mut self, page: u64, cx: &mut Context<Self>) {
+    fn go_page(&mut self, page: u64, window: &mut Window, cx: &mut Context<Self>) {
         let page = self.last_page().map_or(page, |last| page.min(last));
         if page != self.page {
             self.page = page;
-            self.reload(false, cx);
+            self.reload_committed(false, window, cx);
         }
     }
 
@@ -926,6 +978,9 @@ impl TableViewer {
             g.update_model(cx, |m| m.set_hidden_columns(raw_columns, raw_rows, hidden));
         });
         self.form_for = None;
+        // The focused cell may keep its coordinates on new rows; the next `render` reloads the
+        // cell editor through `sync_editor`
+        self.editor_cell = None;
     }
 
     fn insert_row(&mut self, cx: &mut Context<Self>) {
@@ -953,6 +1008,10 @@ impl TableViewer {
             next.insert(name);
         }
         if self.grid.read(cx).model(cx).has_changes() {
+            // A commit in flight would leave the new set without its reprojection
+            if self.busy {
+                return;
+            }
             self.hidden_revert = Some(std::mem::replace(&mut self.hidden, next));
             self.apply_changes(false, window, cx);
         } else {
@@ -1147,14 +1206,14 @@ impl TableViewer {
             )
     }
 
-    fn toggle_rowid(&mut self, cx: &mut Context<Self>) {
+    fn toggle_rowid(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.dialect != Some(Dialect::Sqlite) {
             return;
         }
         self.show_rowid = !self.show_rowid;
         let on = self.show_rowid;
         self.grid.update(cx, |g, _| g.show_rowid = on);
-        self.reload(false, cx);
+        self.reload_committed(false, window, cx);
     }
 
     fn open_find(&mut self, replace: bool, window: &mut Window, cx: &mut Context<Self>) {
@@ -1648,7 +1707,7 @@ impl TableViewer {
             self.write_filter_sql(window, cx);
         }
         self.page = 0;
-        self.reload(true, cx);
+        self.reload_committed(true, window, cx);
     }
 
     fn set_builder(&mut self, on: bool, window: &mut Window, cx: &mut Context<Self>) {
@@ -1719,7 +1778,7 @@ impl TableViewer {
                 .update(cx, |s, cx| s.set_value(text, window, cx));
         }
         self.page = 0;
-        self.reload(true, cx);
+        self.reload_committed(true, window, cx);
     }
 
     fn add_rule(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -2496,7 +2555,9 @@ impl TableViewer {
             .child(
                 icon_button("reload", "refresh-cw", t!("viewer.refresh").to_string())
                     .disabled(!ready)
-                    .on_click(cx.listener(|this, _, _, cx| this.reload(true, cx))),
+                    .on_click(
+                        cx.listener(|this, _, window, cx| this.reload_committed(true, window, cx)),
+                    ),
             )
             .child(
                 icon_button("stop", "circle-stop", t!("viewer.stop").to_string())
@@ -2543,7 +2604,7 @@ impl TableViewer {
                             t!("viewer.first_page").to_string(),
                         )
                         .disabled(!ready || page == 0)
-                        .on_click(cx.listener(|this, _, _, cx| this.go_page(0, cx))),
+                        .on_click(cx.listener(|this, _, window, cx| this.go_page(0, window, cx))),
                     )
                     .child(
                         icon_button(
@@ -2552,9 +2613,11 @@ impl TableViewer {
                             t!("viewer.prev_page").to_string(),
                         )
                         .disabled(!ready || page == 0)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.go_page(page.saturating_sub(1), cx)
-                        })),
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                this.go_page(page.saturating_sub(1), window, cx)
+                            },
+                        )),
                     )
                     .child(
                         icon_button(
@@ -2563,7 +2626,9 @@ impl TableViewer {
                             t!("viewer.next_page").to_string(),
                         )
                         .disabled(!ready || self.limit.is_none() || last.is_some_and(|l| page >= l))
-                        .on_click(cx.listener(move |this, _, _, cx| this.go_page(page + 1, cx))),
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| this.go_page(page + 1, window, cx),
+                        )),
                     )
                     .child(
                         icon_button(
@@ -2572,11 +2637,13 @@ impl TableViewer {
                             t!("viewer.last_page").to_string(),
                         )
                         .disabled(!ready || last.is_none_or(|l| page >= l))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            if let Some(l) = last {
-                                this.go_page(l, cx)
-                            }
-                        })),
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                if let Some(l) = last {
+                                    this.go_page(l, window, cx)
+                                }
+                            },
+                        )),
                     ),
             )
             .child(
@@ -2588,14 +2655,14 @@ impl TableViewer {
                             .xsmall()
                             .label(t!("viewer.limit").to_string())
                             .checked(self.limit.is_some())
-                            .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                            .on_click(cx.listener(|this, checked: &bool, window, cx| {
                                 this.limit = checked
                                     .then(|| this.limit_input.read(cx).value().trim().parse().ok())
                                     .flatten()
                                     .or(checked
                                         .then_some(Settings::global(cx).records_per_page.max(1)));
                                 this.page = 0;
-                                this.reload(false, cx);
+                                this.reload_committed(false, window, cx);
                             })),
                     )
                     .child(
@@ -2629,7 +2696,9 @@ impl Render for TableViewer {
                 this.toggle_column(action.name.to_string(), window, cx);
             }))
             .on_action(cx.listener(|this, _: &ToggleRawData, _, cx| this.toggle_raw(cx)))
-            .on_action(cx.listener(|this, _: &ToggleRowId, _, cx| this.toggle_rowid(cx)))
+            .on_action(
+                cx.listener(|this, _: &ToggleRowId, window, cx| this.toggle_rowid(window, cx)),
+            )
             .on_action(cx.listener(|this, _: &Escape, window, cx| {
                 if this.show_find {
                     this.close_find(window, cx);
