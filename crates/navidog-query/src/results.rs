@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
-use gpui_kit::component::input::{Editor, EditorState};
+use gpui_kit::component::input::{Editor, EditorState, InputEvent, Textarea, TextareaState};
 use gpui_kit::component::native_menu::NativeMenu;
 use gpui_kit::component::{
     Disableable as _, Selectable as _, Sizable as _, WindowExt as _, h_flex, v_flex,
@@ -559,6 +559,12 @@ pub(crate) struct ResultView {
     pub pinned: bool,
     busy: bool,
     status: SharedString,
+    /// The cell editor under the grid (F-DATA-011 style), and the cell it shows
+    cell_editor: bool,
+    cell_input: Entity<TextareaState>,
+    cell_at: Option<(usize, usize)>,
+    /// Form view of the current row instead of the grid
+    form: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -574,8 +580,17 @@ impl ResultView {
         cx: &mut App,
     ) -> Entity<Self> {
         let grid = cx.new(|cx| ResultGrid::new(window, cx));
+        let cell_input = cx.new(|cx| TextareaState::new(window, cx));
         cx.new(|cx: &mut Context<Self>| {
-            let subs = vec![cx.subscribe_in(&grid, window, Self::on_grid_event)];
+            let subs = vec![
+                cx.subscribe_in(&grid, window, Self::on_grid_event),
+                cx.subscribe(&cell_input, |this, input, e: &InputEvent, cx| {
+                    if matches!(e, InputEvent::Change) {
+                        let text = input.read(cx).value().to_string();
+                        this.write_cell(text, cx);
+                    }
+                }),
+            ];
             let mut this = Self {
                 grid,
                 sql,
@@ -587,6 +602,10 @@ impl ResultView {
                 pinned: false,
                 busy: false,
                 status: SharedString::default(),
+                cell_editor: false,
+                cell_input,
+                cell_at: None,
+                form: false,
                 _subscriptions: subs,
             };
             this.show_rows(cx);
@@ -594,6 +613,127 @@ impl ResultView {
             this.find_table(cx);
             this
         })
+    }
+
+    /// Keeps the cell editor on the focused cell (needs `window`, so called from render).
+    fn sync_cell(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.cell_editor {
+            return;
+        }
+        let model = self.grid.read(cx).model(cx);
+        if model.row_count() == 0 {
+            return;
+        }
+        let at = model.head();
+        if self.cell_at == Some(at) {
+            return;
+        }
+        let text = model
+            .value(at.0, at.1)
+            .cloned()
+            .flatten()
+            .map(|v| v.to_string())
+            .unwrap_or_default();
+        self.cell_at = Some(at);
+        self.cell_input
+            .update(cx, |s, cx| s.set_value(text, window, cx));
+    }
+
+    /// Typing in the cell editor edits the cell, when the result is editable.
+    fn write_cell(&mut self, text: String, cx: &mut Context<Self>) {
+        let (Some((r, c)), true) = (self.cell_at, self.edit.is_some() && !self.busy) else {
+            return;
+        };
+        let current = self.grid.read(cx).model(cx).value(r, c).cloned().flatten();
+        if current.as_deref() == Some(text.as_str()) {
+            return;
+        }
+        self.grid.update(cx, |g, cx| {
+            g.update_model(cx, |m| m.set_value(r, c, Some(text.into())))
+        });
+    }
+
+    /// The current row as field / value pairs, with previous and next.
+    fn render_form(&self, cx: &mut Context<Self>) -> AnyElement {
+        let p = palette(cx);
+        let model = self.grid.read(cx).model(cx);
+        let rows = model.row_count();
+        let row = model.head().0.min(rows.saturating_sub(1));
+        let fields: Vec<(SharedString, String)> = model
+            .columns
+            .iter()
+            .enumerate()
+            .map(|(c, col)| {
+                let v = model
+                    .value(row, c)
+                    .cloned()
+                    .flatten()
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "(NULL)".into());
+                (col.name.clone(), v)
+            })
+            .collect();
+        v_flex()
+            .size_full()
+            .child(
+                h_flex()
+                    .h(tokens::result::BOTTOM_BAR_HEIGHT.rems())
+                    .px_2()
+                    .gap_1()
+                    .border_b_1()
+                    .border_color(p.separator)
+                    .child(
+                        Button::new("form-prev")
+                            .ghost()
+                            .xsmall()
+                            .icon(lucide("chevron-left"))
+                            .disabled(row == 0)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.grid
+                                    .update(cx, |g, cx| g.move_to_row(row.saturating_sub(1), cx));
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Button::new("form-next")
+                            .ghost()
+                            .xsmall()
+                            .icon(lucide("chevron-right"))
+                            .disabled(row + 1 >= rows)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.grid.update(cx, |g, cx| g.move_to_row(row + 1, cx));
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(p.label_secondary)
+                            .child(format!("{} / {rows}", (row + 1).min(rows))),
+                    ),
+            )
+            .child(
+                v_flex()
+                    .id("result-form")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .p_2()
+                    .gap_1()
+                    .children(fields.into_iter().enumerate().map(|(ix, (name, value))| {
+                        h_flex()
+                            .gap_2()
+                            .min_w_0()
+                            .child(
+                                truncated(("form-field", ix), name)
+                                    .w(tokens::list::DETAIL_COLUMN_WIDTH.rems())
+                                    .flex_none()
+                                    .text_color(p.label_secondary),
+                            )
+                            .child(truncated(("form-value", ix), value).flex_1())
+                    })),
+            )
+            .into_any_element()
     }
 
     #[cfg(test)]
@@ -821,8 +961,13 @@ impl ResultView {
                 .w(tokens::result::BOTTOM_BUTTON.rems())
                 .h(tokens::result::BOTTOM_BUTTON.rems())
         };
-        let sql = if self.status.is_empty() {
-            self.sql.clone().into()
+        // One line: the bar shows the statement flattened, hover shows it as typed
+        let sql: SharedString = if self.status.is_empty() {
+            self.sql
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .into()
         } else {
             self.status.clone()
         };
@@ -909,7 +1054,15 @@ impl ResultView {
 }
 
 impl Render for ResultView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.sync_cell(window, cx);
+        let p = palette(cx);
+        let body: AnyElement = if self.form {
+            self.render_form(cx)
+        } else {
+            self.grid.clone().into_any_element()
+        };
+        let read_only = self.edit.is_none();
         v_flex()
             .size_full()
             .min_h_0()
@@ -919,8 +1072,21 @@ impl Render for ResultView {
                     .min_h_0()
                     .min_w_0()
                     .overflow_hidden()
-                    .child(self.grid.clone()),
+                    .child(body),
             )
+            .when(self.cell_editor, |v| {
+                v.child(
+                    div()
+                        .h(tokens::viewer::CELL_EDITOR_HEIGHT.rems())
+                        .border_t_1()
+                        .border_color(p.separator)
+                        .child(
+                            Textarea::new(&self.cell_input)
+                                .disabled(read_only)
+                                .size_full(),
+                        ),
+                )
+            })
             .child(self.render_bottom_bar(cx))
     }
 }

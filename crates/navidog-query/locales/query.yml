@@ -381,3 +381,9 @@ query:
   console_not_connected:
     en: The connection is not open yet.
     zh-CN: 连接尚未打开。
+  grid_view:
+    en: Grid View
+    zh-CN: 网格视图
+  form_view:
+    en: Form View
+    zh-CN: 表单视图

@@ -581,6 +581,21 @@ impl QueryEditor {
         self.editor.read(cx).value().to_string()
     }
 
+    /// Replaces the text (one undo step) and marks the query modified.
+    pub fn set_text(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let len = self.editor.read(cx).text().len();
+        let text = text.to_string();
+        self.editor.update(cx, |e, cx| {
+            e.set_selected_range(0..len, cx);
+            e.replace(text, window, cx);
+        });
+    }
+
+    /// Explains everything (the toolbar's "Explain").
+    pub fn explain_all(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.run(RunKind::Explain, window, cx);
+    }
+
     pub(crate) fn dialect(&self, cx: &App) -> Option<Dialect> {
         let id = self.target.connection.as_deref()?;
         Sessions::global(cx).read(cx).dialect(id).or_else(|| {
@@ -1005,6 +1020,8 @@ impl QueryEditor {
             .h(tokens::query::TOOLBAR_HEIGHT.rems())
             .px_2()
             .gap_1()
+            .min_w_0()
+            .overflow_hidden()
             .border_b_1()
             .border_color(p.separator)
             .child(

@@ -125,8 +125,14 @@ impl HistoryLog {
             EditorState::new(window, cx)
                 .language("sql")
                 .line_number(false)
+                .soft_wrap(false)
         });
-        editor.update(cx, |e, cx| e.set_readonly(true, cx));
+        let (entries, next) = log::since(0);
+        let text = render_entries(&entries, header(Settings::global(cx).history_header), false);
+        editor.update(cx, |e, cx| {
+            e.set_readonly(true, cx);
+            e.set_value(text, window, cx);
+        });
         cx.new(|cx: &mut Context<Self>| {
             // ponytail: polls the log four times a second; a channel from the log would avoid it
             let poll = cx.spawn_in(window, async move |this, cx| {
@@ -142,22 +148,19 @@ impl HistoryLog {
                     }
                 }
             });
-            let mut this = Self {
+            Self {
                 focus_handle: cx.focus_handle(),
                 editor,
-                entries: Vec::new(),
-                next: 0,
+                entries,
+                next,
                 paused: false,
                 held: 0,
                 only_errors: false,
                 bottom: Pixels::ZERO,
+                // The first layout scrolls to the end
                 jumped: false,
                 _poll: poll,
-            };
-            let (entries, next) = log::since(0);
-            this.entries = entries;
-            this.next = next;
-            this
+            }
         })
     }
 
@@ -172,13 +175,21 @@ impl HistoryLog {
 
     /// Takes new entries from the log and appends them, following the end if the view is there.
     pub(crate) fn pull(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.next == log::revision() && self.held == 0 && !self.entries.is_empty() {
+        // Start at the end once the first layout gives a line height
+        if !self.jumped
+            && self.bottom == Pixels::ZERO
+            && self.editor.read(cx).line_height().is_some()
+        {
+            self.editor.update(cx, scroll_to_end);
+            self.jumped = true;
+        }
+        if self.next == log::revision() && self.held == 0 {
             self.track_scroll(cx);
             return;
         }
         let (new, next) = log::since(self.next);
         self.next = next;
-        if new.is_empty() && self.editor.read(cx).text().len() > 0 {
+        if new.is_empty() && self.held == 0 {
             return;
         }
         if self.paused {
@@ -188,8 +199,7 @@ impl HistoryLog {
             return;
         }
         let following = self.track_scroll(cx);
-        let first_fill = self.editor.read(cx).text().len() == 0;
-        let shown = if first_fill || self.held > 0 {
+        let shown = if self.held > 0 {
             self.held = 0;
             self.entries.extend(new);
             render_entries(&self.entries, Self::header(cx), self.only_errors)
@@ -211,7 +221,7 @@ impl HistoryLog {
             self.bottom = y;
             self.jumped = false;
         }
-        // raw-px: a line's slack before counting as scrolled away
+        // raw-px: a line's slack before counting as scrolled away, before the first layout
         let line = self.editor.read(cx).line_height().unwrap_or(px(16.));
         y <= self.bottom + line
     }
@@ -221,8 +231,7 @@ impl HistoryLog {
         self.editor.update(cx, |e, cx| {
             e.set_value(text, window, cx);
             if follow {
-                // raw-px: scrolled past the end, clamped to the last line when laid out
-                e.set_scroll_offset(point(px(0.), px(-1e9)), cx);
+                scroll_to_end(e, cx);
             } else {
                 e.set_scroll_offset(offset, cx);
             }
@@ -330,6 +339,17 @@ impl Render for HistoryLog {
                     .child(Editor::new(&self.editor).bordered(false).size_full()),
             )
     }
+}
+
+/// Scrolls a read-only log view so its last line shows (the editor does not clamp an offset
+/// past the end, so it is computed from the line count).
+pub(crate) fn scroll_to_end(e: &mut EditorState, cx: &mut Context<EditorState>) {
+    use gpui_kit::component::RopeExt as _;
+    let Some(line) = e.line_height() else { return };
+    let view = e.input_bounds().size.height;
+    let content = line * (e.text().lines_len() as f32 + 1.);
+    let y = (content - view).max(Pixels::ZERO);
+    e.set_scroll_offset(point(Pixels::ZERO, -y), cx);
 }
 
 #[cfg(test)]

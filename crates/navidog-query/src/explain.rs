@@ -414,3 +414,82 @@ impl QueryEditor {
         cx.notify();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use navidog_db::mysql::MySqlDriver;
+    use navidog_db::postgres::PostgresDriver;
+    use navidog_db::{ConnectParams, Driver, connect, runtime};
+
+    use super::*;
+
+    /// Real plans from the docker-compose servers parse into trees with costs (31 §5).
+    /// `docker compose up -d --wait && NAVIDOG_LIVE=1 cargo test -p navidog-query live_plans`
+    #[test]
+    fn live_plans_parse_on_every_server() {
+        if std::env::var_os("NAVIDOG_LIVE").is_none() {
+            return;
+        }
+        let sql = "SELECT a.first_name FROM actor a JOIN film_actor fa ON fa.actor_id = a.actor_id WHERE a.actor_id < 5";
+        runtime::runtime().block_on(async {
+            for (driver, port, mariadb) in [
+                (MySqlDriver::mysql(), 13306, false),
+                (MySqlDriver::mariadb(), 13307, true),
+            ] {
+                let params = ConnectParams {
+                    host: "127.0.0.1".into(),
+                    port,
+                    user: "root".into(),
+                    password: Some("navidog".into()),
+                    database: Some("sakila".into()),
+                    ..Default::default()
+                };
+                let driver: Arc<dyn Driver> = Arc::new(driver);
+                let mut s = connect(driver, params).await.unwrap();
+                let p = fetch_plan(s.relational().unwrap(), Dialect::MySql, mariadb, sql)
+                    .await
+                    .unwrap();
+                assert!(
+                    p.grid.is_some() && p.json.is_some() && p.text.is_some(),
+                    "{p:?}"
+                );
+                let tree = p.tree.expect("the JSON plan parses");
+                assert!(
+                    plan::flatten(&tree)
+                        .iter()
+                        .any(|(_, n)| n.relation.as_deref() == Some("a")),
+                    "{tree:?}"
+                );
+                assert!(plan::root_cost(&tree).is_some(), "{mariadb}: {tree:?}");
+                s.close().await.unwrap();
+            }
+            let params = ConnectParams {
+                host: "127.0.0.1".into(),
+                port: 15432,
+                user: "postgres".into(),
+                password: Some("navidog".into()),
+                database: Some("pagila".into()),
+                ..Default::default()
+            };
+            let mut s = connect(Arc::new(PostgresDriver::default()), params)
+                .await
+                .unwrap();
+            let p = fetch_plan(
+                s.relational().unwrap(),
+                Dialect::Postgres,
+                false,
+                "SELECT * FROM actor a JOIN film f ON f.film_id = a.actor_id WHERE a.actor_id < 5",
+            )
+            .await
+            .unwrap();
+            let tree = p.tree.expect("the JSON plan parses");
+            let total = plan::root_cost(&tree).unwrap();
+            let sum: f64 = plan::stats_by_type(&tree).iter().map(|s| s.cost).sum();
+            assert!((sum - total).abs() < 1e-6, "{sum} vs {total}");
+            assert!(p.grid.unwrap().rows.len() >= 2 && p.text.is_some());
+            s.close().await.unwrap();
+        });
+    }
+}

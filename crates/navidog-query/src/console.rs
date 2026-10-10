@@ -13,7 +13,7 @@ use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::{
     AnyWindowHandle, App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable,
     InteractiveElement as _, IntoElement, KeyBinding, ParentElement as _, Render, Styled as _,
-    Subscription, Task, WeakEntity, Window, div, point, px,
+    Subscription, Task, WeakEntity, Window, div,
 };
 use navidog_core::store::ConnectionStore;
 use navidog_db::dialect::Dialect;
@@ -385,8 +385,7 @@ impl Console {
             let _ = handle.update(cx, |_, window, cx| {
                 output.update(cx, |e, cx| {
                     e.set_value(all, window, cx);
-                    // raw-px: scrolled past the end, clamped to the last line when laid out
-                    e.set_scroll_offset(point(px(0.), px(-1e9)), cx);
+                    crate::history::scroll_to_end(e, cx);
                 });
             });
         });

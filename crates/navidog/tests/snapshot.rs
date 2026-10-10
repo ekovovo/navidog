@@ -201,6 +201,52 @@ mod macos {
         shot(&mut cx, "viewer-wide-end-dark.png");
         cx.update(|cx| Theme::change(ThemeMode::Light, None, cx));
 
+        // M3: a query editor with results, the explain plan, the console and the history log
+        cx.update(|cx| {
+            Workspace::global(cx).update(cx, |w, cx| {
+                w.select(Selection::Database(lite.clone(), "main".into()), cx)
+            })
+        });
+        dispatch(&mut cx, Box::new(navidog_core::actions::NewQuery));
+        cx.run_until_parked();
+        let editor = cx
+            .update(|cx| navidog_query::active_editor(cx))
+            .expect("a query editor");
+        cx.update_window(handle, |_, window, cx| {
+            editor.update(cx, |e, cx| {
+                e.set_text(
+                    "-- NAME:演员\nSELECT * FROM actor;\nSELECT COUNT(*) AS films FROM film;\nSELECT * FROM nope;",
+                    window,
+                    cx,
+                );
+                e.run_all(window, cx);
+            })
+        })
+        .unwrap();
+        wait(&mut cx, |_| false);
+        shot(&mut cx, "query.png");
+        cx.update(|cx| Theme::change(ThemeMode::Dark, None, cx));
+        shot(&mut cx, "query-dark.png");
+        cx.update(|cx| Theme::change(ThemeMode::Light, None, cx));
+        cx.update_window(handle, |_, window, cx| {
+            editor.update(cx, |e, cx| {
+                e.set_text("SELECT a.first_name, f.title FROM actor a JOIN film_actor fa ON fa.actor_id = a.id JOIN film f ON f.id = fa.film_id WHERE a.id = 1", window, cx);
+                e.explain_all(window, cx);
+            })
+        })
+        .unwrap();
+        wait(&mut cx, |_| false);
+        shot(&mut cx, "query-explain.png");
+        dispatch(&mut cx, Box::new(navidog_core::actions::OpenHistoryLog));
+        for _ in 0..3 {
+            cx.advance_clock(std::time::Duration::from_millis(300));
+            cx.run_until_parked();
+        }
+        shot(&mut cx, "history.png");
+        cx.update(|cx| Theme::change(ThemeMode::Dark, None, cx));
+        shot(&mut cx, "history-dark.png");
+        cx.update(|cx| Theme::change(ThemeMode::Light, None, cx));
+
         // Share from the info pane's general page
         cx.update(|cx| {
             Workspace::global(cx).update(cx, |w, cx| {
