@@ -519,6 +519,15 @@ impl NavigatorPanel {
                 cx.subscribe(&Workspace::global(cx), |this, _, e: &WorkspaceEvent, cx| {
                     let WorkspaceEvent::SelectionChanged = e;
                     this.marked = Self::selected_ids(cx).into_iter().collect();
+                    // A selection made elsewhere (objects tab, editor tab) starts a new range
+                    let anchor = this
+                        .anchor
+                        .as_ref()
+                        .and_then(|a| Node::parse(a)?.selection());
+                    let workspace = Workspace::global(cx).read(cx);
+                    if !anchor.is_some_and(|a| workspace.selections().any(|s| *s == a)) {
+                        this.anchor = None;
+                    }
                     this.reveal_selection(cx);
                     cx.notify();
                 }),
@@ -619,11 +628,20 @@ impl NavigatorPanel {
     }
 
     fn sync_selection(&mut self, cx: &mut Context<Self>) {
-        let target =
-            Node::from_selection(Workspace::global(cx).read(cx).selection()).map(|n| n.id());
+        let selection = Workspace::global(cx).read(cx).selection().clone();
+        let target = Node::from_selection(&selection).map(|n| n.id());
         self.tree.update(cx, |t, cx| {
             let current = t.selected_item().map(|i| i.id.clone());
             if current == target {
+                return;
+            }
+            // A field or folder row under a table selects that table. Keep the focused row
+            // there, or arrow keys and clicks could never move below the table row.
+            let stands_for = current
+                .as_ref()
+                .and_then(|id| Node::parse(id))
+                .and_then(|n| n.selection());
+            if selection != Selection::None && stands_for == Some(selection) {
                 return;
             }
             let ix = target.as_ref().and_then(|id| t.index_of(id));
@@ -704,7 +722,12 @@ impl NavigatorPanel {
     /// A navigator selection that is not the open editor tab's table goes back to the
     /// objects tab, so the info pane can follow the tree. A field under that table still
     /// counts as the table.
-    fn show_objects_tab_unless_same(clicked: &Selection, window: &mut Window, cx: &mut App) {
+    fn show_objects_tab_unless_same(
+        &self,
+        clicked: &Selection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let current = Workspace::global(cx).read(cx).selection().clone();
         if &current == clicked {
             return;
@@ -721,13 +744,20 @@ impl NavigatorPanel {
             .position(|p| p.panel_id(cx) == id);
         if let Some(ix) = ix {
             group.read(cx).context(cx).select_tab(ix, window, cx);
+            // `select_tab` focuses the objects pane; arrow keys and Return stay in the tree
+            window.focus(&self.focus_handle, cx);
         }
     }
 
-    fn select(node: &Node, window: &mut Window, cx: &mut App) {
+    fn select(&mut self, node: &Node, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(sel) = node.selection() {
-            Self::show_objects_tab_unless_same(&sel, window, cx);
+            self.show_objects_tab_unless_same(&sel, window, cx);
             Workspace::global(cx).update(cx, |w, cx| w.select(sel, cx));
+            let id = node.id();
+            self.tree.update(cx, |t, cx| {
+                let ix = t.index_of(&id);
+                t.set_selected_index(ix, cx);
+            });
         }
     }
 
@@ -762,11 +792,23 @@ impl NavigatorPanel {
         };
         let (ids, anchor) = selection::click(click, id);
         self.anchor = anchor;
-        let mut selections = ids.iter().filter_map(|id| Node::parse(id)?.selection());
+        // Rows under one table all stand for it; a range across them names it once
+        let mut selections: Vec<Selection> = Vec::new();
+        for sel in ids.iter().filter_map(|id| Node::parse(id)?.selection()) {
+            if !selections.contains(&sel) {
+                selections.push(sel);
+            }
+        }
+        let mut selections = selections.into_iter();
         let primary = selections.next().unwrap_or_default();
         let also = selections.collect();
-        Self::show_objects_tab_unless_same(&primary, window, cx);
+        self.show_objects_tab_unless_same(&primary, window, cx);
         Workspace::global(cx).update(cx, |w, cx| w.select_many(primary, also, cx));
+        // The clicked row is the focused one, even when it stands for its table
+        self.tree.update(cx, |t, cx| {
+            let ix = t.index_of(id);
+            t.set_selected_index(ix, cx);
+        });
     }
 
     /// Moves the focused row. `extend` keeps the anchor and selects every visible row between them.
@@ -817,20 +859,21 @@ impl NavigatorPanel {
 
     /// While a drag is inside the tree and within one row of its top or bottom, step one row that way.
     /// Holding still keeps stepping: each step asks for another frame. `scroll_edge` is the decision.
+    /// Steps the offset itself: `top_item` / `bottom_item` stay 0 for a `uniform_list`, which does
+    /// not record child bounds.
     fn autoscroll(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !cx.has_active_drag() {
             return;
         }
-        let (bounds, top, bottom, len) = {
-            let tree = self.tree.read(cx);
-            let state = tree.scroll_handle().0.borrow();
-            let bounds = state.base_handle.bounds();
-            let top = state.base_handle.top_item();
-            let bottom = state.base_handle.bottom_item();
-            drop(state);
-            let len = (0..).position(|i| tree.entry(i).is_none()).unwrap_or(0);
-            (bounds, top, bottom, len)
-        };
+        let handle = self
+            .tree
+            .read(cx)
+            .scroll_handle()
+            .0
+            .borrow()
+            .base_handle
+            .clone();
+        let (bounds, offset, max) = (handle.bounds(), handle.offset(), handle.max_offset());
         let margin = tokens::navigator::ROW_HEIGHT.to_pixels(window.rem_size());
         let pos = window.mouse_position();
         let Some(down) = scroll_edge(
@@ -844,9 +887,9 @@ impl NavigatorPanel {
         ) else {
             return;
         };
-        if (!down && top == 0) || (down && bottom + 1 >= len) {
+        let Some(y) = step_offset(offset.y.as_f32(), max.y.as_f32(), margin.as_f32(), down) else {
             return;
-        }
+        };
         let now = std::time::Instant::now();
         if self.autoscroll_at.is_some_and(|at| {
             now.saturating_duration_since(at) < std::time::Duration::from_millis(80)
@@ -855,14 +898,9 @@ impl NavigatorPanel {
             return;
         }
         self.autoscroll_at = Some(now);
-        let target = if down { bottom + 1 } else { top - 1 };
-        let strategy = if down {
-            gpui_kit::ScrollStrategy::Bottom
-        } else {
-            gpui_kit::ScrollStrategy::Top
-        };
-        self.tree
-            .update(cx, |t, _| t.scroll_to_item(target, strategy));
+        // raw-px: a scroll offset computed at runtime
+        handle.set_offset(gpui_kit::point(offset.x, gpui_kit::px(y)));
+        self.tree.update(cx, |_, cx| cx.notify());
         window.request_animation_frame();
     }
 
@@ -875,17 +913,19 @@ impl NavigatorPanel {
             };
             (entry.item().id.clone(), entry.is_folder())
         };
+        let Some(node) = Node::parse(&id) else { return };
+        // A closed connection has no children yet, so it is not a folder; → opens it
+        if expand
+            && let Node::Connection(c) = &node
+            && !Sessions::global(cx).read(cx).state(c).is_open()
+        {
+            window.dispatch_action(Box::new(OpenConnection), cx);
+            return;
+        }
         if !folder {
             return;
         }
-        let Some(node) = Node::parse(&id) else { return };
         if expand {
-            if let Node::Connection(c) = &node
-                && !Sessions::global(cx).read(cx).state(c).is_open()
-            {
-                window.dispatch_action(Box::new(OpenConnection), cx);
-                return;
-            }
             if self.expanded.insert(id) {
                 Self::ensure_children(&node, false, cx);
                 self.rebuild(cx);
@@ -1632,7 +1672,7 @@ impl NavigatorPanel {
             cx.listener(move |this, e: &MouseDownEvent, window, cx| {
                 cx.stop_propagation();
                 if let Some(n) = &right_node {
-                    Self::select(n, window, cx);
+                    this.select(n, window, cx);
                 }
                 window.focus(&this.focus_handle, cx);
                 Self::context_menu(right_node.as_ref(), cx).show(e.position, window, cx);
@@ -1642,7 +1682,7 @@ impl NavigatorPanel {
             window.focus(&this.focus_handle, cx);
             let Some(n) = &click_node else { return };
             if e.click_count() >= 2 {
-                Self::select(n, window, cx);
+                this.select(n, window, cx);
                 this.toggle(n, window, cx);
             } else {
                 let m = e.modifiers();
@@ -2052,6 +2092,17 @@ fn scroll_edge(
     }
 }
 
+/// The vertical scroll offset after one autoscroll step of `step`, or `None` when already at that
+/// end. Offsets run from 0 at the top down to `-max`.
+fn step_offset(y: f32, max: f32, step: f32, down: bool) -> Option<f32> {
+    let next = if down {
+        (y - step).max(-max)
+    } else {
+        (y + step).min(0.)
+    };
+    (next != y).then_some(next)
+}
+
 impl Render for NavigatorPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Other panes read the catalog while they render, so gpui skips its
@@ -2315,5 +2366,17 @@ mod tests {
             super::scroll_edge(10., 50., 0., 100., 100., 400., 22.),
             None
         );
+    }
+
+    #[test]
+    fn autoscroll_steps_the_offset_and_stops_at_the_ends() {
+        // Offsets run from 0 (top) to -max; a step down makes the offset more negative
+        assert_eq!(super::step_offset(0., 100., 22., true), Some(-22.));
+        assert_eq!(super::step_offset(-90., 100., 22., true), Some(-100.));
+        assert_eq!(super::step_offset(-100., 100., 22., true), None);
+        assert_eq!(super::step_offset(-10., 100., 22., false), Some(0.));
+        assert_eq!(super::step_offset(0., 100., 22., false), None);
+        // Nothing to scroll
+        assert_eq!(super::step_offset(0., 0., 22., true), None);
     }
 }

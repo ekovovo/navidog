@@ -81,12 +81,14 @@ impl Catalog {
         self.revision = self.revision.wrapping_add(1);
     }
 
+    /// `job` starts the query, so it runs only on a cache miss: `run_rel` begins executing as
+    /// soon as it is called.
     fn load<K, T>(
         &mut self,
         slot_name: &'static str,
         key: K,
         slot: Slot<K, T>,
-        job: Option<JoinHandle<DbResult<T>>>,
+        job: impl FnOnce(&App) -> Option<JoinHandle<DbResult<T>>>,
         force: bool,
         cx: &mut Context<Self>,
     ) where
@@ -96,7 +98,7 @@ impl Catalog {
         if !force && slot(self).contains_key(&key) {
             return;
         }
-        let Some(job) = job else { return };
+        let Some(job) = job(cx) else { return };
         self.generation_clock = self.generation_clock.wrapping_add(1);
         let generation = self.generation_clock;
         // Columns and table children use the same `(scope, table)` key. The task map
@@ -129,18 +131,14 @@ impl Catalog {
     }
 
     pub fn ensure_schemas(&mut self, conn: &str, db: &str, force: bool, cx: &mut Context<Self>) {
-        let database = db.to_string();
-        let job = Sessions::global(cx)
-            .read(cx)
-            .run_rel(conn, Some(db), |r| r.list_schemas());
-        self.load(
-            "schemas",
-            (conn.to_string(), database),
-            |c| &mut c.schemas,
-            job,
-            force,
-            cx,
-        );
+        let (c, d) = (conn.to_string(), db.to_string());
+        let job = move |cx: &App| {
+            Sessions::global(cx)
+                .read(cx)
+                .run_rel(&c, Some(&d), |r| r.list_schemas())
+        };
+        let key = (conn.to_string(), db.to_string());
+        self.load("schemas", key, |c| &mut c.schemas, job, force, cx);
     }
 
     pub fn ensure_objects(
@@ -151,28 +149,28 @@ impl Catalog {
         cx: &mut Context<Self>,
     ) {
         let s = scope.clone();
-        let job = Sessions::global(cx).read(cx).run_rel(
-            &scope.connection,
-            Some(&scope.database),
-            move |r| Box::pin(async move { r.list_objects(&s, kind).await }),
-        );
-        self.load(
-            "objects",
-            (scope.clone(), kind),
-            |c| &mut c.objects,
-            job,
-            force,
-            cx,
-        );
+        let job = move |cx: &App| {
+            let (conn, db) = (s.connection.clone(), s.database.clone());
+            Sessions::global(cx)
+                .read(cx)
+                .run_rel(&conn, Some(&db), move |r| {
+                    Box::pin(async move { r.list_objects(&s, kind).await })
+                })
+        };
+        let key = (scope.clone(), kind);
+        self.load("objects", key, |c| &mut c.objects, job, force, cx);
     }
 
     pub fn ensure_ddl(&mut self, obj: &ObjectRef, force: bool, cx: &mut Context<Self>) {
         let o = obj.clone();
-        let job = Sessions::global(cx).read(cx).run_rel(
-            &obj.scope.connection,
-            Some(&obj.scope.database),
-            move |r| Box::pin(async move { r.object_ddl(&o.scope, o.kind, &o.name).await }),
-        );
+        let job = move |cx: &App| {
+            let (conn, db) = (o.scope.connection.clone(), o.scope.database.clone());
+            Sessions::global(cx)
+                .read(cx)
+                .run_rel(&conn, Some(&db), move |r| {
+                    Box::pin(async move { r.object_ddl(&o.scope, o.kind, &o.name).await })
+                })
+        };
         self.load("ddl", obj.clone(), |c| &mut c.ddl, job, force, cx);
     }
 
@@ -184,19 +182,16 @@ impl Catalog {
         cx: &mut Context<Self>,
     ) {
         let (s, t) = (scope.clone(), table.to_string());
-        let job = Sessions::global(cx).read(cx).run_rel(
-            &scope.connection,
-            Some(&scope.database),
-            move |r| Box::pin(async move { r.table_columns(&s, &t).await }),
-        );
-        self.load(
-            "columns",
-            (scope.clone(), table.to_string()),
-            |c| &mut c.columns,
-            job,
-            force,
-            cx,
-        );
+        let job = move |cx: &App| {
+            let (conn, db) = (s.connection.clone(), s.database.clone());
+            Sessions::global(cx)
+                .read(cx)
+                .run_rel(&conn, Some(&db), move |r| {
+                    Box::pin(async move { r.table_columns(&s, &t).await })
+                })
+        };
+        let key = (scope.clone(), table.to_string());
+        self.load("columns", key, |c| &mut c.columns, job, force, cx);
     }
 
     pub fn ensure_table_children(
@@ -207,19 +202,16 @@ impl Catalog {
         cx: &mut Context<Self>,
     ) {
         let (s, t) = (scope.clone(), table.to_string());
-        let job = Sessions::global(cx).read(cx).run_rel(
-            &scope.connection,
-            Some(&scope.database),
-            move |r| Box::pin(async move { r.table_children(&s, &t).await }),
-        );
-        self.load(
-            "children",
-            (scope.clone(), table.to_string()),
-            |c| &mut c.children,
-            job,
-            force,
-            cx,
-        );
+        let job = move |cx: &App| {
+            let (conn, db) = (s.connection.clone(), s.database.clone());
+            Sessions::global(cx)
+                .read(cx)
+                .run_rel(&conn, Some(&db), move |r| {
+                    Box::pin(async move { r.table_children(&s, &t).await })
+                })
+        };
+        let key = (scope.clone(), table.to_string());
+        self.load("children", key, |c| &mut c.children, job, force, cx);
     }
 
     /// Drops everything cached for a connection (closed or refreshed).
@@ -283,6 +275,28 @@ mod tests {
         }
     }
 
+    /// A cached key must not even start the query: `run_rel` executes as soon as it is called.
+    #[gpui_kit::test]
+    fn a_cache_hit_starts_no_query(cx: &mut gpui_kit::TestAppContext) {
+        let catalog = cx.new(|_| Catalog::default());
+        let scope = Scope::new("c", "db", None);
+        let key = (scope.clone(), "actor".to_string());
+        catalog.update(cx, |cat, cx| {
+            cat.columns
+                .insert(key.clone(), Load::Ready(vec![column("id")]));
+            cat.load(
+                "columns",
+                key,
+                |c| &mut c.columns,
+                |_| -> Option<JoinHandle<DbResult<Vec<ColumnInfo>>>> {
+                    panic!("a cached load started a query")
+                },
+                false,
+                cx,
+            );
+        });
+    }
+
     /// Fields and the other table children share a `(scope, table)` key. Both loads must finish.
     #[gpui_kit::test]
     fn fields_and_children_of_one_table_both_finish(cx: &mut gpui_kit::TestAppContext) {
@@ -300,7 +314,7 @@ mod tests {
                 "columns",
                 (scope.clone(), "actor".into()),
                 |c| &mut c.columns,
-                Some(columns),
+                move |_| Some(columns),
                 true,
                 cx,
             );
@@ -308,7 +322,7 @@ mod tests {
                 "children",
                 (scope.clone(), "actor".into()),
                 |c| &mut c.children,
-                Some(children),
+                move |_| Some(children),
                 true,
                 cx,
             );
