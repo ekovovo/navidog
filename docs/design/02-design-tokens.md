@@ -19,7 +19,7 @@
 | token | 值 | 来源 |
 | --- | --- | --- |
 | `font.family` | `.SystemUIFont`（SF Pro） | nib：所有控件都用 `.AppleSystemUIFont` |
-| `font.mono_family` | `Menlo` | 暂定，M3 查询编辑器规格中确认 |
+| `font.mono_family` | `Menlo` | M3 确认：Navicat 程序里只引用了 Menlo 和 Monaco（见 30-query-editor.md 第 12 节） |
 | `font.size.body` | 13 | nib:ConnectionFormGeneralModule_mysql/NSTextField（13.0） |
 | `font.size.small` | 11 | nib:ConnectionFormGeneralModule_mysql/备注文字（11.0）；nib:MainWindowController/状态栏文字（高 14） |
 | `font.weight.heading` | Semibold | nib:ConnectionFormConnTypeSelectionModule/标题（`.AppleSystemUIFontDemi` 13） |
@@ -90,6 +90,31 @@
 | `filter.segmented.width` | 115 | nib:FilterAndSortManager/NSSegmentedControl（115 × 24） |
 | `filter.builder.max_height` | 160 | 暂定，待 AX。条件多时仍给网格留出空间 |
 
+## 5.2 查询编辑器与结果（M3）
+
+| token | 值 | 来源 |
+| --- | --- | --- |
+| `editor.font_size` | 12 | 暂定，待并排目测 |
+| `query.toolbar.height` | 30 | nib:QueryDesignSQLEditorModule/顶部栏（707 × 30） |
+| `result.bottom_bar.height` | 28 | nib:SQLResultDatasetModule/底部栏（811 × 28） |
+| `result.bottom_bar.button` | 20 | nib:SQLResultDatasetModule/NSButton（20 × 20，间距 28） |
+| `result.summary.height` | 96 | nib:SQLResultSummaryModule/概况区（663 × 96） |
+| `params.window` | 400 × 300 | nib:QueryDesignParamPanel/NSWindowRect |
+| `beautify.window` | 356 × 143 | nib:SQLBeautifyOptionPanel/NSWindowRect |
+| `recovery.window` | 870 × 600 | nib:AutoRecoverWindowController/NSWindowRect |
+| `snippet.filter.height` | 25 | nib:SQLEditorModule_Snippet/“所有标签”行（271 × 25，+ 按钮 24 × 24） |
+| `snippet.row.height` | 37 | nib:SQLEditorModule_Snippet/NSTableCellView（248 × 37） |
+| `snippet.row.icon` | 32 | nib:SQLEditorModule_Snippet/NSImageView（32 × 32） |
+| `snippet.popover.width` | 360 | nib:SnippetViewController（编辑 360 × 507，查看 360 × 341） |
+| `snippet.popover.code_height` | 180 | nib:SnippetViewController/代码区（336 × 180） |
+| `explain.view_switch.height` | 36 | nib:QueryExplainModule/视图切换（247 × 36） |
+| `explain.toolbar.height` | 32 | nib:QueryExplainVisualModule/工具栏（513 × 32） |
+| `explain.threshold.width` | 45 | nib:QueryExplainVisualModule/NSTextField（45 × 24） |
+| `explain.search.width` | 150 | nib:QueryExplainVisualModule/NSSearchField（150 × 24） |
+| `explain.node_info.width` | 171 | nib:QueryExplainVisualModule/节点信息框（171 × 212，标题栏高 30） |
+| `explain.node` | 160 × 56 | 暂定，待并排目测 |
+| `explain.node_gap` | 40 × 16 | 暂定。横向是层与层的间距，纵向是兄弟节点的间距 |
+
 ## 6. 信息窗格
 
 | token | 值 | 来源 |
@@ -97,6 +122,8 @@
 | `info.header.height` | 30 | nib:InformationViewViewController/NSClassSwapper（400 × 30） |
 | `info.header.button` | 16 | nib:InformationViewViewController/NSButton（16×16，距右 8，y=7） |
 | `info.header.button_inset` | 8 | 同上 |
+| `info.search_bar.height` | 30 | nib:SQLEditorModule_ObjectList/搜索栏（251 × 30），标识符页（M3） |
+| `info.search_field.height` | 22 | nib:SQLEditorModule_ObjectList/NSSearchField（235 × 22） |
 
 ## 7. 表单与对话框
 
@@ -207,5 +234,6 @@ SQL 编辑器（DDL 页、DDL 选项卡，以及 M3 的查询编辑器）的底�
 - `toolbar.*`：主工具栏高度、图标尺寸、按钮最小宽度和间距（M1）。
 - `navigator.row.*`：导航树行高、缩进、图标尺寸（M1）。
 - `tab.min_width`、`object_toolbar.height`、`list.row.height`（M2）。
+- `editor.font_size`、`explain.node`、`explain.node_gap`（M3）：字号和计划图节点尺寸靠截图并排目测，AX 量不到。
 - `button.height`：macOS 26 上按钮的实际高度（M1）。
 - 连接表单窗口的整体尺寸和标签页切换控件（M1）：这部分由代码动态生成，nib 里没有。

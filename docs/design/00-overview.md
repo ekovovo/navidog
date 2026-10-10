@@ -18,6 +18,8 @@ navidog 用 [gpui-kit](https://gpui-kit.com/zh-CN/docs/) 全家桶（GPUI、`gpu
 | [12-secrets.md](12-secrets.md) | 密码加密：本机密钥、主密码，以及各系统上的表现 |
 | [20-objects.md](20-objects.md) | M2：对象树、对象选项卡、信息窗格、编辑器选项卡 |
 | [21-table-viewer.md](21-table-viewer.md) | M2：表查看器与结果网格（含技术验证的判定规则） |
+| [30-query-editor.md](30-query-editor.md) | M3：查询编辑器、代码补全、代码段、保存查询、自动恢复（含编辑器技术验证） |
+| [31-query-results.md](31-query-results.md) | M3：运行、结果、解释、历史日志、命令列界面 |
 | [db/](db/) | MySQL、PostgreSQL、SQLite 以外数据库的专属功能清单 |
 
 每个里程碑开工前，先在本目录补齐该里程碑的详细规格（编号 `1x-*.md`），规格 PR 合并后再开代码 PR。
@@ -64,7 +66,7 @@ navidog 用 [gpui-kit](https://gpui-kit.com/zh-CN/docs/) 全家桶（GPUI、`gpu
 3. 裸 `px(...)` 和原始颜色只允许出现在 `navidog-ui` 的 token 和主题定义里，由 CI 检查（见第 5 节）。
 4. 组件层采用渐进策略：先用 `gpui-component` 加 Navicat 主题；主题调不到实测值的控件，在 `navidog-ui` 中基于 `gpui-base` 原语重写外观，行为、焦点和无障碍语义沿用原语。
 5. 组件能力缺口：先在组件外层补（delegate、自定义渲染）；补不了就基于 `gpui-base` 自建；禁止 fork gpui-kit。结果网格和对象树在 M2 开始时先各做 1 到 2 天的技术验证。
-6. 菜单：右键菜单用 `NativeMenu`（macOS 上就是 `NSMenu`）；菜单栏用 `cx.set_menus`，调用前必须先 `cx.bind_keys`；只有必须参与 GPUI 浮层组合的地方（如补全列表）才用 `PopupMenu`。
+6. 菜单：右键菜单用 `NativeMenu`（macOS 上就是 `NSMenu`）；菜单栏用 `cx.set_menus`，调用前必须先 `cx.bind_keys`；只有必须参与 GPUI 浮层组合的地方才用 GPUI 浮层：一般用 `PopupMenu`，代码补全用编辑器自带的补全菜单。
 7. 主窗口布局：`gpui-component` 的 `DockArea`，默认布局照 Navicat 排列，用 `dump/load` 持久化；插件面板注册为 Dock Panel。
 8. 驱动层：自定义 trait 加原生驱动（`mysql_async`、`tokio-postgres`、`rusqlite`）。核心是 `Driver` 和 `Session` 两个 trait，按类别分出 `Relational`、`Document`、`KeyValue` 三个 trait，一期只实现 `Relational`。
 9. 异步：`navidog-db` 里放一个全局 tokio 多线程运行时；SQLite 走阻塞线程；界面侧用 `cx.spawn` 加 channel 等结果，状态显式区分 idle、loading、loaded、failed，丢弃过期结果。
@@ -96,6 +98,8 @@ flowchart TD
   featConn --> db[navidog-db]
   featGrid --> db
   featGrid --> util[navidog-util]
+  featQuery --> featGrid
+  featQuery --> db
   plugin --> core[navidog-core]
   plugin --> gpuiShell[gpui-shell]
   db --> core
@@ -115,7 +119,7 @@ flowchart TD
 | `navidog-connection` | 连接对话框、连接管理、导航树中的连接节点操作 | M1 |
 | `navidog-navigator` | 导航窗格、对象选项卡、信息窗格 | M2 |
 | `navidog-grid` | 结果网格、表查看器 | M2 |
-| `navidog-query` | 查询编辑器、结果集、执行计划、查询构建器 | M3 |
+| `navidog-query` | 查询编辑器、结果、执行计划、命令列界面、历史日志查看器；查询创建工具在 M7 加入 | M3 |
 | `navidog-designer` | 表、视图、函数等对象设计器 | M4 |
 | `navidog-transfer` | 导入导出、数据传输、数据同步、结构同步 | M6、M8 |
 | `navidog-model` | 模型与 ER 图 | M7 |
@@ -124,7 +128,7 @@ flowchart TD
 | `navidog-ai` | AI 助手 | M11 |
 
 规则：
-- 依赖只能向下：feature crate 可以依赖 `navidog-ui`、`navidog-core`、`navidog-db`、`navidog-util`，**不能依赖其他 feature crate**。feature 之间通过 `navidog-core` 中的命令、事件和领域 ID 协作。`navidog-util` 不依赖本仓库的其他 crate。
+- 依赖只能向下：feature crate 可以依赖 `navidog-ui`、`navidog-core`、`navidog-db`、`navidog-util`，**不能依赖其他 feature crate**。feature 之间通过 `navidog-core` 中的命令、事件和领域 ID 协作。`navidog-util` 不依赖本仓库的其他 crate。唯一的例外是 `navidog-query` 依赖 `navidog-grid`，复用结果网格和提交流程；`navidog-grid` 不能反过来依赖它。
 - 每个 feature crate 把自己的 model、service、view、command、dialog 放在一起，禁止建立全局的 `models/`、`views/`、`commands/` 目录。
 - 小能力先作为 module 留在最接近的 crate 里，等边界有实际收益再拆成 crate。不依赖界面、也不需要驱动的纯函数例外，直接放 `navidog-util`。
 - feature crate 对外只暴露 `init(cx)`、需要被外壳放进 Dock 的 Panel 类型，以及少量公开的 Entity 或命令。
@@ -168,11 +172,11 @@ gpui-kit 的[编码指南](https://gpui-kit.com/zh-CN/docs/coding-guides)和[设
 | M0 | 参考资料工具、总览、功能清单、token 表、插件 API、M1 规格 | 文档、`xtask` |
 | M1 | 应用外壳和连接管理 | `navidog`、`navidog-ui`、`navidog-core`、`navidog-db`、`navidog-connection` |
 | M2 | 对象树、对象选项卡、信息窗格、表查看器和结果网格 | `navidog-navigator`、`navidog-grid` |
-| M3 | 查询编辑器、结果集、执行计划、SQL 美化、历史日志 | `navidog-query` |
+| M3 | 查询编辑器、结果、执行计划、SQL 美化、代码段、历史日志、命令列界面 | `navidog-query` |
 | M4 | 表设计器及其他对象设计器 | `navidog-designer` |
 | M5 | 插件体系 | `navidog-plugin` |
 | M6 | 导入导出向导、导入 `.ncx` 连接 | `navidog-transfer` |
-| M7 | 模型和 ER 图 | `navidog-model` |
+| M7 | 模型和 ER 图；查询创建工具（与 ER 图共用画布，画布放在哪个 crate 在 M7 规格中确定） | `navidog-model`、`navidog-query` |
 | M8 | 数据传输、数据同步、结构同步 | `navidog-transfer` |
 | M9 | 备份还原、自动运行 | `navidog-automation` |
 | M10 | BI | `navidog-bi` |

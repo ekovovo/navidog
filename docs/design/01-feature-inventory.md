@@ -42,11 +42,11 @@
 | F-PREF-003 | 选项卡 | 弹出内容在新选项卡还是新窗口中打开、启动画面、选项卡关闭行为。 | preferences_tab | M2 |
 | F-PREF-004 | 编辑器 | 字体、字号、行号、代码折叠、自动换行、制表符宽度等。 | preferences_editor | M3 |
 | F-PREF-005 | 记录 | 每页记录数（默认 1000）、网格字体、显示主键提示、自动开始事务等。 | preferences_record | M2 |
-| F-PREF-006 | 代码补全 | 是否启用补全、触发延迟、补全范围。 | preferences_code_completion | M3 |
+| F-PREF-006 | 代码补全 | 使用代码补全、自动更新代码补全的信息、包括系统对象、自动选择第一个建议项目、清除代码补全的信息。 | preferences_code_completion | M3 |
 | F-PREF-007 | AI | AI 提供商、模型、API Key（加密存储）。 | preferences_ai | M11 |
-| F-PREF-008 | 自动恢复 | 是否启用、保存间隔。 | preferences_auto_recovery | M3 |
+| F-PREF-008 | 自动恢复 | 自动保存已修改的查询的间隔（每 15 秒到每 5 分钟，或永不）；模型和 BI 工作区的间隔随 M7、M10 加入。 | preferences_auto_recovery | M3 |
 | F-PREF-009 | 环境 | 外部工具路径，例如 `mysqldump`、`pg_dump`。 | preferences_env | M9 |
-| F-PREF-010 | 高级 | 设置位置（配置目录）、日志选项、主密码。 | preferences_adv | M1 |
+| F-PREF-010 | 高级 | 设置位置（配置目录）、日志选项（日志路径、启用诊断日志）、主密码。 | preferences_adv | M1、M3（日志选项） |
 
 ## CONN 连接
 
@@ -109,7 +109,7 @@
 | F-INFO-002 | DDL | 显示对象的 DDL，只读语法高亮，⌘F 搜索。 | information_pane | M2 |
 | F-INFO-003 | 使用与被使用 | 显示对象依赖的对象和依赖它的对象。 | information_pane | M4 |
 | F-INFO-004 | 预览 | 显示查询的 SQL 语句。 | information_pane | M3 |
-| F-INFO-005 | 代码段 | 列出内置和自定义代码段，拖放或双击插入编辑器。 | information_pane, query_code_snippet | M3 |
+| F-INFO-005 | 代码段 | 列出预设和自定义代码段，按标签、数据库类型筛选；拖到编辑器插入，双击查看和编辑。 | information_pane, query_code_snippet | M3 |
 | F-INFO-006 | 标识符 | 列出当前数据库中所有表、视图、字段，供插入编辑器。 | information_pane | M3 |
 | F-INFO-007 | 字段 | 在表查看器中显示所选字段的类型、注释等信息。 | information_pane, data_field_comment | M2 |
 | F-INFO-008 | 成员、成员属于、权限 | 显示用户或角色的成员关系与权限。 | information_pane | M4 |
@@ -141,18 +141,18 @@
 | 编号 | 功能 | 摘要与验收要点 | 帮助页 | 里程碑 |
 | --- | --- | --- | --- | --- |
 | F-QRY-001 | 查询编辑器 | Tree-sitter SQL 语法高亮、括号高亮、代码折叠、行号、自动换行、缩放（⌘+、⌘-、⌘0）。 | query_editor | M3 |
-| F-QRY-002 | 代码补全 | 基于 schema 缓存补全关键字、库、表、字段、函数；补全列表用 `PopupMenu`。 | query_editor, preferences_code_completion | M3 |
+| F-QRY-002 | 代码补全 | 基于代码补全信息（库、表、视图、字段、函数的缓存）补全关键字、对象和代码段；补全列表用编辑器自带的补全菜单。 | query_editor, preferences_code_completion | M3 |
 | F-QRY-003 | 查找与替换 | 正则表达式、大小写符合、整个字。 | query_editor | M3 |
 | F-QRY-004 | SQL 格式 | 缩进、注释与取消注释、转换大小写、美化 SQL（含选项：短括号长度、大写关键字）、简化 SQL。 | query_editor | M3 |
 | F-QRY-005 | 剪贴板堆栈 | 保存最近复制的多段文本，⇧⌘V 选择粘贴。 | query_editor | M3 |
 | F-QRY-006 | 运行 | 运行全部、运行已选择的、运行当前语句、停止；选择数据库或模式；运行多条语句。 | query_editor | M3 |
-| F-QRY-007 | 查询结果 | 每条 SELECT 一个结果选项卡；消息和概况页；固定选项卡；调整结果位置（下方或右侧）；结果网格复用 `navidog-grid`。 | query_results | M3 |
+| F-QRY-007 | 查询结果 | 每条 SELECT 一个结果选项卡（最多 20 个，`-- NAME:` 命名）；消息和摘要页；固定选项卡；结果位置（下方、右侧、新页面）；结果网格复用 `navidog-grid`，来自单张有主键的表时可编辑；MySQL/MariaDB 可显示查询分析和状态。 | query_results | M3 |
 | F-QRY-008 | 查询解释 | 执行计划的网格、文本、JSON 视图和可视化图；耗时阈值高亮；查找。 | query_explain | M3 |
 | F-QRY-009 | 查询参数 | SQL 中的参数占位符在运行时弹出输入框。 | query_parameters | M3 |
 | F-QRY-010 | 代码段 | 内置和自定义代码段，按数据库类型、标签过滤，带占位符。 | query_code_snippet | M3 |
 | F-QRY-011 | 保存查询 | 查询保存在连接的设置位置下，出现在对象分类“查询”中；⌘S、⇧⌘S。 | query | M3 |
 | F-QRY-012 | 历史日志 | ⇧⌘H 打开历史日志查看器，可显示日期、时间、服务器名、会话 ID、连接类型、运行时间。 | log_files | M3 |
-| F-QRY-013 | 查询创建工具 | 可视化构建 SELECT：拖放表、选择输出字段、设置关系、筛选准则、分组、排序、子查询。 | query_builder | M3 |
+| F-QRY-013 | 查询创建工具 | 可视化构建 SELECT：拖放表、选择输出字段、设置关系、筛选准则、分组、排序、子查询。与 ER 图共用画布，所以放在 M7。 | query_builder | M7 |
 | F-QRY-014 | 命令列界面 | ⇧⌘C 打开交互式命令行（类似 `mysql`、`psql` 的终端会话）。 | console | M3 |
 | F-QRY-015 | 运行 SQL 文件 | 对连接或数据库执行 SQL 文件，显示进度和错误，可选遇错继续。 | dump_execute_sql | M6 |
 | F-QRY-016 | 转储 SQL 文件 | 导出数据库或表的结构和数据为 SQL 文件。 | dump_execute_sql | M6 |
