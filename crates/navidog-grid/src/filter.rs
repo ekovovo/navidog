@@ -766,7 +766,7 @@ fn parse_in(rest: &str, dialect: Dialect, negated: bool) -> Option<(Op, String, 
 
 fn parse_sql_value(s: &str, dialect: Dialect) -> Option<(String, &str)> {
     let t = s.trim_start();
-    if t.starts_with('\'') {
+    if t.starts_with('\'') || postgres_escape_string(t, dialect).is_some() {
         return parse_string(t, dialect);
     }
     let bytes = t.as_bytes();
@@ -792,7 +792,18 @@ fn parse_sql_value(s: &str, dialect: Dialect) -> Option<(String, &str)> {
     Some((t[..i].to_string(), &t[i..]))
 }
 
+/// The rest after `E` when `s` is a PostgreSQL escape string (`E'a\\b'`), which `string_literal`
+/// writes for values with a backslash.
+fn postgres_escape_string(s: &str, dialect: Dialect) -> Option<&str> {
+    let rest = s.strip_prefix(['E', 'e'])?;
+    (dialect == Dialect::Postgres && rest.starts_with('\'')).then_some(rest)
+}
+
 fn parse_string(s: &str, dialect: Dialect) -> Option<(String, &str)> {
+    let (s, backslash_escapes) = match postgres_escape_string(s, dialect) {
+        Some(rest) => (rest, true),
+        None => (s, dialect == Dialect::MySql),
+    };
     if !s.starts_with('\'') {
         return None;
     }
@@ -808,7 +819,7 @@ fn parse_string(s: &str, dialect: Dialect) -> Option<(String, &str)> {
             }
             return Some((out, &s[i + 1..]));
         }
-        if dialect == Dialect::MySql && bytes[i] == b'\\' && i + 1 < bytes.len() {
+        if backslash_escapes && bytes[i] == b'\\' && i + 1 < bytes.len() {
             let ch = s[i + 1..].chars().next()?;
             out.push(ch);
             i += 1 + ch.len_utf8();
@@ -1149,7 +1160,7 @@ mod tests {
         );
         // PostgreSQL casts before LIKE so integer columns work, and the cast parses back
         let sql = one(rule("id", Op::Contains, "1", ""), Dialect::Postgres);
-        assert_eq!(sql, "\"id\"::text LIKE '%1%' ESCAPE '\\'");
+        assert_eq!(sql, "\"id\"::text LIKE '%1%' ESCAPE E'\\\\'");
         let parsed = parse_where(&sql, Dialect::Postgres).unwrap();
         assert_eq!(
             (parsed.rules[0].op, parsed.rules[0].field.as_str()),

@@ -69,11 +69,16 @@ impl Dialect {
     }
 
     /// String literal; under MySQL's default sql_mode backslash is an escape character, so it is
-    /// escaped too.
+    /// escaped too (`NO_BACKSLASH_ESCAPES` would read it as two backslashes). PostgreSQL gets an
+    /// `E'…'` string when the value has a backslash: plain `'…'` would let a backslash end the
+    /// literal under `standard_conforming_strings = off`, and `E'…'` reads the same either way.
     pub fn string_literal(self, value: &str) -> String {
         let escaped = value.replace('\'', "''");
         match self {
             Self::MySql => format!("'{}'", escaped.replace('\\', "\\\\")),
+            Self::Postgres if value.contains('\\') => {
+                format!("E'{}'", escaped.replace('\\', "\\\\"))
+            }
             Self::Postgres | Self::Sqlite => format!("'{escaped}'"),
         }
     }
@@ -492,7 +497,9 @@ mod tests {
         assert_eq!(Dialect::MySql.quote_ident("a`b"), "`a``b`");
         assert_eq!(Dialect::Postgres.quote_ident("a\"b"), "\"a\"\"b\"");
         assert_eq!(Dialect::MySql.literal(Some(r"it's \n")), r"'it''s \\n'");
-        assert_eq!(Dialect::Postgres.literal(Some(r"it's \n")), r"'it''s \n'");
+        // An escape string reads the same whatever standard_conforming_strings is
+        assert_eq!(Dialect::Postgres.literal(Some(r"it's \n")), r"E'it''s \\n'");
+        assert_eq!(Dialect::Postgres.literal(Some("it's")), "'it''s'");
         assert_eq!(Dialect::Sqlite.literal(None), "NULL");
         assert_eq!(Dialect::MySql.qualified(&scope(None), "t"), "`app`.`t`");
         assert_eq!(
