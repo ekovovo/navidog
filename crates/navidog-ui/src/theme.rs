@@ -26,10 +26,8 @@ pub fn init(cx: &mut App) {
     theme.light_theme = light;
     theme.dark_theme = dark;
     Theme::change(ThemeMode::Light, None, cx);
-    // gpui maps "show scrollbars" to Hover and "auto hide" to Scrolling.
-    // Neither is visible until a scroll is already happening, so a mouse
-    // cannot start a horizontal scroll. Keep the bars on screen.
-    Theme::set_scrollbar_mode(ScrollbarMode::Always, cx);
+    // Show the bar when the pointer is over the scroll area.
+    Theme::set_scrollbar_mode(ScrollbarMode::Hover, cx);
 }
 
 /// Applies the appearance: `None` follows the system, `Some(true)` forces dark, `Some(false)` forces light.
