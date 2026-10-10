@@ -1596,7 +1596,9 @@ fn grid_font_pt(cx: &App) -> Option<f32> {
         return None;
     }
     let s = Settings::global(cx);
-    (!s.use_default_grid_font).then_some(s.grid_font_pt)
+    // settings.json is editable by hand; keep a tiny or huge size from breaking the layout
+    let range = Settings::GRID_FONT_PT;
+    (!s.use_default_grid_font).then_some(s.grid_font_pt.clamp(*range.start(), *range.end()))
 }
 
 fn width_key(scope: &Scope, table: &str) -> String {

@@ -65,11 +65,15 @@ impl ConnectionsFile {
     }
 
     /// Re-encrypts every secret field with a new key (setting, changing or clearing the master password).
+    /// All or nothing: when `old` cannot open some field, nothing changes, so the file never mixes
+    /// ciphertext of two keys (the next save would make the re-encrypted ones unreadable).
     pub fn rekey(&mut self, old: &Key, new: &Key) -> Result<(), CryptoError> {
-        for conn in &mut self.connections {
+        let mut connections = self.connections.clone();
+        for conn in &mut connections {
             let id = conn.id.clone();
             Self::reencrypt(conn, &id, old, new)?;
         }
+        self.connections = connections;
         Ok(())
     }
 
@@ -455,6 +459,25 @@ mod tests {
         // No plaintext after serialization
         let json = serde_json::to_string(&file).unwrap();
         assert!(!json.contains("\"pw\"") && !json.contains("\"pw2\""));
+    }
+
+    #[test]
+    fn a_failed_rekey_changes_nothing() {
+        let (k1, lost, k3) = (Key::random(), Key::random(), Key::random());
+        let mut good = Connection::new("mysql");
+        ConnectionsFile::set_secret(&mut good, SecretField::Password, Some("pw"), &k1);
+        // A field from a key that is gone (another machine, a new keychain item)
+        let mut bad = Connection::new("mysql");
+        ConnectionsFile::set_secret(&mut bad, SecretField::Password, Some("x"), &lost);
+        let mut file = ConnectionsFile {
+            connections: vec![good, bad],
+            ..Default::default()
+        };
+        let before = file.clone();
+        assert!(file.rekey(&k1, &k3).is_err());
+        assert_eq!(file, before);
+        let revealed = ConnectionsFile::reveal(&file.connections[0], SecretField::Password, &k1);
+        assert_eq!(revealed.unwrap().as_deref(), Some("pw"));
     }
 
     #[test]

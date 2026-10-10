@@ -162,11 +162,23 @@ impl Settings {
         paths::config_dir().join("settings.json")
     }
 
+    /// Grid font sizes the Records page accepts, in points.
+    pub const GRID_FONT_PT: std::ops::RangeInclusive<f32> = 8.0..=72.0;
+
     pub fn load() -> Self {
-        std::fs::read(Self::path())
-            .ok()
-            .and_then(|b| serde_json::from_slice(&b).ok())
-            .unwrap_or_default()
+        Self::load_from(&Self::path())
+    }
+
+    fn load_from(path: &std::path::Path) -> Self {
+        let Ok(bytes) = std::fs::read(path) else {
+            return Self::default();
+        };
+        serde_json::from_slice(&bytes).unwrap_or_else(|err| {
+            // The next save writes defaults over this file: keep a copy, as connections.json does
+            tracing::error!("settings.json cannot be parsed, backed up: {err}");
+            let _ = std::fs::copy(path, path.with_extension("json.bak"));
+            Self::default()
+        })
     }
 
     pub fn save(&self) {
@@ -195,6 +207,18 @@ pub(crate) fn init(cx: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_unreadable_file_is_backed_up_before_defaults_replace_it() {
+        let dir = std::env::temp_dir().join(format!("navidog-settings-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        std::fs::write(&path, r#"{"row_shade":"not-a-variant"}"#).unwrap();
+        assert_eq!(Settings::load_from(&path), Settings::default());
+        let backup = std::fs::read_to_string(dir.join("settings.json.bak")).unwrap();
+        assert!(backup.contains("not-a-variant"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn keeps_unknown_fields_and_defaults_missing_ones() {

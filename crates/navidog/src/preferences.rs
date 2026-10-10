@@ -65,28 +65,48 @@ impl Preferences {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         cx.observe(&ConnectionStore::global(cx), |_, _, cx| cx.notify())
             .detach();
+        // Both fields apply on Return or when they lose focus, not per keystroke: typing "100"
+        // would otherwise save the "10" on the way. A bad value goes back to the saved one.
         let per_page = Settings::global(cx).records_per_page.to_string();
         let records_per_page = cx.new(|cx| InputState::new(window, cx).default_value(per_page));
-        cx.subscribe(&records_per_page, |_, input, e: &InputEvent, cx| {
-            if matches!(e, InputEvent::Change)
-                && let Ok(n) = input.read(cx).value().trim().parse::<u64>()
-                && n > 0
-            {
-                Settings::update(cx, |s| s.records_per_page = n);
-            }
-        })
+        cx.subscribe_in(
+            &records_per_page,
+            window,
+            |_, input, e: &InputEvent, window, cx| {
+                if !matches!(e, InputEvent::Blur | InputEvent::PressEnter { .. }) {
+                    return;
+                }
+                match input.read(cx).value().trim().parse::<u64>() {
+                    Ok(n) if n > 0 => Settings::update(cx, |s| s.records_per_page = n),
+                    _ => {
+                        let saved = Settings::global(cx).records_per_page.to_string();
+                        input.update(cx, |s, cx| s.set_value(saved, window, cx));
+                    }
+                }
+            },
+        )
         .detach();
         let font = Settings::global(cx).grid_font_pt.to_string();
         let grid_font_pt = cx.new(|cx| InputState::new(window, cx).default_value(font));
-        cx.subscribe(&grid_font_pt, |_, input, e: &InputEvent, cx| {
-            if matches!(e, InputEvent::Change)
-                && let Ok(n) = input.read(cx).value().trim().parse::<f32>()
-                && (8. ..=72.).contains(&n)
-            {
-                Settings::update(cx, |s| s.grid_font_pt = n);
-                cx.refresh_windows();
-            }
-        })
+        cx.subscribe_in(
+            &grid_font_pt,
+            window,
+            |_, input, e: &InputEvent, window, cx| {
+                if !matches!(e, InputEvent::Blur | InputEvent::PressEnter { .. }) {
+                    return;
+                }
+                match input.read(cx).value().trim().parse::<f32>() {
+                    Ok(n) if Settings::GRID_FONT_PT.contains(&n) => {
+                        Settings::update(cx, |s| s.grid_font_pt = n);
+                        cx.refresh_windows();
+                    }
+                    _ => {
+                        let saved = Settings::global(cx).grid_font_pt.to_string();
+                        input.update(cx, |s, cx| s.set_value(saved, window, cx));
+                    }
+                }
+            },
+        )
         .detach();
         Self {
             page: Page::General,
