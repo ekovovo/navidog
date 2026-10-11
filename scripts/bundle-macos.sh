@@ -38,5 +38,14 @@ cat > "$app/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-hdiutil create -volname Navidog -srcfolder "$app" -ov -format UDZO "$out/navidog-${version}.dmg"
+# Stage the app beside a symlink to /Applications. The link's name stays
+# "Applications"; Finder shows the viewer's own localized name (应用程序, …)
+# and dropping the app onto it installs into /Applications.
+stage="$out/dmg"
+rm -rf "$stage"
+mkdir -p "$stage"
+ditto "$app" "$stage/navidog.app"
+ln -s /Applications "$stage/Applications"
+hdiutil create -volname Navidog -srcfolder "$stage" -ov -format UDZO "$out/navidog-${version}.dmg"
+rm -rf "$stage"
 echo "Built $out/navidog-${version}.dmg"
