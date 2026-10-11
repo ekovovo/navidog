@@ -68,6 +68,10 @@ pub fn run() {
 
             let state = AppState::load();
             let (window, view) = open_main_window(state, cx);
+            // The recovery dialog needs the window root, which exists only after open_window returns.
+            let _ = window.update(cx, |_, window, cx| {
+                view.update(cx, |v, cx| v.check_recovery(window, cx));
+            });
             cx.on_app_quit(move |cx| {
                 navidog_query::flush_on_quit(cx);
                 let view = view.clone();
@@ -151,10 +155,7 @@ fn open_main_window(
         if Settings::global(cx).auto_connect_on_startup {
             navidog_connection::auto_connect(window, cx);
         }
-        view.update(cx, |v, cx| {
-            v.open_startup_tabs(window, cx);
-            v.check_recovery(window, cx);
-        });
+        view.update(cx, |v, cx| v.open_startup_tabs(window, cx));
         view
     })
     .expect("无法打开主窗口")
