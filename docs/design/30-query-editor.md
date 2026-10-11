@@ -224,6 +224,7 @@ Navicat 的编辑器还需要以下能力，在外层补：
 | `beautify.window` | 356 × 143 | nib:SQLBeautifyOptionPanel/NSWindowRect |
 | `recovery.window` | 870 × 600 | nib:AutoRecoverWindowController/NSWindowRect |
 | `query.picker_width` | 120 | 暂定：工具栏的连接、数据库、模式选择 |
+| `query.find_control.height` | 19.5 | 查找栏的模式按钮，等于 `Input::small`（`h_6` = 1.5rem） |
 | `editor.font_range` | 8 ~ 72 | 第 9 节（缩放与偏好设置的字号范围） |
 
 ## 13. 验收清单

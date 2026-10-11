@@ -175,6 +175,8 @@ pub mod query {
     pub const EDITOR_FONT_MAX: f32 = 72.;
     /// Provisional: width of the connection, database and schema pickers
     pub const PICKER_WIDTH: Pt = Pt(120.);
+    /// Find/replace mode chip. `Input::small` is `h_6` (1.5rem), which is 1.5 × `BASE_PT`.
+    pub const FIND_CONTROL_HEIGHT: Pt = Pt(super::BASE_PT * 1.5);
     pub const BEAUTIFY_WIDTH: Pt = Pt(356.);
     pub const BEAUTIFY_HEIGHT: Pt = Pt(143.);
     pub const RECOVERY_WIDTH: Pt = Pt(870.);

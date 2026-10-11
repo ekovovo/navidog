@@ -151,7 +151,7 @@ impl TableViewer {
                     .flex_none()
                     .px_2()
                     .gap_1()
-                    .h(tokens::info::SEARCH_FIELD_HEIGHT.rems())
+                    .h(tokens::query::FIND_CONTROL_HEIGHT.rems())
                     .items_center()
                     .rounded_md()
                     .border_1()
@@ -178,15 +178,10 @@ impl TableViewer {
                         h_flex()
                             .gap_1()
                             .items_center()
-                            .child(
-                                Input::new(&self.find_input)
-                                    .xsmall()
-                                    .h(tokens::info::SEARCH_FIELD_HEIGHT.rems())
-                                    .flex_1(),
-                            )
+                            .child(Input::new(&self.find_input).small().flex_1())
                             .child(
                                 Button::new("find-prev")
-                                    .xsmall()
+                                    .small()
                                     .ghost()
                                     .icon(lucide("chevron-left"))
                                     .on_click(
@@ -195,7 +190,7 @@ impl TableViewer {
                             )
                             .child(
                                 Button::new("find-next")
-                                    .xsmall()
+                                    .small()
                                     .ghost()
                                     .icon(lucide("chevron-right"))
                                     .on_click(
@@ -204,7 +199,7 @@ impl TableViewer {
                             )
                             .child(
                                 Button::new("find-done")
-                                    .xsmall()
+                                    .small()
                                     .label(t!("viewer.find_done").to_string())
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.close_find(window, cx)
@@ -216,15 +211,10 @@ impl TableViewer {
                             h_flex()
                                 .gap_1()
                                 .items_center()
-                                .child(
-                                    Input::new(&self.replace_input)
-                                        .xsmall()
-                                        .h(tokens::info::SEARCH_FIELD_HEIGHT.rems())
-                                        .flex_1(),
-                                )
+                                .child(Input::new(&self.replace_input).small().flex_1())
                                 .child(
                                     Button::new("replace-one")
-                                        .xsmall()
+                                        .small()
                                         .label(t!("viewer.replace").to_string())
                                         .on_click(
                                             cx.listener(|this, _, _, cx| this.replace_current(cx)),
@@ -232,7 +222,7 @@ impl TableViewer {
                                 )
                                 .child(
                                     Button::new("replace-all")
-                                        .xsmall()
+                                        .small()
                                         .label(t!("viewer.replace_all").to_string())
                                         .on_click(
                                             cx.listener(|this, _, _, cx| this.replace_every(cx)),

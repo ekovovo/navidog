@@ -356,7 +356,7 @@ impl QueryEditor {
                     .flex_none()
                     .px_2()
                     .gap_1()
-                    .h(tokens::info::SEARCH_FIELD_HEIGHT.rems())
+                    .h(tokens::query::FIND_CONTROL_HEIGHT.rems())
                     .items_center()
                     .rounded_md()
                     .border_1()
@@ -393,16 +393,12 @@ impl QueryEditor {
                                     .min_w_0()
                                     .rounded_md()
                                     .when(self.find.error, |d| d.border_1().border_color(p.danger))
-                                    .child(
-                                        Input::new(&self.find.query)
-                                            .small()
-                                            .h(tokens::info::SEARCH_FIELD_HEIGHT.rems()),
-                                    ),
+                                    .child(Input::new(&self.find.query).small()),
                             )
                             .child(
                                 Button::new("find-prev")
                                     .ghost()
-                                    .xsmall()
+                                    .small()
                                     .icon(lucide("chevron-left"))
                                     .disabled(count == 0)
                                     .on_click(cx.listener(|this, _, window, cx| {
@@ -412,7 +408,7 @@ impl QueryEditor {
                             .child(
                                 Button::new("find-next")
                                     .ghost()
-                                    .xsmall()
+                                    .small()
                                     .icon(lucide("chevron-right"))
                                     .disabled(count == 0)
                                     .on_click(cx.listener(|this, _, window, cx| {
@@ -421,7 +417,7 @@ impl QueryEditor {
                             )
                             .child(
                                 Button::new("find-done")
-                                    .xsmall()
+                                    .small()
                                     .label(t!("query.find_done").to_string())
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.close_find(window, cx)
@@ -434,15 +430,14 @@ impl QueryEditor {
                                 .gap_1()
                                 .items_center()
                                 .child(
-                                    div().flex_1().min_w_0().child(
-                                        Input::new(&self.find.replacement)
-                                            .small()
-                                            .h(tokens::info::SEARCH_FIELD_HEIGHT.rems()),
-                                    ),
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .child(Input::new(&self.find.replacement).small()),
                                 )
                                 .child(
                                     Button::new("find-replace-one")
-                                        .xsmall()
+                                        .small()
                                         .label(t!("query.replace").to_string())
                                         .disabled(count == 0)
                                         .on_click(cx.listener(|this, _, window, cx| {
@@ -451,7 +446,7 @@ impl QueryEditor {
                                 )
                                 .child(
                                     Button::new("find-replace-all")
-                                        .xsmall()
+                                        .small()
                                         .label(t!("query.replace_all").to_string())
                                         .disabled(count == 0)
                                         .on_click(cx.listener(|this, _, window, cx| {
