@@ -12,7 +12,7 @@ use gpui_kit::{
 };
 use navidog_core::connection::Connection;
 use navidog_core::crypto::Key;
-use navidog_core::settings::Settings;
+use navidog_core::settings::{ResultsPosition, Settings};
 use navidog_core::store::ConnectionStore;
 use navidog_db::sessions::Sessions;
 use navidog_db::sqlite::SqliteDriver;
@@ -280,6 +280,57 @@ fn runs_scripts_into_messages_summary_and_editable_results(cx: &mut TestAppConte
     cx.update(|cx| assert!(!editor.read(cx).results_page));
     go(cx, Box::new(crate::editor::ShowResults));
     cx.update(|cx| assert!(editor.read(cx).results_page));
+
+    // Focus stays on the SQL editor the results page just unmounted. The position
+    // buttons must still switch layout; dispatching from that focus would miss.
+    cx.update_window(handle, |_, _, cx| {
+        editor.update(cx, |e, cx| {
+            e.results_page = false;
+            cx.notify();
+        });
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        editor.update(cx, |e, cx| {
+            e.editor.update(cx, |ed, cx| ed.focus(window, cx));
+            e.results_page = true;
+            cx.notify();
+        });
+        Settings::update(cx, |s| s.results_position = ResultsPosition::NewPage);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("result-below", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update(|cx| {
+        assert_eq!(
+            Settings::global(cx).results_position,
+            ResultsPosition::Below
+        );
+        assert!(!editor.read(cx).results_page);
+    });
+    cx.update_window(handle, |_, _, cx| {
+        editor.update(cx, |e, cx| {
+            e.results_page = true;
+            cx.notify();
+        });
+        Settings::update(cx, |s| s.results_position = ResultsPosition::NewPage);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("result-back", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update(|cx| assert!(!editor.read(cx).results_page));
 }
 
 #[gpui_kit::test]

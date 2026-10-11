@@ -4,6 +4,7 @@
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use gpui_kit::component::button::{Button, ButtonCustomVariant, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
@@ -15,6 +16,7 @@ use gpui_kit::component::input::{
     Editor, EditorState, Escape, Input, InputEvent, InputState, Textarea, TextareaState,
 };
 use gpui_kit::component::native_menu::NativeMenu;
+use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{
     Disableable as _, Selectable as _, Sizable as _, WindowExt as _, h_flex, v_flex,
 };
@@ -52,6 +54,8 @@ mod form;
 
 const PANEL: &str = "TableViewer";
 const CONTEXT: &str = "TableViewer";
+/// Half a turn of the refresh icon. `Spinner`'s cycle is 0.8s and not configurable.
+const REFRESH_SPIN: Duration = Duration::from_millis(400);
 actions!(
     viewer,
     [
@@ -202,6 +206,8 @@ pub struct TableViewer {
     form_for: Option<usize>,
     in_transaction: bool,
     busy: bool,
+    /// Refresh icon keeps turning until this instant, even if the load finished sooner.
+    spin_until: Option<Instant>,
     /// The most recently executed SQL or error
     status: SharedString,
     task: Option<Task<()>>,
@@ -660,6 +666,7 @@ impl TableViewer {
                 form_for: None,
                 in_transaction: false,
                 busy: false,
+                spin_until: None,
                 status: SharedString::default(),
                 task: None,
                 _subscriptions: subs,
@@ -780,6 +787,34 @@ impl TableViewer {
     fn set_busy(&mut self, busy: bool, cx: &mut Context<Self>) {
         self.busy = busy;
         self.grid.update(cx, |g, cx| g.set_locked(busy, cx));
+        if busy {
+            self.spin_until = Some(Instant::now() + REFRESH_SPIN);
+            return;
+        }
+        let Some(until) = self.spin_until else {
+            return;
+        };
+        let left = until.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            self.spin_until = None;
+            return;
+        }
+        // The load can finish before half a turn; wake the view when that half ends.
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(left).await;
+            let _ = this.update(cx, |this, cx| {
+                if this.busy || this.spin_until.is_some_and(|t| Instant::now() < t) {
+                    return;
+                }
+                this.spin_until = None;
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn spinning(&self) -> bool {
+        refresh_spinning(self.busy, self.spin_until, Instant::now())
     }
 
     fn fail(&mut self, message: String, cx: &mut Context<Self>) {
@@ -1490,13 +1525,32 @@ impl TableViewer {
                         this.form_for = None;
                     })),
             )
-            .child(
-                icon_button("reload", "refresh-cw", t!("viewer.refresh").to_string())
-                    .disabled(!ready)
-                    .on_click(
-                        cx.listener(|this, _, window, cx| this.reload_committed(true, window, cx)),
-                    ),
-            )
+            .child({
+                let mut reload = Button::new("reload")
+                    .ghost()
+                    .xsmall()
+                    .tooltip(t!("viewer.refresh").to_string())
+                    .w(tokens::viewer::BOTTOM_BUTTON_WIDTH.rems())
+                    .h(tokens::viewer::BOTTOM_BUTTON_HEIGHT.rems())
+                    .disabled(self.session.is_none());
+                // Disabled would fade the icon, so a spin looks like it never started.
+                if self.spinning() {
+                    reload = reload.child(
+                        Spinner::new()
+                            .icon(lucide("refresh-cw"))
+                            .xsmall()
+                            .ease(|t| t),
+                    );
+                } else {
+                    reload = reload.icon(lucide("refresh-cw"));
+                }
+                reload.on_click(cx.listener(|this, _, window, cx| {
+                    if this.busy {
+                        return;
+                    }
+                    this.reload_committed(true, window, cx);
+                }))
+            })
             .child(
                 icon_button("stop", "circle-stop", t!("viewer.stop").to_string())
                     .disabled(!self.busy || self.cancel.is_none())
@@ -1739,10 +1793,38 @@ impl Render for TableViewer {
     }
 }
 
+fn refresh_spinning(busy: bool, until: Option<Instant>, now: Instant) -> bool {
+    busy || until.is_some_and(|t| now < t)
+}
+
 impl Drop for TableViewer {
     fn drop(&mut self) {
         if let Some(s) = self.session.take() {
             close_session(s);
         }
+    }
+}
+
+#[cfg(test)]
+mod spin_tests {
+    use super::refresh_spinning;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn refresh_keeps_spinning_for_half_a_turn_after_the_load() {
+        let start = Instant::now();
+        let until = start + Duration::from_millis(400);
+        assert!(refresh_spinning(true, Some(until), start));
+        assert!(refresh_spinning(
+            false,
+            Some(until),
+            start + Duration::from_millis(100)
+        ));
+        assert!(!refresh_spinning(
+            false,
+            Some(until),
+            start + Duration::from_millis(400)
+        ));
+        assert!(!refresh_spinning(false, None, start));
     }
 }

@@ -1448,25 +1448,18 @@ impl Render for QueryEditor {
                     this.toggle_word_wrap(window, cx)
                 }),
             )
-            .on_action(cx.listener(|this, _: &ResultsBelow, _, cx| {
-                set_position(ResultsPosition::Below, cx);
-                this.results_page = false;
+            .on_action(cx.listener(|this, _: &ResultsBelow, window, cx| {
+                this.place_results(ResultsPosition::Below, window, cx)
             }))
-            .on_action(cx.listener(|this, _: &ResultsBeside, _, cx| {
-                set_position(ResultsPosition::Beside, cx);
-                this.results_page = false;
+            .on_action(cx.listener(|this, _: &ResultsBeside, window, cx| {
+                this.place_results(ResultsPosition::Beside, window, cx)
             }))
-            .on_action(cx.listener(|this, _: &ResultsNewPage, _, cx| {
-                set_position(ResultsPosition::NewPage, cx);
-                if this.results.has_run() {
-                    this.results_page = true;
-                }
-                cx.notify();
+            .on_action(cx.listener(|this, _: &ResultsNewPage, window, cx| {
+                this.place_results(ResultsPosition::NewPage, window, cx)
             }))
             .on_action(
-                cx.listener(|this, _: &crate::results::BackToEditor, _, cx| {
-                    this.results_page = false;
-                    cx.notify();
+                cx.listener(|this, _: &crate::results::BackToEditor, window, cx| {
+                    this.back_to_editor(window, cx)
                 }),
             )
             .on_action(cx.listener(|this, _: &ShowResults, _, cx| {
@@ -1692,6 +1685,35 @@ fn set_position(position: ResultsPosition, cx: &mut App) {
     Settings::update(cx, |s| s.results_position = position);
     // Every open query editor follows; the menus show the check
     cx.refresh_windows();
+}
+
+impl QueryEditor {
+    /// Result-position buttons call this directly. `dispatch_action` follows focus, and after the
+    /// results page unmounts the SQL editor that focus is no longer in the tree.
+    pub(crate) fn place_results(
+        &mut self,
+        position: ResultsPosition,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let show_page = position == ResultsPosition::NewPage && self.results.has_run();
+        self.results_page = show_page;
+        set_position(position, cx);
+        cx.notify();
+        if !show_page {
+            self.focus_sql(window, cx);
+        }
+    }
+
+    pub(crate) fn back_to_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.results_page = false;
+        cx.notify();
+        self.focus_sql(window, cx);
+    }
+
+    fn focus_sql(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.editor.update(cx, |e, cx| e.focus(window, cx));
+    }
 }
 
 impl QueryEditor {

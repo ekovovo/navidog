@@ -31,7 +31,7 @@ use navidog_ui::{palette, tokens};
 use navidog_util::sql_text;
 use rust_i18n::t;
 
-use crate::editor::{QueryEditor, ResultsBelow, ResultsBeside, ResultsNewPage};
+use crate::editor::QueryEditor;
 use crate::explain::ExplainView;
 use crate::run::Outcome;
 
@@ -1362,11 +1362,9 @@ impl QueryEditor {
                                         t!("query.back_to_editor").to_string(),
                                         false,
                                     )
-                                    .on_click(
-                                        |_, window, cx| {
-                                            window.dispatch_action(Box::new(BackToEditor), cx)
-                                        },
-                                    ),
+                                    .on_click(cx.listener(
+                                        |this, _, window, cx| this.back_to_editor(window, cx),
+                                    )),
                                 )
                             })
                             .child(
@@ -1376,9 +1374,11 @@ impl QueryEditor {
                                     t!("query.results_below").to_string(),
                                     position == ResultsPosition::Below,
                                 )
-                                .on_click(|_, window, cx| {
-                                    window.dispatch_action(Box::new(ResultsBelow), cx)
-                                }),
+                                .on_click(cx.listener(
+                                    |this, _, window, cx| {
+                                        this.place_results(ResultsPosition::Below, window, cx)
+                                    },
+                                )),
                             )
                             .child(
                                 pos_button(
@@ -1387,9 +1387,11 @@ impl QueryEditor {
                                     t!("query.results_beside").to_string(),
                                     position == ResultsPosition::Beside,
                                 )
-                                .on_click(|_, window, cx| {
-                                    window.dispatch_action(Box::new(ResultsBeside), cx)
-                                }),
+                                .on_click(cx.listener(
+                                    |this, _, window, cx| {
+                                        this.place_results(ResultsPosition::Beside, window, cx)
+                                    },
+                                )),
                             )
                             .child(
                                 pos_button(
@@ -1398,9 +1400,11 @@ impl QueryEditor {
                                     t!("query.results_new_page").to_string(),
                                     position == ResultsPosition::NewPage,
                                 )
-                                .on_click(|_, window, cx| {
-                                    window.dispatch_action(Box::new(ResultsNewPage), cx)
-                                }),
+                                .on_click(cx.listener(
+                                    |this, _, window, cx| {
+                                        this.place_results(ResultsPosition::NewPage, window, cx)
+                                    },
+                                )),
                             ),
                     ),
             )

@@ -393,7 +393,11 @@ impl QueryEditor {
                                     .min_w_0()
                                     .rounded_md()
                                     .when(self.find.error, |d| d.border_1().border_color(p.danger))
-                                    .child(Input::new(&self.find.query).small()),
+                                    .child(
+                                        Input::new(&self.find.query)
+                                            .small()
+                                            .h(tokens::info::SEARCH_FIELD_HEIGHT.rems()),
+                                    ),
                             )
                             .child(
                                 Button::new("find-prev")
@@ -430,10 +434,11 @@ impl QueryEditor {
                                 .gap_1()
                                 .items_center()
                                 .child(
-                                    div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .child(Input::new(&self.find.replacement).small()),
+                                    div().flex_1().min_w_0().child(
+                                        Input::new(&self.find.replacement)
+                                            .small()
+                                            .h(tokens::info::SEARCH_FIELD_HEIGHT.rems()),
+                                    ),
                                 )
                                 .child(
                                     Button::new("find-replace-one")

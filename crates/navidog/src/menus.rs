@@ -30,7 +30,9 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("alt-cmd-t", ToggleToolbar, None),
         KeyBinding::new("ctrl-cmd-f", ToggleFullScreen, None),
         KeyBinding::new("cmd-m", Minimize, None),
-        KeyBinding::new("cmd-r", Refresh, None),
+        // No context matches at the full stack depth and would beat Run / RefreshTable,
+        // which are bound on QueryEditor and TableViewer. ⌘R stays refresh everywhere else.
+        KeyBinding::new("cmd-r", Refresh, Some("!QueryEditor && !TableViewer")),
         KeyBinding::new("shift-cmd-.", CloseConnection, None),
         KeyBinding::new("cmd-u", OpenUri, None),
         KeyBinding::new("cmd-y", NewQuery, None),

@@ -178,7 +178,12 @@ impl TableViewer {
                         h_flex()
                             .gap_1()
                             .items_center()
-                            .child(Input::new(&self.find_input).xsmall().flex_1())
+                            .child(
+                                Input::new(&self.find_input)
+                                    .xsmall()
+                                    .h(tokens::info::SEARCH_FIELD_HEIGHT.rems())
+                                    .flex_1(),
+                            )
                             .child(
                                 Button::new("find-prev")
                                     .xsmall()
@@ -211,7 +216,12 @@ impl TableViewer {
                             h_flex()
                                 .gap_1()
                                 .items_center()
-                                .child(Input::new(&self.replace_input).xsmall().flex_1())
+                                .child(
+                                    Input::new(&self.replace_input)
+                                        .xsmall()
+                                        .h(tokens::info::SEARCH_FIELD_HEIGHT.rems())
+                                        .flex_1(),
+                                )
                                 .child(
                                     Button::new("replace-one")
                                         .xsmall()
