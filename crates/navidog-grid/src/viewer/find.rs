@@ -91,113 +91,145 @@ impl TableViewer {
         self.sync_highlight(cx);
     }
 
+    fn find_mode_label(&self) -> String {
+        if self.find_columns {
+            t!("viewer.find_columns").to_string()
+        } else if self.replace_mode {
+            t!("viewer.replace").to_string()
+        } else {
+            t!("viewer.find").to_string()
+        }
+    }
+
+    fn find_menu(&self) -> NativeMenu {
+        NativeMenu::new()
+            .menu_with_check(
+                t!("viewer.find").to_string(),
+                !self.replace_mode && !self.find_columns,
+                Box::new(FindData),
+            )
+            .menu_with_check(
+                t!("viewer.replace").to_string(),
+                self.replace_mode && !self.find_columns,
+                Box::new(FindReplaceMode),
+            )
+            .menu_with_check(
+                t!("viewer.find_columns").to_string(),
+                self.find_columns,
+                Box::new(FindColumnsMode),
+            )
+            .separator()
+            .menu_with_check(
+                t!("viewer.find_case").to_string(),
+                self.find_case,
+                Box::new(ToggleMatchCase),
+            )
+            .menu_with_check(
+                t!("viewer.find_highlight").to_string(),
+                self.find_highlight,
+                Box::new(ToggleHighlight),
+            )
+            .menu_with_check(
+                t!("viewer.find_incremental").to_string(),
+                self.find_incremental,
+                Box::new(ToggleIncremental),
+            )
+    }
+
     pub(super) fn render_find(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
-        let toggle = |id: &'static str, on: bool, label: String| {
-            Button::new(id).xsmall().ghost().selected(on).label(label)
-        };
         h_flex()
-            .h(tokens::viewer::FILTER_HEIGHT.rems())
             .px_2()
+            .py_1()
             .gap_1()
+            .items_start()
             .border_b_1()
             .border_color(p.separator)
             .child(
-                Button::new("find-close")
-                    .xsmall()
-                    .ghost()
-                    .icon(lucide("x"))
-                    .tooltip(t!("viewer.close_find").to_string())
-                    .on_click(cx.listener(|this, _, window, cx| this.close_find(window, cx))),
-            )
-            .child({
-                let label = if self.find_columns {
-                    t!("viewer.find_columns").to_string()
-                } else {
-                    t!("viewer.find_data").to_string()
-                };
-                toggle("find-columns", self.find_columns, label).on_click(cx.listener(
-                    |this, _, _, cx| {
-                        this.find_columns = !this.find_columns;
-                        if this.find_columns {
-                            this.replace_mode = false;
-                        }
-                        this.find_step(false, cx);
-                    },
-                ))
-            })
-            .child(Input::new(&self.find_input).xsmall().flex_1())
-            .child(
-                Button::new("find-next")
-                    .xsmall()
-                    .ghost()
-                    .label(t!("viewer.find_next").to_string())
-                    .on_click(cx.listener(|this, _, _, cx| this.find_step(true, cx))),
-            )
-            .child(
-                toggle(
-                    "find-replace",
-                    self.replace_mode,
-                    t!("viewer.replace").to_string(),
-                )
-                .on_click(cx.listener(|this, _, window, cx| {
-                    this.replace_mode = !this.replace_mode;
-                    if this.replace_mode {
-                        this.find_columns = false;
-                        this.replace_input.update(cx, |s, cx| s.focus(window, cx));
-                    }
-                    cx.notify();
-                })),
-            )
-            .when(self.replace_mode && !self.find_columns, |bar| {
-                bar.child(Input::new(&self.replace_input).xsmall().flex_1())
+                h_flex()
+                    .id("find-mode")
+                    .flex_none()
+                    .px_2()
+                    .gap_1()
+                    .h(tokens::info::SEARCH_FIELD_HEIGHT.rems())
+                    .items_center()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(p.separator)
+                    .bg(p.fill_tertiary)
+                    .cursor_pointer()
+                    .child(self.find_mode_label())
                     .child(
-                        Button::new("replace-one")
-                            .xsmall()
-                            .ghost()
-                            .label(t!("viewer.replace").to_string())
-                            .on_click(cx.listener(|this, _, _, cx| this.replace_current(cx))),
+                        lucide("chevron-down")
+                            .size(tokens::navigator::ROW_ICON.rems())
+                            .text_color(p.label_secondary),
                     )
+                    .on_click(cx.listener(|this, e: &ClickEvent, window, cx| {
+                        this.focus_for_menu(window, cx);
+                        this.find_menu().show(e.position(), window, cx);
+                    })),
+            )
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap_1()
                     .child(
-                        Button::new("replace-all")
-                            .xsmall()
-                            .ghost()
-                            .label(t!("viewer.replace_all").to_string())
-                            .on_click(cx.listener(|this, _, _, cx| this.replace_every(cx))),
+                        h_flex()
+                            .gap_1()
+                            .items_center()
+                            .child(Input::new(&self.find_input).xsmall().flex_1())
+                            .child(
+                                Button::new("find-prev")
+                                    .xsmall()
+                                    .ghost()
+                                    .icon(lucide("chevron-left"))
+                                    .on_click(
+                                        cx.listener(|this, _, _, cx| this.find_step(false, cx)),
+                                    ),
+                            )
+                            .child(
+                                Button::new("find-next")
+                                    .xsmall()
+                                    .ghost()
+                                    .icon(lucide("chevron-right"))
+                                    .on_click(
+                                        cx.listener(|this, _, _, cx| this.find_step(true, cx)),
+                                    ),
+                            )
+                            .child(
+                                Button::new("find-done")
+                                    .xsmall()
+                                    .label(t!("viewer.find_done").to_string())
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.close_find(window, cx)
+                                    })),
+                            ),
                     )
-            })
-            .child(
-                toggle(
-                    "find-case",
-                    self.find_case,
-                    t!("viewer.find_case").to_string(),
-                )
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.find_case = !this.find_case;
-                    this.sync_highlight(cx);
-                })),
-            )
-            .child(
-                toggle(
-                    "find-highlight",
-                    self.find_highlight,
-                    t!("viewer.find_highlight").to_string(),
-                )
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.find_highlight = !this.find_highlight;
-                    this.sync_highlight(cx);
-                })),
-            )
-            .child(
-                toggle(
-                    "find-incremental",
-                    self.find_incremental,
-                    t!("viewer.find_incremental").to_string(),
-                )
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.find_incremental = !this.find_incremental;
-                    cx.notify();
-                })),
+                    .when(self.replace_mode && !self.find_columns, |col| {
+                        col.child(
+                            h_flex()
+                                .gap_1()
+                                .items_center()
+                                .child(Input::new(&self.replace_input).xsmall().flex_1())
+                                .child(
+                                    Button::new("replace-one")
+                                        .xsmall()
+                                        .label(t!("viewer.replace").to_string())
+                                        .on_click(
+                                            cx.listener(|this, _, _, cx| this.replace_current(cx)),
+                                        ),
+                                )
+                                .child(
+                                    Button::new("replace-all")
+                                        .xsmall()
+                                        .label(t!("viewer.replace_all").to_string())
+                                        .on_click(
+                                            cx.listener(|this, _, _, cx| this.replace_every(cx)),
+                                        ),
+                                ),
+                        )
+                    }),
             )
     }
 }

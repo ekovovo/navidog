@@ -54,7 +54,31 @@ const PANEL: &str = "TableViewer";
 const CONTEXT: &str = "TableViewer";
 actions!(
     viewer,
-    [ApplyChanges, ShowFind, FindNext, ShowReplace, ToggleFilter]
+    [
+        ApplyChanges,
+        ShowFind,
+        FindNext,
+        ShowReplace,
+        ToggleFilter,
+        BeginTransaction,
+        CommitTransaction,
+        RollbackTransaction,
+        DesignTable,
+        QueryTable,
+        ApplyFilterSort,
+        ClearFilterSort,
+        RefreshTable,
+        StopLoad,
+        SortAscending,
+        SortDescending,
+        SortNone,
+        FindData,
+        FindReplaceMode,
+        FindColumnsMode,
+        ToggleMatchCase,
+        ToggleHighlight,
+        ToggleIncremental,
+    ]
 );
 
 #[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
@@ -95,6 +119,11 @@ pub(crate) fn init(cx: &mut App) {
         KeyBinding::new("cmd-g", FindNext, Some(CONTEXT)),
         KeyBinding::new("alt-cmd-f", ShowReplace, Some(CONTEXT)),
         KeyBinding::new("cmd-shift-f", ToggleFilter, Some(CONTEXT)),
+        KeyBinding::new("cmd-r", RefreshTable, Some(CONTEXT)),
+        KeyBinding::new("cmd-.", StopLoad, Some(CONTEXT)),
+        KeyBinding::new("ctrl-r", ApplyFilterSort, Some(CONTEXT)),
+        KeyBinding::new("shift-cmd-y", QueryTable, Some(CONTEXT)),
+        KeyBinding::new("cmd-d", DesignTable, Some(CONTEXT)),
     ]);
     register_panel(cx, PANEL, |ctx, window, cx| {
         let object = match ctx.info() {
@@ -224,7 +253,16 @@ impl BasePanel for TableViewer {
         tabs::set_close_guard(panel, guard, cx);
     }
     fn set_active(&mut self, active: bool, _: &mut Window, cx: &mut Context<Self>) {
-        tabs::set_active(PanelId::from(cx.entity_id()), active, cx);
+        let panel = PanelId::from(cx.entity_id());
+        tabs::set_active(panel, active, cx);
+        tabs::set_surface(
+            panel,
+            active,
+            tabs::MenuSurface::Table,
+            self.in_transaction,
+            self.show_filter,
+            cx,
+        );
         let workspace = Workspace::global(cx);
         if active {
             // The info pane and the navigator follow the tab, not the last tree click.
@@ -316,15 +354,20 @@ impl BasePanel for TableViewer {
 impl Panel for TableViewer {
     fn title(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let store = navidog_core::store::ConnectionStore::global(cx);
-        let color = store
-            .read(cx)
-            .get(&self.object.scope.connection)
-            .and_then(|c| c.color.clone());
+        let (color, connection) = match store.read(cx).get(&self.object.scope.connection) {
+            Some(c) => (c.color.clone(), Some(c.name.clone())),
+            None => (None, None),
+        };
         let pending = self.needs_close_prompt(cx);
+        let label = tabs::object_label(
+            &self.object.name,
+            Some(&self.object.scope.database),
+            connection.as_deref(),
+        );
         tabs::title(
             PanelId::from(cx.entity_id()),
             Some(lucide("table")),
-            self.object.name.clone(),
+            label,
             color.and_then(|c| tokens::connection_color(&c, cx)),
             pending,
         )
@@ -454,11 +497,19 @@ impl TableViewer {
                 }
             };
             let subs = vec![
-                cx.subscribe_in(&find_input, window, |this, _, e: &InputEvent, _, cx| {
-                    if matches!(e, InputEvent::Change) && this.find_incremental {
-                        this.find_step(false, cx);
-                    } else if matches!(e, InputEvent::Change) {
-                        this.sync_highlight(cx);
+                cx.subscribe_in(
+                    &find_input,
+                    window,
+                    |this, _, e: &InputEvent, _, cx| match e {
+                        InputEvent::PressEnter { .. } => this.find_step(true, cx),
+                        InputEvent::Change if this.find_incremental => this.find_step(false, cx),
+                        InputEvent::Change => this.sync_highlight(cx),
+                        _ => {}
+                    },
+                ),
+                cx.subscribe_in(&replace_input, window, |this, _, e: &InputEvent, _, cx| {
+                    if matches!(e, InputEvent::PressEnter { .. }) {
+                        this.replace_current(cx);
                     }
                 }),
                 cx.subscribe_in(&filter, window, apply_on_enter),
@@ -548,7 +599,7 @@ impl TableViewer {
                             if let Some(s) = this.session.take() {
                                 close_session(s);
                             }
-                            this.in_transaction = false;
+                            this.set_in_transaction(false, cx);
                             this.status = t!("viewer.closed").to_string().into();
                             cx.notify();
                         }
@@ -914,7 +965,7 @@ impl TableViewer {
                 match result {
                     Ok(()) => {
                         if end_transaction {
-                            this.in_transaction = false;
+                            this.set_in_transaction(false, cx);
                         }
                         // Committed from the close prompt: nothing to reload, the tab goes
                         if std::mem::take(&mut this.close_after_commit) {
@@ -993,11 +1044,72 @@ impl TableViewer {
         .detach();
     }
 
+    fn note_menu(&self, cx: &mut Context<Self>) {
+        tabs::set_table_menu(
+            PanelId::from(cx.entity_id()),
+            self.in_transaction,
+            self.show_filter,
+            cx,
+        );
+    }
+
+    fn set_in_transaction(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.in_transaction = on;
+        self.note_menu(cx);
+    }
+
+    fn toggle_filter_pane(&mut self, cx: &mut Context<Self>) {
+        self.show_filter = !self.show_filter;
+        self.note_menu(cx);
+        cx.notify();
+    }
+
+    /// "Query Table": `SELECT * FROM` this table, in a new query, then run.
+    fn query_table(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let dialect = self.dialect.unwrap_or(Dialect::Sqlite);
+        let sql = format!(
+            "SELECT * FROM {}",
+            dialect.qualified(&self.object.scope, &self.object.name)
+        );
+        window.dispatch_action(
+            Box::new(navidog_core::actions::NewQueryText {
+                connection: self.object.scope.connection.clone().into(),
+                database: self.object.scope.database.clone().into(),
+                schema: self.object.scope.schema.clone().map(Into::into),
+                sql: sql.into(),
+            }),
+            cx,
+        );
+    }
+
+    fn sort_focused(&mut self, dir: Option<bool>, cx: &mut Context<Self>) {
+        let col = self.grid.read(cx).model(cx).head().1;
+        if self.grid.read(cx).model(cx).columns.get(col).is_none() {
+            return;
+        }
+        self.grid.update(cx, |g, cx| {
+            g.request_sort(dir.map(|_| col), dir.unwrap_or(true), cx)
+        });
+    }
+
+    fn clear_filter_sort(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.rules.clear();
+        self.sorts.clear();
+        self.grouped = false;
+        self.group_negate = false;
+        self.filter
+            .update(cx, |s, cx| s.set_value(String::new(), window, cx));
+        self.order
+            .update(cx, |s, cx| s.set_value(String::new(), window, cx));
+        self.page = 0;
+        self.reload_committed(true, window, cx);
+    }
+
     fn begin_transaction(&mut self, cx: &mut Context<Self>) {
         let Some(d) = self.dialect else { return };
         self.run_simple(
             d.begin_transaction(),
-            |this, _| this.in_transaction = true,
+            |this, cx| this.set_in_transaction(true, cx),
             cx,
         );
     }
@@ -1006,7 +1118,7 @@ impl TableViewer {
         self.run_simple(
             "ROLLBACK",
             |this, cx| {
-                this.in_transaction = false;
+                this.set_in_transaction(false, cx);
                 this.reload(true, cx);
             },
             cx,
@@ -1224,10 +1336,7 @@ impl TableViewer {
             .child(
                 button("toggle-filter", "funnel", t!("viewer.filter").to_string())
                     .selected(self.show_filter)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.show_filter = !this.show_filter;
-                        cx.notify();
-                    })),
+                    .on_click(cx.listener(|this, _, _, cx| this.toggle_filter_pane(cx))),
             )
             .child(
                 button("viewer-find", "search", t!("viewer.find").to_string())
@@ -1540,8 +1649,56 @@ impl Render for TableViewer {
                 this.show_find = true;
                 this.find_step(true, cx);
             }))
-            .on_action(cx.listener(|this, _: &ToggleFilter, _, cx| {
-                this.show_filter = !this.show_filter;
+            .on_action(cx.listener(|this, _: &ToggleFilter, _, cx| this.toggle_filter_pane(cx)))
+            .on_action(cx.listener(|this, _: &BeginTransaction, _, cx| this.begin_transaction(cx)))
+            .on_action(cx.listener(|this, _: &CommitTransaction, window, cx| {
+                this.apply_changes(true, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &RollbackTransaction, _, cx| this.rollback(cx)))
+            .on_action(cx.listener(|this, _: &QueryTable, window, cx| this.query_table(window, cx)))
+            .on_action(|_: &DesignTable, _, _| {})
+            .on_action(
+                cx.listener(|this, _: &ApplyFilterSort, window, cx| this.apply_filter(window, cx)),
+            )
+            .on_action(cx.listener(|this, _: &ClearFilterSort, window, cx| {
+                this.clear_filter_sort(window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &RefreshTable, window, cx| {
+                this.reload_committed(true, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &StopLoad, _, _| this.stop()))
+            .on_action(
+                cx.listener(|this, _: &SortAscending, _, cx| this.sort_focused(Some(true), cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &SortDescending, _, cx| this.sort_focused(Some(false), cx)),
+            )
+            .on_action(cx.listener(|this, _: &SortNone, _, cx| this.sort_focused(None, cx)))
+            .on_action(cx.listener(|this, _: &FindData, window, cx| {
+                this.find_columns = false;
+                this.replace_mode = false;
+                this.open_find(false, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &FindReplaceMode, window, cx| {
+                this.find_columns = false;
+                this.open_find(true, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &FindColumnsMode, window, cx| {
+                this.find_columns = true;
+                this.replace_mode = false;
+                this.open_find(false, window, cx);
+                this.find_step(false, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ToggleMatchCase, _, cx| {
+                this.find_case = !this.find_case;
+                this.sync_highlight(cx);
+            }))
+            .on_action(cx.listener(|this, _: &ToggleHighlight, _, cx| {
+                this.find_highlight = !this.find_highlight;
+                this.sync_highlight(cx);
+            }))
+            .on_action(cx.listener(|this, _: &ToggleIncremental, _, cx| {
+                this.find_incremental = !this.find_incremental;
                 cx.notify();
             }))
             .on_action(cx.listener(|this, a: &PickField, _, cx| {

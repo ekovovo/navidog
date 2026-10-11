@@ -198,6 +198,7 @@ impl ExplainView {
                 .map(|r| r.iter().map(|v| v.clone().map(Into::into)).collect())
                 .collect();
             grid.update(cx, |g, cx| {
+                g.set_quick_filter(false);
                 g.set_data(columns, rows, cx);
                 g.set_locked(true, cx);
             });

@@ -82,14 +82,19 @@ impl Panel for DdlPanel {
     fn title(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let icon = lucide(crate::navigator::kind_icon(self.object.kind));
         let store = navidog_core::store::ConnectionStore::global(cx);
-        let color = store
-            .read(cx)
-            .get(&self.object.scope.connection)
-            .and_then(|c| c.color.clone());
+        let (color, connection) = match store.read(cx).get(&self.object.scope.connection) {
+            Some(c) => (c.color.clone(), Some(c.name.clone())),
+            None => (None, None),
+        };
+        let label = tabs::object_label(
+            &self.object.name,
+            Some(self.object.scope.database.as_str()),
+            connection.as_deref(),
+        );
         tabs::title(
             PanelId::from(cx.entity_id()),
             Some(icon),
-            self.object.name.clone(),
+            label,
             color.and_then(|c| navidog_ui::tokens::connection_color(&c, cx)),
             false,
         )

@@ -60,8 +60,10 @@ pub fn run() {
             set_dock_icon();
             menus::bind_keys(cx);
             menus::set_menus(cx);
-            // Checked menu items (results position, profile, …) follow the settings
+            // Checked menu items follow the settings; the query and table menus follow the active tab
             cx.observe_global::<Settings>(menus::set_menus).detach();
+            cx.observe_global::<navidog_ui::tabs::ActiveMenu>(menus::set_menus)
+                .detach();
             register_app_actions(cx);
 
             let state = AppState::load();

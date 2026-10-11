@@ -271,6 +271,9 @@ viewer:
   close_find:
     en: Close
     zh-CN: 关闭
+  find_done:
+    en: Done
+    zh-CN: 完成
   find_data:
     en: Find Data
     zh-CN: 查找数据

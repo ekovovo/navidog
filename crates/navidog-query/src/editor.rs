@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use gpui_kit::component::button::{Button, ButtonCustomVariant, ButtonVariants as _};
+use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dock::{
     BasePanel, Panel, PanelEvent, PanelId, PanelInfo, PanelState, TabGroup, panel_handle,
     register_panel,
@@ -20,7 +21,8 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, AppContext as _, ClickEvent, Context, Entity, EventEmitter, FocusHandle, Focusable,
     InteractiveElement as _, IntoElement, KeyBinding, ParentElement as _, Render, SharedString,
-    Styled as _, Subscription, Task, WeakEntity, Window, actions, div, px,
+    StatefulInteractiveElement as _, Styled as _, Subscription, Task, WeakEntity, Window, actions,
+    div, px,
 };
 use navidog_core::actions::OpenConnectionId;
 use navidog_core::object::{ObjectRef, Scope};
@@ -30,6 +32,7 @@ use navidog_core::workspace::{Selection, Workspace};
 use navidog_db::dialect::Dialect;
 use navidog_db::sessions::{ConnState, Sessions, SessionsEvent};
 use navidog_ui::assets::lucide;
+use navidog_ui::skin::truncated;
 use navidog_ui::{palette, tabs, tokens};
 use navidog_util::sql_format::CommentMode;
 use rust_i18n::t;
@@ -57,6 +60,7 @@ actions!(
         ResultsBelow,
         ResultsBeside,
         ResultsNewPage,
+        ShowResults,
         ShowResultAfterRun,
         ShowMessagesAfterRun,
         ShowSummaryAfterRun,
@@ -274,7 +278,9 @@ impl BasePanel for QueryEditor {
     }
 
     fn set_active(&mut self, active: bool, window: &mut Window, cx: &mut Context<Self>) {
-        tabs::set_active(PanelId::from(cx.entity_id()), active, cx);
+        let panel = PanelId::from(cx.entity_id());
+        tabs::set_active(panel, active, cx);
+        tabs::set_surface(panel, active, tabs::MenuSurface::Query, false, false, cx);
         if active {
             set_active_editor(cx.entity().downgrade(), cx);
             self.publish_context(cx);
@@ -307,10 +313,16 @@ impl Panel for QueryEditor {
             .as_ref()
             .and_then(|id| ConnectionStore::global(cx).read(cx).get(id))
             .and_then(|c| c.color.clone());
+        let conn = self.connection_name(cx);
+        let label = tabs::object_label(
+            &self.display_name(),
+            self.target.database.as_deref(),
+            (!conn.is_empty()).then_some(conn.as_str()),
+        );
         tabs::title(
             PanelId::from(cx.entity_id()),
             Some(lucide("file-code")),
-            self.display_name(),
+            label,
             color.and_then(|c| tokens::connection_color(&c, cx)),
             self.dirty && !self.close_approved,
         )
@@ -479,6 +491,22 @@ impl QueryEditor {
     /// Runs everything (the navigator's "Open Query").
     pub fn run_all(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.run(RunKind::All, window, cx);
+    }
+
+    /// "Query Table": an untitled editor holding `sql`, then the shell runs it.
+    pub fn from_sql(
+        target: Target,
+        sql: String,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Entity<Self> {
+        Self::new(
+            QuerySource::Untitled(next_untitled()),
+            target,
+            sql,
+            window,
+            cx,
+        )
     }
 
     /// A new untitled query at the workspace selection (⌘Y, toolbar "New Query").
@@ -1006,13 +1034,34 @@ impl QueryEditor {
                 .label(label)
         };
         let picker = |id: &'static str, icon: &'static str, label: String, empty: bool| {
-            Button::new(id)
-                .small()
-                .ghost()
-                .icon(lucide(icon))
-                .label(label)
+            let mut glyph = lucide(icon);
+            if let Some(color) = tokens::icon_color(icon, cx) {
+                glyph = glyph.text_color(color);
+            }
+            h_flex()
+                .id(id)
+                .flex_none()
                 .w(tokens::query::PICKER_WIDTH.rems())
-                .when(empty, |b| b.text_color(p.label_secondary))
+                .h(tokens::info::SEARCH_FIELD_HEIGHT.rems())
+                .px_1()
+                .gap_1()
+                .items_center()
+                .rounded_md()
+                .border_1()
+                .border_color(p.separator)
+                .bg(p.fill_tertiary)
+                .cursor_pointer()
+                .child(glyph.size(tokens::navigator::ROW_ICON.rems()))
+                .child(
+                    truncated(SharedString::from(format!("{id}-label")), label)
+                        .flex_1()
+                        .text_color(if empty { p.label_secondary } else { p.label }),
+                )
+                .child(
+                    lucide("chevron-down")
+                        .size(tokens::navigator::ROW_ICON.rems())
+                        .text_color(p.label_secondary),
+                )
         };
         let store = ConnectionStore::global(cx);
         let conn_name = self
@@ -1023,136 +1072,196 @@ impl QueryEditor {
             .map(|c| c.name.clone());
         let pg = self.dialect(cx) == Some(Dialect::Postgres);
         let selected = self.has_selection(cx);
-        h_flex()
-            .h(tokens::query::TOOLBAR_HEIGHT.rems())
-            .px_2()
-            .gap_1()
-            .min_w_0()
-            .overflow_hidden()
-            .border_b_1()
-            .border_color(p.separator)
+        let show_results = Settings::global(cx).results_position == ResultsPosition::NewPage
+            && !self.results_page
+            && self.results.has_run();
+        v_flex()
             .child(
-                picker(
-                    "query-connection",
-                    "plug",
-                    conn_name
-                        .clone()
-                        .unwrap_or_else(|| t!("query.connection").to_string()),
-                    conn_name.is_none(),
-                )
-                .on_click(cx.listener(|this, e: &ClickEvent, window, cx| {
-                    this.focus_for_menu(window, cx);
-                    this.connection_menu(cx).show(e.position(), window, cx);
-                })),
-            )
-            .child(
-                picker(
-                    "query-database",
-                    "database",
-                    self.target
-                        .database
-                        .clone()
-                        .unwrap_or_else(|| t!("query.database").to_string()),
-                    self.target.database.is_none(),
-                )
-                .disabled(self.target.connection.is_none())
-                .on_click(cx.listener(|this, e: &ClickEvent, window, cx| {
-                    this.focus_for_menu(window, cx);
-                    this.database_menu(cx).show(e.position(), window, cx);
-                })),
-            )
-            .when(pg, |bar| {
-                bar.child(
-                    picker(
-                        "query-schema",
-                        "layers",
-                        self.target
-                            .schema
-                            .clone()
-                            .unwrap_or_else(|| t!("query.schema").to_string()),
-                        self.target.schema.is_none(),
+                h_flex()
+                    .h(tokens::query::TOOLBAR_HEIGHT.rems())
+                    .px_2()
+                    .gap_1()
+                    .min_w_0()
+                    .items_center()
+                    .overflow_hidden()
+                    .border_b_1()
+                    .border_color(p.separator)
+                    .child(
+                        button("query-save", "save", t!("query.save").to_string()).on_click(
+                            cx.listener(|this, _, window, cx| this.save_query(false, window, cx)),
+                        ),
                     )
-                    .disabled(self.schemas.is_empty())
-                    .on_click(cx.listener(
-                        |this, e: &ClickEvent, window, cx| {
-                            this.focus_for_menu(window, cx);
-                            this.schema_menu().show(e.position(), window, cx);
-                        },
-                    )),
-                )
-            })
-            .child(separator(cx))
-            .child(
-                button("query-run", "play", t!("query.run").to_string())
-                    .disabled(self.running)
-                    .on_click(
-                        cx.listener(|this, _, window, cx| this.run(RunKind::All, window, cx)),
+                    .child(separator(cx))
+                    .child(
+                        button(
+                            "query-beautify",
+                            "wand-sparkles",
+                            t!("query.beautify").to_string(),
+                        )
+                        .on_click(|_, window, cx| {
+                            window.dispatch_action(Box::new(crate::format::Beautify), cx)
+                        }),
+                    )
+                    .child(
+                        button(
+                            "query-snippets",
+                            "scroll-text",
+                            t!("query.snippets").to_string(),
+                        )
+                        .on_click(|_, window, cx| {
+                            window
+                                .dispatch_action(Box::new(navidog_core::actions::ShowSnippets), cx)
+                        }),
+                    )
+                    .child(
+                        button("query-builder", "blocks", t!("query.builder").to_string())
+                            .disabled(true),
+                    )
+                    .child(div().flex_1())
+                    .child(
+                        Button::new("query-focus-mode")
+                            .ghost()
+                            .small()
+                            .icon(lucide("scan"))
+                            .tooltip(t!("query.focus_mode").to_string())
+                            .on_click(|_, window, cx| {
+                                window.dispatch_action(
+                                    Box::new(navidog_core::actions::ToggleFocusMode),
+                                    cx,
+                                )
+                            }),
                     ),
             )
             .child(
-                Button::new("query-run-menu")
-                    .ghost()
-                    .xsmall()
-                    .icon(lucide("chevron-down"))
-                    .disabled(self.running)
-                    .on_click(cx.listener(|this, e: &ClickEvent, window, cx| {
-                        this.focus_for_menu(window, cx);
-                        this.run_menu(cx).show(e.position(), window, cx);
-                    })),
-            )
-            .child(
-                button("query-stop", "circle-stop", t!("query.stop").to_string())
-                    .disabled(!self.running)
-                    .on_click(cx.listener(|this, _, _, cx| this.stop(cx))),
-            )
-            .child(
-                button(
-                    "query-explain",
-                    "list-tree",
-                    if selected {
-                        t!("query.explain_selected").to_string()
-                    } else {
-                        t!("query.explain").to_string()
-                    },
-                )
-                .disabled(self.running)
-                .on_click(
-                    cx.listener(|this, _, window, cx| this.run(RunKind::Explain, window, cx)),
-                ),
-            )
-            .child(separator(cx))
-            .child(
-                button(
-                    "query-beautify",
-                    "wand-sparkles",
-                    t!("query.beautify").to_string(),
-                )
-                .on_click(|_, window, cx| {
-                    window.dispatch_action(Box::new(crate::format::Beautify), cx)
-                }),
-            )
-            .child(
-                button(
-                    "query-snippets",
-                    "scroll-text",
-                    t!("query.snippets").to_string(),
-                )
-                .on_click(|_, window, cx| {
-                    window.dispatch_action(Box::new(navidog_core::actions::ShowSnippets), cx)
-                }),
-            )
-            .child(
-                button("query-builder", "blocks", t!("query.builder").to_string()).disabled(true),
-            )
-            .child(div().flex_1())
-            .child(
-                Button::new("query-focus-mode")
-                    .ghost()
-                    .small()
-                    .icon(lucide("scan"))
-                    .tooltip(t!("query.focus_mode").to_string())
-                    .on_click(|_, window, cx| {
-                        window.dispatch_action(Box::new(navidog_core::actions::ToggleFocusMode), cx)
+                h_flex()
+                    .h(tokens::query::TOOLBAR_HEIGHT.rems())
+                    .px_2()
+                    .gap_1()
+                    .min_w_0()
+                    .items_center()
+                    .overflow_hidden()
+                    .border_b_1()
+                    .border_color(p.separator)
+                    .child(
+                        picker(
+                            "query-connection",
+                            "plug",
+                            conn_name
+                                .clone()
+                                .unwrap_or_else(|| t!("query.connection").to_string()),
+                            conn_name.is_none(),
+                        )
+                        .on_click(cx.listener(
+                            |this, e: &ClickEvent, window, cx| {
+                                this.focus_for_menu(window, cx);
+                                this.connection_menu(cx).show(e.position(), window, cx);
+                            },
+                        )),
+                    )
+                    .child(
+                        picker(
+                            "query-database",
+                            "database",
+                            self.target
+                                .database
+                                .clone()
+                                .unwrap_or_else(|| t!("query.database").to_string()),
+                            self.target.database.is_none(),
+                        )
+                        .when(self.target.connection.is_none(), |d| d.opacity(0.4))
+                        .on_click(cx.listener(
+                            |this, e: &ClickEvent, window, cx| {
+                                if this.target.connection.is_none() {
+                                    return;
+                                }
+                                this.focus_for_menu(window, cx);
+                                this.database_menu(cx).show(e.position(), window, cx);
+                            },
+                        )),
+                    )
+                    .when(pg, |bar| {
+                        bar.child(
+                            picker(
+                                "query-schema",
+                                "layers",
+                                self.target
+                                    .schema
+                                    .clone()
+                                    .unwrap_or_else(|| t!("query.schema").to_string()),
+                                self.target.schema.is_none(),
+                            )
+                            .when(self.schemas.is_empty(), |d| d.opacity(0.4))
+                            .on_click(cx.listener(
+                                |this, e: &ClickEvent, window, cx| {
+                                    if this.schemas.is_empty() {
+                                        return;
+                                    }
+                                    this.focus_for_menu(window, cx);
+                                    this.schema_menu().show(e.position(), window, cx);
+                                },
+                            )),
+                        )
+                    })
+                    .child(
+                        button("query-run", "play", t!("query.run").to_string())
+                            .disabled(self.running)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.run(RunKind::All, window, cx)
+                            })),
+                    )
+                    .child(
+                        Button::new("query-run-menu")
+                            .ghost()
+                            .xsmall()
+                            .icon(lucide("chevron-down"))
+                            .disabled(self.running)
+                            .on_click(cx.listener(|this, e: &ClickEvent, window, cx| {
+                                this.focus_for_menu(window, cx);
+                                this.run_menu(cx).show(e.position(), window, cx);
+                            })),
+                    )
+                    .child(
+                        Checkbox::new("query-continue")
+                            .label(t!("query.continue_on_error").to_string())
+                            .checked(Settings::global(cx).continue_on_error)
+                            .on_click(|checked: &bool, _, cx| {
+                                let on = *checked;
+                                Settings::update(cx, |s| s.continue_on_error = on);
+                            }),
+                    )
+                    .child(
+                        button("query-stop", "circle-stop", t!("query.stop").to_string())
+                            .disabled(!self.running)
+                            .on_click(cx.listener(|this, _, _, cx| this.stop(cx))),
+                    )
+                    .child(
+                        button(
+                            "query-explain",
+                            "list-tree",
+                            if selected {
+                                t!("query.explain_selected").to_string()
+                            } else {
+                                t!("query.explain").to_string()
+                            },
+                        )
+                        .disabled(self.running)
+                        .on_click(
+                            cx.listener(|this, _, window, cx| {
+                                this.run(RunKind::Explain, window, cx)
+                            }),
+                        ),
+                    )
+                    .when(show_results, |bar| {
+                        bar.child(
+                            button(
+                                "query-show-results",
+                                "square",
+                                t!("query.show_results").to_string(),
+                            )
+                            .on_click(|_, window, cx| {
+                                window.dispatch_action(Box::new(ShowResults), cx)
+                            }),
+                        )
                     }),
             )
     }
@@ -1347,8 +1456,24 @@ impl Render for QueryEditor {
                 set_position(ResultsPosition::Beside, cx);
                 this.results_page = false;
             }))
-            .on_action(cx.listener(|_, _: &ResultsNewPage, _, cx| {
+            .on_action(cx.listener(|this, _: &ResultsNewPage, _, cx| {
                 set_position(ResultsPosition::NewPage, cx);
+                if this.results.has_run() {
+                    this.results_page = true;
+                }
+                cx.notify();
+            }))
+            .on_action(
+                cx.listener(|this, _: &crate::results::BackToEditor, _, cx| {
+                    this.results_page = false;
+                    cx.notify();
+                }),
+            )
+            .on_action(cx.listener(|this, _: &ShowResults, _, cx| {
+                if this.results.has_run() {
+                    this.results_page = true;
+                    cx.notify();
+                }
             }))
             .on_action(|_: &ShowResultAfterRun, _, cx| {
                 Settings::update(cx, |s| s.show_after_run = ShowAfterRun::Result)
@@ -1421,6 +1546,16 @@ impl Render for QueryEditor {
             .on_action(
                 cx.listener(|this, _: &crate::find::ToggleFindWholeWord, window, cx| {
                     this.toggle_find_option(|o| o.whole_word = !o.whole_word, window, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &crate::find::FindLiteral, window, cx| {
+                    this.open_find(false, window, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &crate::find::FindReplace, window, cx| {
+                    this.open_find(true, window, cx)
                 }),
             )
             .on_action(

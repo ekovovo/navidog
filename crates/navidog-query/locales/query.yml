@@ -297,6 +297,12 @@ query:
   find:
     en: Find
     zh-CN: 查找
+  find_done:
+    en: Done
+    zh-CN: 完成
+  show_results:
+    en: Show Results
+    zh-CN: 显示结果
   replace:
     en: Replace
     zh-CN: 替换

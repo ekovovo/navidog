@@ -58,6 +58,16 @@ pub struct RunQuery {
     pub object: ObjectRef,
 }
 
+/// "Query Table": a new query holding `sql`, aimed at this connection, then run.
+#[derive(Clone, PartialEq, Debug, Action)]
+#[action(namespace = query, no_json)]
+pub struct NewQueryText {
+    pub connection: SharedString,
+    pub database: SharedString,
+    pub schema: Option<SharedString>,
+    pub sql: SharedString,
+}
+
 /// A saved query file was renamed; open editors follow it.
 #[derive(Clone, PartialEq, Debug, Action)]
 #[action(namespace = query, no_json)]

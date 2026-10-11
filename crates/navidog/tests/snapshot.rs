@@ -165,6 +165,16 @@ mod macos {
         );
         wait(&mut cx, |_| false);
         shot(&mut cx, "viewer.png");
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            window.click("viewer-find", cx);
+            window.dispatch_action(Box::new(navidog_grid::ShowReplace), cx);
+        })
+        .unwrap();
+        shot(&mut cx, "viewer-find.png");
+        cx.update(|cx| Theme::change(ThemeMode::Dark, None, cx));
+        shot(&mut cx, "viewer-find-dark.png");
+        cx.update(|cx| Theme::change(ThemeMode::Light, None, cx));
         let actor_ref = actor.clone();
         let wide = ObjectRef {
             name: "wide".into(),
@@ -224,10 +234,22 @@ mod macos {
         })
         .unwrap();
         wait(&mut cx, |_| false);
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            let focus = editor.read(cx).focus_handle(cx);
+            window.focus(&focus, cx);
+            window.dispatch_action(Box::new(navidog_grid::ShowReplace), cx);
+        })
+        .unwrap();
         shot(&mut cx, "query.png");
         cx.update(|cx| Theme::change(ThemeMode::Dark, None, cx));
         shot(&mut cx, "query-dark.png");
         cx.update(|cx| Theme::change(ThemeMode::Light, None, cx));
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            window.click("find-done", cx);
+        })
+        .unwrap();
         cx.update_window(handle, |_, window, cx| {
             editor.update(cx, |e, cx| {
                 e.set_text("SELECT a.first_name, f.title FROM actor a JOIN film_actor fa ON fa.actor_id = a.id JOIN film f ON f.id = fa.film_id WHERE a.id = 1", window, cx);

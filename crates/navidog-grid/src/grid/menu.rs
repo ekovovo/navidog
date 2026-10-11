@@ -47,7 +47,9 @@ impl ResultGrid {
             .menu(t!("grid.copy").to_string(), Box::new(Copy))
             .submenu(t!("grid.copy_as").to_string(), sub)
             .menu(t!("grid.paste").to_string(), Box::new(Paste));
-        if let Some((column, value, is_null)) = self.filter_target(cx) {
+        if self.quick_filter
+            && let Some((column, value, is_null)) = self.filter_target(cx)
+        {
             let shown = menu_value(&value);
             menu = menu.separator();
             if is_null {

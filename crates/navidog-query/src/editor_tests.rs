@@ -6,9 +6,9 @@ use std::time::{Duration, Instant};
 
 use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{
-    AnyWindowHandle, AppContext as _, Context, Entity, EntityInputHandler as _, IntoElement,
-    ParentElement as _, Render, Styled as _, TestAppContext, Window, WindowBounds, WindowOptions,
-    div, size,
+    AnyWindowHandle, AppContext as _, Context, Entity, EntityInputHandler as _, Focusable as _,
+    IntoElement, ParentElement as _, Render, Styled as _, TestAppContext, Window, WindowBounds,
+    WindowOptions, div, size,
 };
 use navidog_core::connection::Connection;
 use navidog_core::crypto::Key;
@@ -262,6 +262,24 @@ fn runs_scripts_into_messages_summary_and_editable_results(cx: &mut TestAppConte
             Body::Explain(_)
         ));
     });
+
+    // An existing result stays on the new page; back returns to the editor; show results returns.
+    let go = |cx: &mut TestAppContext, action: Box<dyn gpui_kit::Action>| {
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            let focus = editor.read(cx).focus_handle(cx);
+            window.focus(&focus, cx);
+            window.dispatch_action(action, cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+    };
+    go(cx, Box::new(crate::editor::ResultsNewPage));
+    cx.update(|cx| assert!(editor.read(cx).results_page));
+    go(cx, Box::new(crate::results::BackToEditor));
+    cx.update(|cx| assert!(!editor.read(cx).results_page));
+    go(cx, Box::new(crate::editor::ShowResults));
+    cx.update(|cx| assert!(editor.read(cx).results_page));
 }
 
 #[gpui_kit::test]

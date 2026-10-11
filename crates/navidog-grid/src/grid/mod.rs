@@ -172,6 +172,8 @@ pub struct ResultGrid {
     pub show_rowid: bool,
     /// Local columns that reference another table (F-DATA-012)
     foreign_keys: Vec<String>,
+    /// Query results have no WHERE pane, so the context menu skips quick filters.
+    quick_filter: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -242,8 +244,24 @@ impl ResultGrid {
             raw: false,
             show_rowid: false,
             foreign_keys: Vec::new(),
+            quick_filter: true,
             _subscriptions: subs,
         }
+    }
+
+    /// Turns the context menu's quick-filter items on or off.
+    pub fn set_quick_filter(&mut self, on: bool) {
+        self.quick_filter = on;
+    }
+
+    /// Same path as a header click: `None` clears the sort.
+    pub fn request_sort(&mut self, column: Option<usize>, asc: bool, cx: &mut Context<Self>) {
+        self.table.update(cx, |t, cx| {
+            let d = t.delegate_mut();
+            d.sort = column.map(|c| (c, asc));
+            d.sort_changed = true;
+            cx.notify();
+        });
     }
 
     pub fn set_foreign_keys(&mut self, columns: Vec<String>, cx: &mut Context<Self>) {
@@ -762,7 +780,7 @@ pub fn auto_width<'a>(header: &str, values: impl IntoIterator<Item = &'a str>, e
     const PAD: f32 = 26.;
     const MIN: f32 = 56.;
     const MAX: f32 = 460.;
-    px((units * em * LATIN_EM + PAD).clamp(MIN, MAX))
+    px((units * em * LATIN_EM + PAD).clamp(MIN, MAX)) // raw-px: same estimate as the constants above
 }
 
 fn grid_em(rem: Pixels, cx: &App) -> Pixels {
@@ -846,7 +864,7 @@ mod tests {
         let names = ["id", "name"].map(SharedString::from);
         // raw-px: arbitrary widths; the first reported width is the marker column
         let shown = [px(80.), px(140.)];
-        let reported = [px(20.), px(80.), px(200.)];
+        let reported = [px(20.), px(80.), px(200.)]; // raw-px: marker column plus the two shown widths
         let changed = widths_the_drag_changed(&names, &shown, &reported);
         assert_eq!(changed.get("id"), None);
         assert_eq!(changed.get("name"), Some(&200.));

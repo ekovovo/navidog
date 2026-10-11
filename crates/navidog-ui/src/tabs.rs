@@ -75,6 +75,7 @@ impl Global for Tabs {}
 
 pub fn init(cx: &mut App) {
     cx.set_global(Tabs::default());
+    cx.set_global(ActiveMenu::default());
     cx.on_action(|_: &CloseTab, cx| close(None, Close::This, cx));
     cx.on_action(|a: &CloseTabs, cx| close(a.panel, a.which, cx));
     cx.on_action(|_: &NextTab, cx| cycle(1, cx));
@@ -128,6 +129,85 @@ pub fn detach(panel: PanelId, cx: &mut App) {
 
 pub fn active(cx: &App) -> Option<PanelId> {
     cx.try_global::<Tabs>()?.active
+}
+
+/// Which editor the menu bar follows. Query and table insert their own menu; everything else
+/// keeps the base menus (10-shell.md §9).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum MenuSurface {
+    #[default]
+    Other,
+    Query,
+    Table,
+}
+
+/// The object pane's active editor, observed by the shell when it rebuilds the menu bar.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct ActiveMenu {
+    pub surface: MenuSurface,
+    panel: Option<PanelId>,
+    pub table_in_transaction: bool,
+    pub filter_open: bool,
+}
+
+impl Global for ActiveMenu {}
+
+pub fn active_menu(cx: &App) -> ActiveMenu {
+    cx.try_global::<ActiveMenu>().copied().unwrap_or_default()
+}
+
+/// `active == false` clears the record only when `panel` is the one currently shown, so
+/// deactivating the previous tab cannot wipe the tab that just became active.
+pub fn set_surface(
+    panel: PanelId,
+    active: bool,
+    surface: MenuSurface,
+    in_transaction: bool,
+    filter_open: bool,
+    cx: &mut App,
+) {
+    let current = active_menu(cx);
+    let next = if active {
+        ActiveMenu {
+            surface,
+            panel: Some(panel),
+            table_in_transaction: in_transaction,
+            filter_open,
+        }
+    } else if current.panel == Some(panel) {
+        ActiveMenu::default()
+    } else {
+        return;
+    };
+    if current != next {
+        cx.set_global(next);
+    }
+}
+
+/// Table-only menu checks (transaction, filter pane) while that table stays active.
+pub fn set_table_menu(panel: PanelId, in_transaction: bool, filter_open: bool, cx: &mut App) {
+    let current = active_menu(cx);
+    if current.panel != Some(panel)
+        || (current.table_in_transaction == in_transaction && current.filter_open == filter_open)
+    {
+        return;
+    }
+    cx.set_global(ActiveMenu {
+        table_in_transaction: in_transaction,
+        filter_open,
+        ..current
+    });
+}
+
+/// `名称 @库 (连接名)`. Either piece missing leaves just the name.
+pub fn object_label(name: &str, database: Option<&str>, connection: Option<&str>) -> String {
+    match (
+        database.map(str::trim).filter(|s| !s.is_empty()),
+        connection.map(str::trim).filter(|s| !s.is_empty()),
+    ) {
+        (Some(database), Some(connection)) => format!("{name} @{database} ({connection})"),
+        _ => name.to_string(),
+    }
 }
 
 pub fn group_of(panel: PanelId, cx: &App) -> Option<Entity<TabGroup>> {
@@ -331,5 +411,20 @@ mod tests {
         assert_eq!(targets(&ids, p(2), Close::Right), [p(3), p(4)]);
         assert_eq!(targets(&ids, p(4), Close::Right), []);
         assert_eq!(targets(&ids, p(9), Close::All), []);
+    }
+
+    #[test]
+    fn object_label_names_the_database_and_connection() {
+        assert_eq!(
+            object_label("actor", Some("sakila"), Some("本地")),
+            "actor @sakila (本地)"
+        );
+        assert_eq!(
+            object_label("无标题", Some("main"), Some("unofs")),
+            "无标题 @main (unofs)"
+        );
+        assert_eq!(object_label("actor", None, Some("本地")), "actor");
+        assert_eq!(object_label("actor", Some(""), Some("本地")), "actor");
+        assert_eq!(object_label("actor", Some("sakila"), None), "actor");
     }
 }

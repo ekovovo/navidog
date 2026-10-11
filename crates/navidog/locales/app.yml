@@ -315,6 +315,69 @@ menu:
   report_issue:
     en: Report an Issue
     zh-CN: 反馈问题
+  query:
+    en: Query
+    zh-CN: 查询
+  run:
+    en: Run
+    zh-CN: 运行
+  run_current:
+    en: Run Current Statement
+    zh-CN: 运行当前语句
+  stop:
+    en: Stop
+    zh-CN: 停止
+  explain:
+    en: Explain
+    zh-CN: 解释
+  continue_on_error:
+    en: Continue on Error
+    zh-CN: 遇到错误时继续
+  table:
+    en: Table
+    zh-CN: 表
+  begin_transaction:
+    en: Begin Transaction
+    zh-CN: 开始事务
+  commit:
+    en: Commit
+    zh-CN: 提交
+  rollback:
+    en: Rollback
+    zh-CN: 回滚
+  design_table:
+    en: Design Table
+    zh-CN: 设计表
+  query_table:
+    en: Query Table
+    zh-CN: 查询表
+  filter:
+    en: Filter
+    zh-CN: 筛选
+  show_filter:
+    en: Show Filter & Sort
+    zh-CN: 显示筛选与排序
+  sort:
+    en: Sort
+    zh-CN: 排序
+  sort_asc:
+    en: Ascending
+    zh-CN: 升序
+  sort_desc:
+    en: Descending
+    zh-CN: 降序
+  sort_none:
+    en: No Sort
+    zh-CN: 不排序
+  apply_filter:
+    en: Apply Filter & Sort
+    zh-CN: 应用筛选 & 排序
+  clear_filter:
+    en: Remove All Filters & Sorts
+    zh-CN: 移除所有筛选 & 排序
+  refresh:
+    en: Refresh
+    zh-CN: 刷新
 toolbar:
   connection:
     en: Connection

@@ -105,6 +105,138 @@ fn recent_menu(cx: &App) -> Menu {
     Menu::new(t!("menu.open_recent").to_string()).items(items)
 }
 
+fn checked(name: String, action: Box<dyn gpui_kit::Action>, on: bool) -> MenuItem {
+    MenuItem::Action {
+        name: name.into(),
+        action,
+        os_action: None,
+        checked: on,
+        disabled: false,
+    }
+}
+
+fn disabled(name: String, action: Box<dyn gpui_kit::Action>) -> MenuItem {
+    MenuItem::Action {
+        name: name.into(),
+        action,
+        os_action: None,
+        checked: false,
+        disabled: true,
+    }
+}
+
+fn format_menu() -> Menu {
+    Menu::new(t!("menu.format").to_string()).items([
+        MenuItem::submenu(Menu::new(t!("menu.indent").to_string()).items([
+            MenuItem::action(
+                t!("menu.indent_more").to_string(),
+                gpui_kit::component::input::Indent,
+            ),
+            MenuItem::action(
+                t!("menu.indent_less").to_string(),
+                gpui_kit::component::input::Outdent,
+            ),
+        ])),
+        MenuItem::submenu(Menu::new(t!("menu.comment").to_string()).items([
+            MenuItem::action(t!("menu.comment_lines").to_string(), query::CommentLines),
+            MenuItem::action(
+                t!("menu.uncomment_lines").to_string(),
+                query::UncommentLines,
+            ),
+        ])),
+        MenuItem::action(t!("menu.toggle_comment").to_string(), query::ToggleComment),
+        MenuItem::submenu(Menu::new(t!("menu.convert_case").to_string()).items([
+            MenuItem::action(t!("menu.upper_case").to_string(), query::UpperCase),
+            MenuItem::action(t!("menu.lower_case").to_string(), query::LowerCase),
+        ])),
+        MenuItem::separator(),
+        MenuItem::action(t!("menu.beautify").to_string(), query::Beautify),
+        MenuItem::action(
+            t!("menu.beautify_options").to_string(),
+            query::BeautifyOptionsDialog,
+        ),
+        MenuItem::action(t!("menu.minify").to_string(), query::Minify),
+    ])
+}
+
+/// Query menu (31 §8). Shown only while a query editor is the active tab.
+fn query_menu(continue_on_error: bool) -> Menu {
+    Menu::new(t!("menu.query").to_string()).items([
+        MenuItem::action(t!("menu.run").to_string(), query::Run),
+        MenuItem::action(t!("menu.run_current").to_string(), query::RunCurrent),
+        MenuItem::action(t!("menu.stop").to_string(), query::Stop),
+        MenuItem::action(t!("menu.explain").to_string(), query::Explain),
+        checked(
+            t!("menu.continue_on_error").to_string(),
+            Box::new(query::ToggleContinueOnError),
+            continue_on_error,
+        ),
+    ])
+}
+
+/// Table menu (21 §6). Shown only while a table viewer is the active tab.
+fn table_menu(in_transaction: bool, filter_open: bool) -> Menu {
+    let mut items = Vec::new();
+    if in_transaction {
+        items.push(MenuItem::action(
+            t!("menu.commit").to_string(),
+            navidog_grid::CommitTransaction,
+        ));
+        items.push(MenuItem::action(
+            t!("menu.rollback").to_string(),
+            navidog_grid::RollbackTransaction,
+        ));
+    } else {
+        items.push(MenuItem::action(
+            t!("menu.begin_transaction").to_string(),
+            navidog_grid::BeginTransaction,
+        ));
+    }
+    items.push(disabled(
+        t!("menu.design_table").to_string(),
+        Box::new(navidog_grid::DesignTable),
+    ));
+    items.push(MenuItem::action(
+        t!("menu.query_table").to_string(),
+        navidog_grid::QueryTable,
+    ));
+    items.push(MenuItem::submenu(
+        Menu::new(t!("menu.filter").to_string()).items([checked(
+            t!("menu.show_filter").to_string(),
+            Box::new(navidog_grid::ToggleFilter),
+            filter_open,
+        )]),
+    ));
+    items.push(MenuItem::submenu(
+        Menu::new(t!("menu.sort").to_string()).items([
+            MenuItem::action(t!("menu.sort_asc").to_string(), navidog_grid::SortAscending),
+            MenuItem::action(
+                t!("menu.sort_desc").to_string(),
+                navidog_grid::SortDescending,
+            ),
+            MenuItem::action(t!("menu.sort_none").to_string(), navidog_grid::SortNone),
+        ]),
+    ));
+    items.push(MenuItem::action(
+        t!("menu.apply_filter").to_string(),
+        navidog_grid::ApplyFilterSort,
+    ));
+    items.push(MenuItem::action(
+        t!("menu.clear_filter").to_string(),
+        navidog_grid::ClearFilterSort,
+    ));
+    items.push(MenuItem::separator());
+    items.push(MenuItem::action(
+        t!("menu.refresh").to_string(),
+        navidog_grid::RefreshTable,
+    ));
+    items.push(MenuItem::action(
+        t!("menu.stop").to_string(),
+        navidog_grid::StopLoad,
+    ));
+    Menu::new(t!("menu.table").to_string()).items(items)
+}
+
 pub fn set_menus(cx: &mut App) {
     let state = cx
         .try_global::<crate::state::AppState>()
@@ -122,15 +254,8 @@ pub fn set_menus(cx: &mut App) {
                 },
             )
         }));
-    let checked =
-        |name: String, action: Box<dyn gpui_kit::Action>, checked: bool| MenuItem::Action {
-            name: name.into(),
-            action,
-            os_action: None,
-            checked,
-            disabled: false,
-        };
-    cx.set_menus(vec![
+    let surface = navidog_ui::tabs::active_menu(cx);
+    let mut menus = vec![
         Menu::new("Navidog").items([
             MenuItem::action(t!("menu.about").to_string(), About),
             MenuItem::separator(),
@@ -206,37 +331,6 @@ pub fn set_menus(cx: &mut App) {
             MenuItem::submenu(Menu::new(t!("menu.code_completion").to_string()).items([
                 MenuItem::action(t!("menu.update_outline").to_string(), query::UpdateOutline),
             ])),
-        ]),
-        Menu::new(t!("menu.format").to_string()).items([
-            MenuItem::submenu(Menu::new(t!("menu.indent").to_string()).items([
-                MenuItem::action(
-                    t!("menu.indent_more").to_string(),
-                    gpui_kit::component::input::Indent,
-                ),
-                MenuItem::action(
-                    t!("menu.indent_less").to_string(),
-                    gpui_kit::component::input::Outdent,
-                ),
-            ])),
-            MenuItem::submenu(Menu::new(t!("menu.comment").to_string()).items([
-                MenuItem::action(t!("menu.comment_lines").to_string(), query::CommentLines),
-                MenuItem::action(
-                    t!("menu.uncomment_lines").to_string(),
-                    query::UncommentLines,
-                ),
-            ])),
-            MenuItem::action(t!("menu.toggle_comment").to_string(), query::ToggleComment),
-            MenuItem::submenu(Menu::new(t!("menu.convert_case").to_string()).items([
-                MenuItem::action(t!("menu.upper_case").to_string(), query::UpperCase),
-                MenuItem::action(t!("menu.lower_case").to_string(), query::LowerCase),
-            ])),
-            MenuItem::separator(),
-            MenuItem::action(t!("menu.beautify").to_string(), query::Beautify),
-            MenuItem::action(
-                t!("menu.beautify_options").to_string(),
-                query::BeautifyOptionsDialog,
-            ),
-            MenuItem::action(t!("menu.minify").to_string(), query::Minify),
         ]),
         Menu::new(t!("menu.view").to_string()).items([
             MenuItem::submenu(Menu::new(t!("menu.navigation_pane").to_string()).items([
@@ -386,5 +480,20 @@ pub fn set_menus(cx: &mut App) {
             MenuItem::action(t!("menu.navidog_help").to_string(), OpenHelp),
             MenuItem::action(t!("menu.report_issue").to_string(), ReportIssue),
         ]),
-    ]);
+    ];
+    // After View: query + format, or table, or neither (10-shell.md).
+    match surface.surface {
+        navidog_ui::tabs::MenuSurface::Query => {
+            menus.insert(4, query_menu(settings.continue_on_error));
+            menus.insert(5, format_menu());
+        }
+        navidog_ui::tabs::MenuSurface::Table => {
+            menus.insert(
+                4,
+                table_menu(surface.table_in_transaction, surface.filter_open),
+            );
+        }
+        navidog_ui::tabs::MenuSurface::Other => {}
+    }
+    cx.set_menus(menus);
 }

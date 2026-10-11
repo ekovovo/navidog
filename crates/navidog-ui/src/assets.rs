@@ -14,6 +14,7 @@ icon_assets!(pub ExtraIcons, [
     Columns3, Check, RotateCcw, Play, Square, ChevronFirst, ChevronLast, ChevronLeft, ChevronRight,
     Funnel, ArrowUpDown, Clipboard, Undo2, Save, FileText, GitCommitHorizontal, CircleStop,
     Hash, Binary, Braces, Key, Blocks, FileClock, Pin, ScrollText, ZoomIn, ZoomOut,
+    ListTree, WandSparkles, PanelBottom, PanelRight,
 ]);
 
 /// Our own color icons, drawn with `img()` (`svg()` can only tint in one color).

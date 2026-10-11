@@ -15,9 +15,9 @@ use gpui_kit::{
     Render, Styled as _, Subscription, Window, div,
 };
 use navidog_core::actions::{
-    InsertText, NewQuery, OpenConnection, OpenConsole, OpenExternalQuery, OpenHistoryLog,
-    OpenObject, RunQuery, ToggleFocusMode, ToggleHideObjectGroups, ToggleOnlyActive,
-    ToggleShowHidden, ToggleShowTableProfile,
+    InsertText, NewQuery, NewQueryText, OpenConnection, OpenConsole, OpenExternalQuery,
+    OpenHistoryLog, OpenObject, RunQuery, ToggleFocusMode, ToggleHideObjectGroups,
+    ToggleOnlyActive, ToggleShowHidden, ToggleShowTableProfile,
 };
 use navidog_core::favorites::Favorites;
 use navidog_core::object::{ObjectKind, ObjectRef};
@@ -642,6 +642,20 @@ impl Render for MainWindow {
                     if let Some(editor) = navidog_query::editor_for(&a.object, cx) {
                         editor.update(cx, |e, cx| e.run_all(window, cx));
                     }
+                }))
+                .on_action(cx.listener(|this, a: &NewQueryText, window, cx| {
+                    let editor = navidog_query::QueryEditor::from_sql(
+                        navidog_query::Target {
+                            connection: Some(a.connection.to_string()),
+                            database: Some(a.database.to_string()),
+                            schema: a.schema.as_ref().map(|s| s.to_string()),
+                        },
+                        a.sql.to_string(),
+                        window,
+                        cx,
+                    );
+                    this.add_editor(panel_handle(editor.clone()), window, cx);
+                    editor.update(cx, |e, cx| e.run_all(window, cx));
                 }))
                 .on_action(cx.listener(|this, _: &OpenHistoryLog, window, cx| {
                     this.open_history_log(window, cx)

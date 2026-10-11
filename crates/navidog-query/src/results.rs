@@ -191,6 +191,10 @@ impl Results {
         }
     }
 
+    pub fn has_run(&self) -> bool {
+        self.started.is_some()
+    }
+
     /// Each run starts by dropping the tabs that are not pinned (31 §2).
     pub fn begin_run(&mut self, cx: &mut Context<QueryEditor>) {
         let dropped: Vec<u64> = self
@@ -398,6 +402,7 @@ fn read_only_grid(set: &ResultSet, window: &mut Window, cx: &mut App) -> Entity<
     let grid = cx.new(|cx| ResultGrid::new(window, cx));
     let (columns, rows) = grid_data(set);
     grid.update(cx, |g, cx| {
+        g.set_quick_filter(false);
         g.set_data(columns, rows, cx);
         g.set_locked(true, cx);
     });
@@ -579,7 +584,11 @@ impl ResultView {
         window: &mut Window,
         cx: &mut App,
     ) -> Entity<Self> {
-        let grid = cx.new(|cx| ResultGrid::new(window, cx));
+        let grid = cx.new(|cx| {
+            let mut grid = ResultGrid::new(window, cx);
+            grid.set_quick_filter(false);
+            grid
+        });
         let cell_input = cx.new(|cx| TextareaState::new(window, cx));
         cx.new(|cx: &mut Context<Self>| {
             let subs = vec![
@@ -1323,10 +1332,6 @@ impl QueryEditor {
                 for id in ids {
                     this.results.close_tab(id, cx);
                 }
-            }))
-            .on_action(cx.listener(|this, _: &BackToEditor, _, cx| {
-                this.results_page = false;
-                cx.notify();
             }))
             .child(
                 h_flex()
