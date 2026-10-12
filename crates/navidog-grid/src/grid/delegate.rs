@@ -3,6 +3,8 @@
 
 use super::*;
 
+use gpui_kit::StatefulInteractiveElement as _;
+
 pub struct GridDelegate {
     pub model: GridModel,
     pub(super) editing: Option<(Pos, Entity<InputState>)>,
@@ -331,6 +333,10 @@ impl TableDelegate for GridDelegate {
             {
                 row = row.bg(p.row_alt);
             }
+            // Cells stop this click. What reaches the row is the empty tail past the last field.
+            row = row.on_click(cx.listener(move |_, _, _, cx| {
+                cx.emit(TableEvent::SelectRow(row_ix));
+            }));
         }
         row
     }

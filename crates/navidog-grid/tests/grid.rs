@@ -439,3 +439,90 @@ fn right_click_focuses_the_grid_so_the_menu_item_runs(cx: &mut TestAppContext) {
     let copied = cx.update(|cx| cx.read_from_clipboard().and_then(|c| c.text()));
     assert_eq!(copied.as_deref(), Some("a"));
 }
+
+/// The empty tail past the last field is not a cell. Clicking it selects the whole row.
+/// A data cell still selects one cell, and the blank row under the records selects nothing.
+#[gpui_kit::test]
+fn click_past_the_last_column_selects_the_row(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        navidog_ui::theme::init(cx);
+        navidog_grid::init(cx);
+    });
+    let (handle, grid): (_, Entity<ResultGrid>) = cx.update(|cx| {
+        // raw-px: test window size; wide enough that the columns leave an empty tail
+        let test_size = size(gpui_kit::px(800.), gpui_kit::px(400.));
+        let bounds = gpui_kit::Bounds {
+            origin: Default::default(),
+            size: test_size,
+        };
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
+            ..Default::default()
+        };
+        gpui_kit::open_window(options, cx, |window, cx| {
+            cx.new(|cx| ResultGrid::new(window, cx))
+        })
+        .unwrap()
+    });
+    cx.update(|cx| {
+        grid.update(cx, |g, cx| {
+            let cell = |s: &str| Some(s.to_string().into());
+            g.set_data(
+                vec![col("id", true), col("name", false)],
+                vec![vec![cell("1"), cell("a")], vec![cell("2"), cell("b")]],
+                cx,
+            )
+        })
+    });
+
+    let selection = |cx: &mut TestAppContext| {
+        cx.update(|cx| grid.read(cx).model(cx).selection())
+    };
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.render_frame(cx);
+        let rem = window.rem_size();
+        // Past the marker, id, and name: the empty tail of the row.
+        let tail = tokens::grid::ROW_NUMBER_WIDTH.to_pixels(rem)
+            + fit(rem, "id", &["1", "2"])
+            + fit(rem, "name", &["a", "b"])
+            + gpui_kit::px(40.);
+        let mid = rem / 2.;
+        window.click_at(
+            ElementId::NamedInteger("row".into(), 0),
+            gpui_kit::point(tail, mid),
+            cx,
+        );
+    })
+    .unwrap();
+    assert_eq!(selection(cx), (0..=0, 0..=1));
+
+    cx.update_window(handle, |_, window, cx| {
+        let rem = window.rem_size();
+        let id = tokens::grid::ROW_NUMBER_WIDTH.to_pixels(rem) + fit(rem, "id", &["1", "2"]) / 2.;
+        window.click_at(
+            ElementId::NamedInteger("row".into(), 1),
+            gpui_kit::point(id, rem / 2.),
+            cx,
+        );
+    })
+    .unwrap();
+    assert_eq!(selection(cx), (1..=1, 0..=0));
+
+    cx.update_window(handle, |_, window, cx| {
+        let rem = window.rem_size();
+        let tail = tokens::grid::ROW_NUMBER_WIDTH.to_pixels(rem)
+            + fit(rem, "id", &["1", "2"])
+            + fit(rem, "name", &["a", "b"])
+            + gpui_kit::px(40.);
+        // Row 2 is the blank row under the records.
+        window.click_at(
+            ElementId::NamedInteger("row".into(), 2),
+            gpui_kit::point(tail, rem / 2.),
+            cx,
+        );
+    })
+    .unwrap();
+    assert_eq!(selection(cx), (1..=1, 0..=0));
+}

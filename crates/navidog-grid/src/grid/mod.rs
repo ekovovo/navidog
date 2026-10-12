@@ -444,6 +444,30 @@ impl ResultGrid {
             return;
         }
         match *e {
+            TableEvent::SelectRow(r) if r < self.model(cx).row_count() => {
+                // Same path as the marker column: the empty tail is not a cell, so SelectCell
+                // never fires. Commit first, then select the whole row.
+                self.commit_edit(window, cx);
+                let shift = window.modifiers().shift;
+                let col = self.table.update(cx, |t, cx| {
+                    let d = t.delegate_mut();
+                    // A press on a data cell may have armed click-to-edit. This click is the
+                    // empty tail, and the SelectCell below must not open the editor.
+                    d.arm_click_edit = false;
+                    d.model.select_rows(r, shift);
+                    d.finish_navigation(shift);
+                    let col = d.model.head().1;
+                    cx.notify();
+                    col
+                });
+                // Stay in cell mode on the last field. SelectCell sees head already there and
+                // leaves the row selection. That column is just left of the click, so the
+                // non-strict scroll does not move the viewport.
+                if !self.model(cx).columns.is_empty() {
+                    self.table
+                        .update(cx, |t, cx| t.set_selected_cell(r, col + 1, cx));
+                }
+            }
             TableEvent::SelectCell(r, ix) => {
                 let real = self.model(cx).row_count();
                 if r >= real {
