@@ -518,6 +518,61 @@ fn postgres_cancel_over_tls() {
     });
 }
 
+/// The server drops an idle session (wait timeout, sleep). The next statement reconnects
+/// instead of surfacing "connection is closed".
+#[test]
+fn reconnects_after_the_server_kills_the_session() {
+    if !live() {
+        return;
+    }
+    runtime::runtime().block_on(async {
+        let driver: Arc<dyn Driver> = Arc::new(MySqlDriver::mysql());
+        let mut session = connect(driver.clone(), mysql_params(13306)).await.unwrap();
+        let id = session.session_id().unwrap();
+        let mut killer = connect(driver, mysql_params(13306)).await.unwrap();
+        killer
+            .relational()
+            .unwrap()
+            .execute(&format!("KILL {id}"))
+            .await
+            .unwrap();
+        killer.close().await.unwrap();
+        let sets = session
+            .relational()
+            .unwrap()
+            .execute("SELECT 1")
+            .await
+            .unwrap();
+        assert_eq!(sets[0].rows, [vec![Some("1".to_string())]]);
+        assert_ne!(session.session_id(), Some(id));
+        session.close().await.unwrap();
+
+        let mut session = connect(Arc::new(PostgresDriver::default()), pg_params())
+            .await
+            .unwrap();
+        let pid = session.session_id().unwrap();
+        let mut killer = connect(Arc::new(PostgresDriver::default()), pg_params())
+            .await
+            .unwrap();
+        killer
+            .relational()
+            .unwrap()
+            .execute(&format!("SELECT pg_terminate_backend({pid})"))
+            .await
+            .unwrap();
+        killer.close().await.unwrap();
+        let sets = session
+            .relational()
+            .unwrap()
+            .execute("SELECT 1")
+            .await
+            .unwrap();
+        assert_eq!(sets[0].rows, [vec![Some("1".to_string())]]);
+        assert_ne!(session.session_id(), Some(pid));
+        session.close().await.unwrap();
+    });
+}
+
 #[test]
 fn ssh_tunnel_to_mysql_and_postgres() {
     if !live() {

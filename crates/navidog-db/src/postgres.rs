@@ -44,10 +44,23 @@ impl Default for PostgresDriver {
 }
 
 fn err(e: tokio_postgres::Error) -> DbError {
-    match e.as_db_error() {
-        Some(db) => DbError::coded(db.code().code(), db.message()),
-        None => DbError::msg(e.to_string()),
+    if let Some(db) = e.as_db_error() {
+        let mut out = DbError::coded(db.code().code(), db.message());
+        // Most SQL errors leave the session usable. A few mean the backend is already gone
+        // (idle timeout, admin terminate). Query cancel (57014) is not one of them.
+        out.disconnected = session_closed_sqlstate(db.code().code());
+        return out;
     }
+    // Closed, or an IO failure with no SQLSTATE.
+    let mut out = DbError::msg(e.to_string());
+    out.disconnected =
+        e.is_closed() || std::error::Error::source(&e).is_some_and(|s| s.is::<std::io::Error>());
+    out
+}
+
+/// SQLSTATEs after which the backend will not take another command.
+fn session_closed_sqlstate(code: &str) -> bool {
+    code.starts_with("08") || matches!(code, "57P01" | "57P02" | "57P03" | "57P04" | "57P05")
 }
 
 fn tls_err(e: impl std::fmt::Display) -> DbError {
@@ -164,6 +177,34 @@ async fn connect(
     Ok((client, Some(connector)))
 }
 
+/// Handshake, initial queries, and the backend pid. Shared by the first connect and a reconnect.
+async fn establish(
+    params: &ConnectParams,
+    notices: Notices,
+) -> DbResult<(Client, Option<MakeTlsConnector>, String, u64)> {
+    let (client, tls) = tokio::time::timeout(params.timeout(), connect(params, notices))
+        .await
+        .map_err(|_| DbError::msg("连接超时"))??;
+    for q in crate::sql::split_statements(&params.initial_queries, Dialect::Postgres) {
+        client.batch_execute(&q).await.map_err(err)?;
+    }
+    let msgs = client
+        .simple_query("SELECT current_setting('server_version'), pg_backend_pid()")
+        .await
+        .map_err(err)?;
+    let (version, pid) = msgs
+        .into_iter()
+        .find_map(|m| match m {
+            SimpleQueryMessage::Row(r) => Some((
+                r.get(0).unwrap_or_default().to_string(),
+                r.get(1).and_then(|p| p.parse().ok()).unwrap_or(0),
+            )),
+            _ => None,
+        })
+        .unwrap_or_default();
+    Ok((client, tls, version, pid))
+}
+
 impl Driver for PostgresDriver {
     fn info(&self) -> &DriverInfo {
         &self.info
@@ -173,32 +214,13 @@ impl Driver for PostgresDriver {
         let mut tag = Tag::new(&params.name, &self.info.name);
         async move {
             let notices = Notices::default();
-            let (client, tls) =
-                tokio::time::timeout(params.timeout(), connect(&params, notices.clone()))
-                    .await
-                    .map_err(|_| DbError::msg("连接超时"))??;
-            for q in crate::sql::split_statements(&params.initial_queries, Dialect::Postgres) {
-                client.batch_execute(&q).await.map_err(err)?;
-            }
-            let msgs = client
-                .simple_query("SELECT current_setting('server_version'), pg_backend_pid()")
-                .await
-                .map_err(err)?;
-            let (version, pid) = msgs
-                .into_iter()
-                .find_map(|m| match m {
-                    SimpleQueryMessage::Row(r) => Some((
-                        r.get(0).unwrap_or_default().to_string(),
-                        r.get(1).and_then(|p| p.parse().ok()).unwrap_or(0),
-                    )),
-                    _ => None,
-                })
-                .unwrap_or_default();
+            let (client, tls, version, pid) = establish(&params, notices.clone()).await?;
             tag.session = pid;
             let cancel = client.cancel_token();
             Ok(Box::new(PgSession {
                 client,
                 cancel,
+                params,
                 tls,
                 version,
                 notices,
@@ -213,12 +235,77 @@ impl Driver for PostgresDriver {
 pub struct PgSession {
     client: Client,
     cancel: CancelToken,
+    params: ConnectParams,
     tls: Option<MakeTlsConnector>,
     version: String,
     notices: Notices,
     tag: Tag,
     /// `(table oid, column number)` → where a result column comes from; `None` when unknown
     origins: HashMap<(u32, i16), Option<ColumnOrigin>>,
+}
+
+impl PgSession {
+    async fn reconnect(&mut self) -> DbResult<()> {
+        let (client, tls, _version, pid) = establish(&self.params, self.notices.clone()).await?;
+        self.client = client;
+        self.tls = tls;
+        self.cancel = self.client.cancel_token();
+        self.tag.session = pid;
+        Ok(())
+    }
+
+    fn lost(&self, e: &DbError) -> bool {
+        e.disconnected || self.client.is_closed()
+    }
+
+    async fn attempt(&mut self, sql: &str) -> DbResult<Vec<ResultSet>> {
+        self.notices
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clear();
+        let client = &self.client;
+        let msgs = logged(&self.tag, sql, async {
+            client.simple_query(sql).await.map_err(err)
+        })
+        .await?;
+        let mut sets = Vec::new();
+        let mut current = ResultSet::default();
+        for m in msgs {
+            match m {
+                SimpleQueryMessage::RowDescription(cols) => {
+                    current.columns = cols
+                        .iter()
+                        .map(|c| Column {
+                            name: c.name().to_string(),
+                            ..Column::default()
+                        })
+                        .collect();
+                }
+                SimpleQueryMessage::Row(r) => {
+                    current
+                        .rows
+                        .push((0..r.len()).map(|i| r.get(i).map(String::from)).collect());
+                }
+                SimpleQueryMessage::CommandComplete(n) => {
+                    if current.columns.is_empty() {
+                        current.affected_rows = Some(n);
+                    }
+                    sets.push(std::mem::take(&mut current));
+                }
+                _ => {}
+            }
+        }
+        let notices = std::mem::take(&mut *self.notices.lock().unwrap_or_else(|p| p.into_inner()));
+        if let Some(last) = sets.last_mut() {
+            last.notices = notices;
+        } else if !notices.is_empty() {
+            sets.push(ResultSet {
+                notices,
+                ..ResultSet::default()
+            });
+        }
+        Ok(sets)
+    }
 }
 
 impl Session for PgSession {
@@ -228,11 +315,24 @@ impl Session for PgSession {
 
     fn ping(&mut self) -> BoxFuture<'_, DbResult<()>> {
         async move {
-            self.client
+            match self
+                .client
                 .simple_query("SELECT 1")
                 .await
                 .map(|_| ())
                 .map_err(err)
+            {
+                Err(e) if self.lost(&e) => {
+                    tracing::warn!("PostgreSQL connection lost ({e}); reconnecting");
+                    self.reconnect().await?;
+                    self.client
+                        .simple_query("SELECT 1")
+                        .await
+                        .map(|_| ())
+                        .map_err(err)
+                }
+                other => other,
+            }
         }
         .boxed()
     }
@@ -288,7 +388,17 @@ impl PgSession {
     /// Column types and origins of a SELECT, from its prepared form. `None` when it cannot be
     /// prepared; the result is then shown without types and stays read-only.
     async fn describe(&mut self, sql: &str) -> Option<Vec<Column>> {
-        let stmt = self.client.prepare(sql).await.ok()?;
+        let stmt = match self.client.prepare(sql).await {
+            Ok(stmt) => stmt,
+            Err(e) => {
+                let mapped = err(e);
+                if !self.lost(&mapped) {
+                    return None;
+                }
+                self.reconnect().await.ok()?;
+                self.client.prepare(sql).await.ok()?
+            }
+        };
         let wanted: Vec<(u32, i16)> = stmt
             .columns()
             .iter()
@@ -357,53 +467,14 @@ impl Relational for PgSession {
 
     fn execute<'a>(&'a mut self, sql: &'a str) -> BoxFuture<'a, DbResult<Vec<ResultSet>>> {
         async move {
-            self.notices
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .clear();
-            let client = &self.client;
-            let msgs = logged(&self.tag, sql, async {
-                client.simple_query(sql).await.map_err(err)
-            })
-            .await?;
-            let mut sets = Vec::new();
-            let mut current = ResultSet::default();
-            for m in msgs {
-                match m {
-                    SimpleQueryMessage::RowDescription(cols) => {
-                        current.columns = cols
-                            .iter()
-                            .map(|c| Column {
-                                name: c.name().to_string(),
-                                ..Column::default()
-                            })
-                            .collect();
-                    }
-                    SimpleQueryMessage::Row(r) => {
-                        current
-                            .rows
-                            .push((0..r.len()).map(|i| r.get(i).map(String::from)).collect());
-                    }
-                    SimpleQueryMessage::CommandComplete(n) => {
-                        if current.columns.is_empty() {
-                            current.affected_rows = Some(n);
-                        }
-                        sets.push(std::mem::take(&mut current));
-                    }
-                    _ => {}
+            match self.attempt(sql).await {
+                Err(e) if self.lost(&e) => {
+                    tracing::warn!("PostgreSQL connection lost ({e}); reconnecting");
+                    self.reconnect().await?;
+                    self.attempt(sql).await
                 }
+                other => other,
             }
-            let notices =
-                std::mem::take(&mut *self.notices.lock().unwrap_or_else(|p| p.into_inner()));
-            if let Some(last) = sets.last_mut() {
-                last.notices = notices;
-            } else if !notices.is_empty() {
-                sets.push(ResultSet {
-                    notices,
-                    ..ResultSet::default()
-                });
-            }
-            Ok(sets)
         }
         .boxed()
     }
@@ -427,5 +498,19 @@ impl Relational for PgSession {
             Ok(sets)
         }
         .boxed()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::session_closed_sqlstate;
+
+    #[test]
+    fn query_cancel_is_not_a_dropped_session() {
+        assert!(!session_closed_sqlstate("57014"));
+        assert!(!session_closed_sqlstate("42601"));
+        assert!(session_closed_sqlstate("57P01"));
+        assert!(session_closed_sqlstate("57P05"));
+        assert!(session_closed_sqlstate("08006"));
     }
 }

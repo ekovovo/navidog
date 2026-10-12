@@ -46,10 +46,29 @@ impl MySqlDriver {
 }
 
 fn err(e: mysql_async::Error) -> DbError {
-    match e {
+    let disconnected = mysql_disconnected(&e);
+    let mut out = match e {
         mysql_async::Error::Server(s) => DbError::coded(s.code, s.message),
         other => DbError::msg(other.to_string()),
-    }
+    };
+    out.disconnected = disconnected;
+    out
+}
+
+/// The socket is gone or the protocol stream is corrupt. A server SQL error is not in here:
+/// that connection can still be used.
+fn mysql_disconnected(e: &mysql_async::Error) -> bool {
+    use mysql_async::{DriverError, Error};
+    matches!(
+        e,
+        Error::Io(_)
+            | Error::Driver(
+                DriverError::ConnectionClosed
+                    | DriverError::PacketOutOfOrder
+                    | DriverError::UnexpectedPacket { .. }
+                    | DriverError::BadCompressedPacketHeader,
+            )
+    )
 }
 
 fn build_opts(p: &ConnectParams) -> Opts {
@@ -109,6 +128,7 @@ impl Driver for MySqlDriver {
                 opts,
                 version: version.unwrap_or_default(),
                 read_timeout: params.read_timeout,
+                connect_timeout: params.timeout(),
                 tag,
             }) as Box<dyn Session>)
         }
@@ -121,7 +141,46 @@ pub struct MySqlSession {
     opts: Opts,
     version: String,
     read_timeout: Option<Duration>,
+    connect_timeout: Duration,
     tag: Tag,
+}
+
+impl MySqlSession {
+    /// Opens a new connection with the options from the original connect and drops the dead one.
+    async fn reconnect(&mut self) -> DbResult<()> {
+        let conn = tokio::time::timeout(self.connect_timeout, Conn::new(self.opts.clone()))
+            .await
+            .map_err(|_| DbError::msg("连接超时"))?
+            .map_err(err)?;
+        drop(std::mem::replace(&mut self.conn, conn));
+        self.tag.session = self.conn.id() as u64;
+        Ok(())
+    }
+
+    async fn attempt(&mut self, sql: &str) -> DbResult<Vec<ResultSet>> {
+        let (opts, id, limit) = (self.opts.clone(), self.conn.id(), self.read_timeout);
+        let tag = self.tag.clone();
+        let run = query(&mut self.conn, sql);
+        let Some(limit) = limit else {
+            return logged(&tag, sql, run).await;
+        };
+        // On timeout the statement is killed and its interrupted result read off the wire,
+        // so the session stays usable. A timeout is not a dropped connection.
+        let guarded = async {
+            tokio::pin!(run);
+            tokio::select! {
+                result = &mut run => result,
+                _ = tokio::time::sleep(limit) => {
+                    if let Err(e) = kill_query(opts, id).await {
+                        tracing::warn!("KILL QUERY after the read timeout failed: {e}");
+                    }
+                    let _ = run.await;
+                    Err(DbError::msg(format!("读取超时（{} 秒）", limit.as_secs())))
+                }
+            }
+        };
+        logged(&tag, sql, guarded).await
+    }
 }
 
 /// Kills the statement session `id` is running, from a separate session.
@@ -140,7 +199,17 @@ impl Session for MySqlSession {
     }
 
     fn ping(&mut self) -> BoxFuture<'_, DbResult<()>> {
-        async move { self.conn.ping().await.map_err(err) }.boxed()
+        async move {
+            match self.conn.ping().await.map_err(err) {
+                Err(e) if e.disconnected => {
+                    tracing::warn!("MySQL connection lost ({e}); reconnecting");
+                    self.reconnect().await?;
+                    self.conn.ping().await.map_err(err)
+                }
+                other => other,
+            }
+        }
+        .boxed()
     }
 
     fn cancel_handle(&self) -> Option<CancelHandle> {
@@ -168,29 +237,15 @@ impl Relational for MySqlSession {
     }
 
     fn execute<'a>(&'a mut self, sql: &'a str) -> BoxFuture<'a, DbResult<Vec<ResultSet>>> {
-        let (opts, id, limit) = (self.opts.clone(), self.conn.id(), self.read_timeout);
-        let tag = self.tag.clone();
         async move {
-            let run = query(&mut self.conn, sql);
-            let Some(limit) = limit else {
-                return logged(&tag, sql, run).await;
-            };
-            // On timeout the statement is killed and its interrupted result read off the wire,
-            // so the session stays usable
-            let guarded = async {
-                tokio::pin!(run);
-                tokio::select! {
-                    result = &mut run => result,
-                    _ = tokio::time::sleep(limit) => {
-                        if let Err(e) = kill_query(opts, id).await {
-                            tracing::warn!("KILL QUERY after the read timeout failed: {e}");
-                        }
-                        let _ = run.await;
-                        Err(DbError::msg(format!("读取超时（{} 秒）", limit.as_secs())))
-                    }
+            match self.attempt(sql).await {
+                Err(e) if e.disconnected => {
+                    tracing::warn!("MySQL connection lost ({e}); reconnecting");
+                    self.reconnect().await?;
+                    self.attempt(sql).await
                 }
-            };
-            logged(&tag, sql, guarded).await
+                other => other,
+            }
         }
         .boxed()
     }
@@ -304,6 +359,28 @@ fn value_text(v: mysql_async::Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn server_error_is_not_a_dropped_connection() {
+        use mysql_async::{DriverError, Error, IoError, ServerError};
+        let server = err(Error::Server(ServerError {
+            code: 1064,
+            message: "syntax".into(),
+            state: "42000".into(),
+        }));
+        assert!(!server.disconnected);
+        assert!(err(Error::Driver(DriverError::ConnectionClosed)).disconnected);
+        assert!(err(Error::Driver(DriverError::PacketOutOfOrder)).disconnected);
+        assert!(
+            err(Error::Io(IoError::Io(std::io::Error::new(
+                std::io::ErrorKind::ConnectionReset,
+                "reset",
+            ))))
+            .disconnected
+        );
+        // A bad statement, not a dead socket.
+        assert!(!err(Error::Driver(DriverError::MixedParams)).disconnected);
+    }
 
     #[test]
     fn protocol_types_become_sql_type_names() {

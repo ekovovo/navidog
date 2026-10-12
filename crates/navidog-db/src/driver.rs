@@ -19,6 +19,9 @@ use crate::params::ConnectParams;
 pub struct DbError {
     pub code: Option<String>,
     pub message: String,
+    /// The transport is dead (server closed it, or the socket failed). Callers retry once on a
+    /// new connection. A SQL error leaves this false.
+    pub disconnected: bool,
 }
 
 impl std::fmt::Display for DbError {
@@ -35,6 +38,7 @@ impl DbError {
         Self {
             code: None,
             message: message.into(),
+            disconnected: false,
         }
     }
 
@@ -42,6 +46,7 @@ impl DbError {
         Self {
             code: Some(code.to_string()),
             message: message.into(),
+            disconnected: false,
         }
     }
 }
