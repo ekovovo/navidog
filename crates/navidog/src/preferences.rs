@@ -7,7 +7,9 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::radio::{Radio, RadioGroup};
-use gpui_kit::component::{Sizable as _, TitleBar, WindowExt as _, h_flex, v_flex};
+use gpui_kit::component::searchable_list::SearchableListItem;
+use gpui_kit::component::select::{Select, SelectEvent, SelectState};
+use gpui_kit::component::{IndexPath, Sizable as _, TitleBar, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyWindowHandle, App, AppContext as _, Context, Entity, Global, InteractiveElement as _,
@@ -15,7 +17,7 @@ use gpui_kit::{
     Styled as _, Window, WindowBounds, WindowOptions, div,
 };
 use navidog_core::object::ObjectRef;
-use navidog_core::settings::{Appearance, Language, RowShade, Settings};
+use navidog_core::settings::{Appearance, Language, RowShade, Settings, ThemeFamily};
 use navidog_core::store::ConnectionStore;
 use navidog_ui::assets::lucide;
 use navidog_ui::skin::{FormRow, confirm_with, form_note, heading, truncated};
@@ -61,8 +63,30 @@ enum Page {
     Advanced,
 }
 
+/// One row of the theme menu. The title is translated when drawn, so a language change updates it.
+#[derive(Clone)]
+struct ThemeOption {
+    family: ThemeFamily,
+}
+
+impl SearchableListItem for ThemeOption {
+    type Value = ThemeFamily;
+
+    fn title(&self) -> SharedString {
+        match self.family {
+            ThemeFamily::Navidog => "Navidog".into(),
+            ThemeFamily::Default => t!("prefs.theme_default").into(),
+        }
+    }
+
+    fn value(&self) -> &Self::Value {
+        &self.family
+    }
+}
+
 struct Preferences {
     page: Page,
+    theme: Entity<SelectState<Vec<ThemeOption>>>,
     records_per_page: Entity<InputState>,
     grid_font_pt: Entity<InputState>,
     query: query::QueryPrefs,
@@ -72,6 +96,38 @@ impl Preferences {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         cx.observe(&ConnectionStore::global(cx), |_, _, cx| cx.notify())
             .detach();
+        let families = [ThemeFamily::Navidog, ThemeFamily::Default];
+        let selected = families
+            .iter()
+            .position(|family| *family == Settings::global(cx).theme)
+            .unwrap_or(0);
+        let theme = cx.new(|cx| {
+            SelectState::new(
+                families
+                    .into_iter()
+                    .map(|family| ThemeOption { family })
+                    .collect(),
+                Some(IndexPath::default().row(selected)),
+                window,
+                cx,
+            )
+        });
+        cx.subscribe_in(
+            &theme,
+            window,
+            |_, _, event: &SelectEvent<Vec<ThemeOption>>, window, cx| {
+                let SelectEvent::Confirm(Some(family)) = event else {
+                    return;
+                };
+                let family = *family;
+                if Settings::global(cx).theme == family {
+                    return;
+                }
+                Settings::update(cx, |s| s.theme = family);
+                crate::apply_theme(Some(window), cx);
+            },
+        )
+        .detach();
         // Both fields apply on Return or when they lose focus, not per keystroke: typing "100"
         // would otherwise save the "10" on the way. A bad value goes back to the saved one.
         let per_page = Settings::global(cx).records_per_page.to_string();
@@ -118,6 +174,7 @@ impl Preferences {
         let query = query::QueryPrefs::new(window, cx);
         Self {
             page: Page::General,
+            theme,
             records_per_page,
             grid_font_pt,
             query,
@@ -291,6 +348,12 @@ impl Preferences {
         let languages = [Language::System, Language::ZhCn, Language::En];
         v_flex()
             .gap(tokens::form::ROW_GAP.rems())
+            .child(Self::setting_row(
+                format!("{}:", t!("prefs.theme")),
+                Select::new(&self.theme)
+                    .id("theme")
+                    .w(tokens::form::POPUP_WIDTH_SHORT.rems()),
+            ))
             .child(Self::setting_row(
                 format!("{}:", t!("prefs.appearance")),
                 RadioGroup::horizontal("appearance")

@@ -5,6 +5,15 @@ use gpui_kit::{App, Window};
 const NAVICAT_THEME: &str = include_str!("../themes/navicat.json");
 pub const LIGHT: &str = "Navicat Light";
 pub const DARK: &str = "Navicat Dark";
+pub const DEFAULT_LIGHT: &str = "Default Light";
+pub const DEFAULT_DARK: &str = "Default Dark";
+
+/// Navidog (Navicat colors) or gpui-kit's built-in Default (shadcn).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ThemeFamily {
+    Navidog,
+    Default,
+}
 
 /// Registers the Navicat themes as the default light and dark themes. Call after `gpui_kit::init`.
 pub fn init(cx: &mut App) {
@@ -28,6 +37,37 @@ pub fn init(cx: &mut App) {
     Theme::change(ThemeMode::Light, None, cx);
     // Show the bar when the pointer is over the scroll area.
     Theme::set_scrollbar_mode(ScrollbarMode::Hover, cx);
+}
+
+/// Points the light and dark slots at one family. Call [`apply_appearance`] afterwards so
+/// `Theme::change` loads the slot for the current mode.
+pub fn apply_family(family: ThemeFamily, cx: &mut App) {
+    let (light_name, dark_name) = match family {
+        ThemeFamily::Navidog => (LIGHT, DARK),
+        ThemeFamily::Default => (DEFAULT_LIGHT, DEFAULT_DARK),
+    };
+    let registry = ThemeRegistry::global(cx);
+    let light = registry
+        .themes()
+        .get(light_name)
+        .cloned()
+        .unwrap_or_else(|| panic!("missing theme {light_name}"));
+    let dark = registry
+        .themes()
+        .get(dark_name)
+        .cloned()
+        .unwrap_or_else(|| panic!("missing theme {dark_name}"));
+    let theme = Theme::global_mut(cx);
+    theme.light_theme = light;
+    theme.dark_theme = dark;
+}
+
+/// Keeps the rem base at 13pt. The Default theme omits `font.size`, and gpui's built-in size is 16.
+pub fn pin_layout_font(cx: &mut App) {
+    Theme::update(cx, |theme| {
+        theme.font_size = gpui_kit::px(13.); // raw-px: layout rem base
+        theme.mono_font_size = gpui_kit::px(12.); // raw-px: mono size from navicat.json
+    });
 }
 
 /// Applies the appearance: `None` follows the system, `Some(true)` forces dark, `Some(false)` forces light.
@@ -115,7 +155,7 @@ pub fn to_hex(color: gpui_kit::Hsla) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tokens::{dark_palette, light_palette};
+    use crate::tokens::{dark_palette, light_palette, palette};
     use gpui_kit::component::ThemeSet;
 
     #[test]
@@ -176,6 +216,52 @@ mod tests {
                 "{mode:?}"
             );
             assert!(style.syntax.keyword.is_some(), "{mode:?}");
+        }
+    }
+
+    /// Default uses gpui-kit's shadcn themes; Navidog restores the measured palette. Font stays 13pt.
+    #[gpui_kit::test]
+    fn switching_family_swaps_the_theme_and_palette(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::component::ActiveTheme as _;
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            init(cx);
+        });
+        cx.run_until_parked();
+        for (family, mode, name) in [
+            (ThemeFamily::Default, ThemeMode::Light, DEFAULT_LIGHT),
+            (ThemeFamily::Default, ThemeMode::Dark, DEFAULT_DARK),
+            (ThemeFamily::Navidog, ThemeMode::Light, LIGHT),
+            (ThemeFamily::Navidog, ThemeMode::Dark, DARK),
+        ] {
+            cx.update(|cx| {
+                apply_family(family, cx);
+                Theme::change(mode, None, cx);
+                if family == ThemeFamily::Default {
+                    // gpui's built-in size, which Default does not override
+                    Theme::update(cx, |theme| theme.font_size = gpui_kit::px(16.)); // raw-px: gpui built-in size
+                    pin_layout_font(cx);
+                }
+            });
+            cx.update(|cx| {
+                assert_eq!(Theme::global(cx).theme_name().as_ref(), name);
+                let colors = palette(cx);
+                if family == ThemeFamily::Navidog {
+                    let expected = if mode.is_dark() {
+                        dark_palette()
+                    } else {
+                        light_palette()
+                    };
+                    assert_eq!(colors, expected, "{name}");
+                } else {
+                    assert_eq!(colors.window_bg, cx.theme().background, "{name}");
+                    assert_eq!(colors.selection, cx.theme().list_active_border, "{name}");
+                    assert_eq!(colors.selection_text, cx.theme().foreground, "{name}");
+                    assert_eq!(colors.row_selected, cx.theme().list_active, "{name}");
+                    assert_eq!(cx.theme().font_size, gpui_kit::px(13.), "{name}"); // raw-px: layout rem base
+                    assert_eq!(cx.theme().mono_font_size, gpui_kit::px(12.), "{name}"); // raw-px: mono size from navicat.json
+                }
+            });
         }
     }
 }

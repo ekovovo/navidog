@@ -542,6 +542,12 @@ prefs:
   diagnostic_hint:
     en: Applies to the app log at the next start; QueryExec.log moves right away.
     zh-CN: 应用日志在下次启动时生效；QueryExec.log 立即换到新位置。
+  theme:
+    en: Theme
+    zh-CN: 主题
+  theme_default:
+    en: Default
+    zh-CN: 默认
   appearance:
     en: Appearance
     zh-CN: 外观

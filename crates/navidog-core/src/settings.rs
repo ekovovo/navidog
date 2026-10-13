@@ -23,6 +23,15 @@ impl Appearance {
     }
 }
 
+/// Which theme pair to load. Light and dark still come from [`Appearance`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ThemeFamily {
+    #[default]
+    Navidog,
+    Default,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Language {
@@ -150,6 +159,8 @@ fn system_prefers_chinese(lang: &str) -> bool {
 pub struct Settings {
     pub version: u32,
     pub appearance: Appearance,
+    /// Navidog (Navicat) or gpui-kit's Default (shadcn). Missing means Navidog.
+    pub theme: ThemeFamily,
     pub language: Language,
     /// Open the connections marked "auto connect" at startup
     pub auto_connect_on_startup: bool,
@@ -235,6 +246,7 @@ impl Default for Settings {
         Self {
             version: 1,
             appearance: Appearance::System,
+            theme: ThemeFamily::Navidog,
             language: Language::System,
             auto_connect_on_startup: true,
             show_schema_objects: true,
@@ -360,6 +372,7 @@ mod tests {
     fn keeps_unknown_fields_and_defaults_missing_ones() {
         let s: Settings = serde_json::from_str(r#"{"appearance":"dark","future":1}"#).unwrap();
         assert_eq!(s.appearance, Appearance::Dark);
+        assert_eq!(s.theme, ThemeFamily::Navidog);
         assert_eq!(s.language, Language::System);
         assert!(s.auto_connect_on_startup);
         assert!(s.show_schema_objects);
@@ -371,6 +384,14 @@ mod tests {
         assert_eq!(s.row_shade, RowShade::Alternate);
         let back = serde_json::to_string(&s).unwrap();
         assert!(back.contains("\"future\":1"));
+    }
+
+    #[test]
+    fn theme_defaults_to_navidog_and_reads_default() {
+        let missing: Settings = serde_json::from_str(r#"{"appearance":"dark"}"#).unwrap();
+        assert_eq!(missing.theme, ThemeFamily::Navidog);
+        let chosen: Settings = serde_json::from_str(r#"{"theme":"default"}"#).unwrap();
+        assert_eq!(chosen.theme, ThemeFamily::Default);
     }
 
     #[test]

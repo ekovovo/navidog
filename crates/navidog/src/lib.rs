@@ -104,11 +104,21 @@ pub fn init(cx: &mut App) {
     cx.set_global(AppState::load());
 }
 
-/// The appearance from the settings, then the user's syntax colors over its editor colors.
+/// The theme family and appearance from the settings, then the user's syntax colors.
 pub fn apply_theme(window: Option<&mut gpui_kit::Window>, cx: &mut App) {
     use gpui_kit::component::ActiveTheme as _;
+    use navidog_core::settings::ThemeFamily as Saved;
+    use navidog_ui::theme::ThemeFamily as Active;
     let s = Settings::global(cx).clone();
+    let family = match s.theme {
+        Saved::Navidog => Active::Navidog,
+        Saved::Default => Active::Default,
+    };
+    navidog_ui::theme::apply_family(family, cx);
     navidog_ui::theme::apply_appearance(s.appearance.is_dark(), window, cx);
+    if family == Active::Default {
+        navidog_ui::theme::pin_layout_font(cx);
+    }
     let colors = if cx.theme().is_dark() {
         &s.syntax_colors.dark
     } else {

@@ -14,7 +14,7 @@
 4. 在 `run` 回调中依次执行：
    1. `gpui_kit::init(cx)`；
    2. `cx.set_app_identity(...)`，Bundle ID 为 `ci.nn.navidog`。Dock 图标用 `crates/navidog/resources/navidog.svg`；`scripts/bundle-macos.sh` 把它做成 `navidog.icns` 放进应用包，`cargo run` 启动时用同一张图调用 `setApplicationIconImage`（gpui 在 macOS 上忽略窗口的 `icon`）；
-   3. 加载 Navicat 主题，`font_size` 设为 13，外观跟随系统或使用偏好设置中固定的外观；
+   3. 加载主题（默认 Navicat；偏好设置可选 gpui-kit 的 Default），`font_size` 设为 13，外观跟随系统或使用偏好设置中固定的外观；
    4. 初始化各 crate：`navidog_core::init`、`navidog_db::init`（启动 tokio 运行时）、`navidog_connection::init`；
    5. 先 `cx.bind_keys(...)`，再 `cx.set_menus(...)`；
    6. 打开主窗口。
@@ -165,11 +165,11 @@ M1 实现以下菜单。各菜单的完整结构参考 `reference/tree/MainMenu.
 
 ## 10. 偏好设置窗口（F-PREF-001、F-PREF-002、F-PREF-010）
 
-- ⌘, 打开独立窗口（单例，640 × 480），左侧是分类列表，右侧是设置页。外观和语言各占一行（标签加横向选项，对应 Navicat 的弹出菜单）。主窗口等是小节标题，下面是左对齐的复选框，不再套用连接表单的标签列。记录页的“限制记录”和每页条数在同一行。
+- ⌘, 打开独立窗口（单例，640 × 480），左侧是分类列表，右侧是设置页。主题是标签加下拉（Navidog、Default）。外观和语言各占一行（标签加横向选项，对应 Navicat 的弹出菜单）。主窗口等是小节标题，下面是左对齐的复选框，不再套用连接表单的标签列。记录页的“限制记录”和每页条数在同一行。
 - M1 包含两个分类：
-  - **常规**：外观（跟随系统、浅色、深色）、语言（跟随系统、简体中文、English）、启动时自动打开“自动连接”的连接；
+  - **常规**：主题（Navidog、Default；Default 是 gpui-kit 自带的 shadcn 主题，与外观独立；缺省和已有的 `settings.json` 都是 Navidog）、外观（跟随系统、浅色、深色）、语言（跟随系统、简体中文、English）、启动时自动打开“自动连接”的连接；
   - **高级**：设置位置（只读显示配置目录，带“在 Finder 中显示”按钮）、主密码（设置、修改、清除）。
-- 修改立即生效：切换外观时调用 `Theme::change`；切换语言时调用 `set_locale` 和 `cx.refresh_windows()`。设置保存在 `settings.json`。
+- 修改立即生效：切换主题时换上对应的浅色/深色主题对，再调用 `Theme::change`；Default 把 `font_size` 钉在 13、等宽字号钉在 12。切换外观时调用 `Theme::change`；切换语言时调用 `set_locale` 和 `cx.refresh_windows()`。设置保存在 `settings.json`（`theme` 为 `navidog` 或 `default`）。
 
 ## 11. 配置文件
 

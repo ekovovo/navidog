@@ -325,6 +325,7 @@ mod macos {
             .unwrap();
         shot_of(&mut cx, prefs, "preferences.png");
         cx.update(|cx| Theme::change(ThemeMode::Dark, None, cx));
+        shot_of(&mut cx, prefs, "preferences-dark.png");
         cx.update_window(prefs, |_, window, cx| {
             window.render_frame(cx);
             navidog::preferences::open_master_dialog(window, cx);

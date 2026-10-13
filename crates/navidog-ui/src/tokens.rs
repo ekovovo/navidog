@@ -328,7 +328,7 @@ pub fn min_window_size() -> Size<Pixels> {
 }
 
 /// AppKit semantic colors outside the gpui-component theme; values are listed in §8 of the token table.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Palette {
     pub window_bg: Hsla,
     pub control_bg: Hsla,
@@ -461,12 +461,41 @@ pub fn icon_color(icon: &str, cx: &App) -> Option<Hsla> {
 }
 
 /// The palette for the current appearance.
+///
+/// Navidog keeps the measured Navicat colors. Any other theme (gpui-kit Default) takes its chrome
+/// from `cx.theme()`, so custom skins follow the same colors as gpui components. Icon tints, grid
+/// row states and the find highlight stay on the light/dark constants: they are categorical, not chrome.
 pub fn palette(cx: &App) -> Palette {
-    if cx.theme().is_dark() {
+    let mut p = if cx.theme().is_dark() {
         dark_palette()
     } else {
         light_palette()
+    };
+    if cx.theme().theme_name().starts_with("Navicat") {
+        return p;
     }
+    let t = cx.theme();
+    p.window_bg = t.background;
+    p.control_bg = t.background;
+    p.label = t.foreground;
+    p.label_secondary = t.muted_foreground;
+    p.label_tertiary = t.muted_foreground;
+    p.separator = t.border;
+    p.grid = t.background;
+    p.row_alt = t.list_even;
+    // Washes under the normal foreground. Solid `primary` is near-white in dark mode, so light
+    // text disappears; Tree also replaces a row background with `list_active` and keeps this text.
+    p.row_selected = t.list_active;
+    p.accent = t.primary;
+    p.selection = t.list_active_border;
+    p.selection_text = t.foreground;
+    p.selection_inactive = t.muted;
+    p.disabled_text = t.muted_foreground;
+    p.danger = t.danger;
+    p.success = t.success;
+    p.grid_line = t.table_row_border;
+    p.chrome_active = t.accent;
+    p
 }
 
 /// Connection colors (F-CONN-014), taken from the AppKit system colors.

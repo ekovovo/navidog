@@ -73,7 +73,7 @@ M2 的任务都已完成，逐项记录见 git 历史；M2 的功能状态仍在
 | F-APP-018 关于与检查更新 | 完成 | 目测 | Sparkle 在 M15 |
 | F-APP-019 欢迎界面 | 部分 | snapshot | 有空状态提示；首次启动引导窗口未做 |
 | F-PREF-001 偏好设置窗口 | 完成 | 目测 | |
-| F-PREF-002 常规 | 完成 | settings 单元测试、目测 | 外观、语言、自动连接、显示模式下的对象、显示表下的对象（默认开）。已经写进 settings.json 的 false 不会被改掉 |
+| F-PREF-002 常规 | 完成 | settings 单元测试、theme 单元测试、snapshot | 主题（Navidog、Default，默认 Navidog）、外观、语言、自动连接、显示模式下的对象、显示表下的对象（默认开）。已经写进 settings.json 的 false 不会被改掉 |
 | F-PREF-010 高级 | 部分 | | 设置位置、主密码已完成；日志选项未做 |
 | F-CONN-001 新建连接：选择类型 | 完成 | snapshot | |
 | F-CONN-002 连接表单：常规 | 完成 | ui 测试、snapshot | |
