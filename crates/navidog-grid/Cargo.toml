@@ -4,7 +4,8 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-publish.workspace = true
+repository.workspace = true
+description = "Result grid and table viewer for navidog."
 
 [dependencies]
 navidog-ui.workspace = true

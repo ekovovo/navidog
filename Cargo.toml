@@ -4,22 +4,24 @@ members = ["crates/*", "xtask"]
 default-members = ["crates/navidog"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.0.1"
 edition = "2024"
 rust-version = "1.92"
 license = "Apache-2.0"
-publish = false
+repository = "https://github.com/xhofe/navidog"
 
 [workspace.dependencies]
-navidog-ui = { path = "crates/navidog-ui" }
-navidog-core = { path = "crates/navidog-core" }
-navidog-util = { path = "crates/navidog-util" }
-navidog-db = { path = "crates/navidog-db" }
-navidog-plugin = { path = "crates/navidog-plugin" }
-navidog-connection = { path = "crates/navidog-connection" }
-navidog-navigator = { path = "crates/navidog-navigator" }
-navidog-grid = { path = "crates/navidog-grid" }
-navidog-query = { path = "crates/navidog-query" }
+# `version` lets `cargo publish` rewrite the path to a crates.io requirement.
+# Keep it equal to workspace.package.version.
+navidog-ui = { version = "0.0.1", path = "crates/navidog-ui" }
+navidog-core = { version = "0.0.1", path = "crates/navidog-core" }
+navidog-util = { version = "0.0.1", path = "crates/navidog-util" }
+navidog-db = { version = "0.0.1", path = "crates/navidog-db" }
+navidog-plugin = { version = "0.0.1", path = "crates/navidog-plugin" }
+navidog-connection = { version = "0.0.1", path = "crates/navidog-connection" }
+navidog-navigator = { version = "0.0.1", path = "crates/navidog-navigator" }
+navidog-grid = { version = "0.0.1", path = "crates/navidog-grid" }
+navidog-query = { version = "0.0.1", path = "crates/navidog-query" }
 
 gpui-kit = "0.7"
 rust-i18n = "4"

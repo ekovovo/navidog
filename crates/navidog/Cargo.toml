@@ -4,7 +4,8 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-publish.workspace = true
+repository.workspace = true
+description = "Database client for macOS."
 
 [dependencies]
 gpui-kit.workspace = true
@@ -28,7 +29,7 @@ tracing-appender = "0.2"
 [dev-dependencies]
 gpui-kit = { workspace = true, features = ["test-support"] }
 
-# 需要 Metal，默认 `cargo test` 不运行；手动执行 `cargo test -p navidog --test snapshot`
+# Needs Metal, so `cargo test` skips it. Run `cargo test -p navidog --test snapshot` by hand.
 [[test]]
 name = "snapshot"
 harness = false

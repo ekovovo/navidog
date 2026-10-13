@@ -5128,7 +5128,7 @@ dependencies = [
 
 [[package]]
 name = "navidog"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "gpui-kit",
@@ -5151,7 +5151,7 @@ dependencies = [
 
 [[package]]
 name = "navidog-connection"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "gpui-kit",
@@ -5166,7 +5166,7 @@ dependencies = [
 
 [[package]]
 name = "navidog-core"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "argon2 0.5.3",
@@ -5183,7 +5183,7 @@ dependencies = [
 
 [[package]]
 name = "navidog-db"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5207,7 +5207,7 @@ dependencies = [
 
 [[package]]
 name = "navidog-grid"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "gpui-kit",
  "navidog-core",
@@ -5222,7 +5222,7 @@ dependencies = [
 
 [[package]]
 name = "navidog-navigator"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "chrono",
  "gpui-kit",
@@ -5240,7 +5240,7 @@ dependencies = [
 
 [[package]]
 name = "navidog-plugin"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "gpui-kit",
  "navidog-core",
@@ -5248,7 +5248,7 @@ dependencies = [
 
 [[package]]
 name = "navidog-query"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5269,7 +5269,7 @@ dependencies = [
 
 [[package]]
 name = "navidog-ui"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "gpui-kit",
@@ -5279,7 +5279,7 @@ dependencies = [
 
 [[package]]
 name = "navidog-util"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "serde_json",
  "sqlformat",
