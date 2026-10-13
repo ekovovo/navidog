@@ -181,25 +181,51 @@ pub(crate) fn complete(text: &str, offset: usize, src: &Sources) -> (Range<usize
     }
     let needle = word.to_lowercase();
     let mut seen = std::collections::HashSet::new();
-    let mut ranked: Vec<(u8, Candidate)> = out
+    let mut ranked: Vec<(u8, u32, Candidate)> = out
         .into_iter()
         .filter(|c| seen.insert((c.label.clone(), c.detail.clone())))
         .filter_map(|c| {
             let label = c.label.to_lowercase();
-            if needle.is_empty() || label.starts_with(&needle) {
-                Some((0, c))
-            } else if label.contains(&needle) {
-                Some((1, c))
-            } else {
-                None
-            }
+            match_key(&label, &needle).map(|(tier, gaps)| (tier, gaps, c))
         })
         .collect();
-    ranked.sort_by(|(ra, a), (rb, b)| {
-        ra.cmp(rb)
+    ranked.sort_by(|(ta, ga, a), (tb, gb, b)| {
+        ta.cmp(tb)
+            .then(ga.cmp(gb))
             .then_with(|| a.label.to_lowercase().cmp(&b.label.to_lowercase()))
     });
-    (start..offset, ranked.into_iter().map(|(_, c)| c).collect())
+    (
+        start..offset,
+        ranked.into_iter().map(|(_, _, c)| c).collect(),
+    )
+}
+
+/// Prefix is 0, a consecutive substring is 1, a subsequence is 2.
+/// `gaps` is characters skipped between the first and last hit; only
+/// subsequences use it, so a tighter match sorts first.
+fn match_key(label: &str, needle: &str) -> Option<(u8, u32)> {
+    if needle.is_empty() || label.starts_with(needle) {
+        return Some((0, 0));
+    }
+    if label.contains(needle) {
+        return Some((1, 0));
+    }
+    subsequence_gaps(label, needle).map(|gaps| (2, gaps))
+}
+
+/// Characters between the first and last matched character, minus the needle.
+/// `None` when `needle` is not a subsequence of `label`.
+fn subsequence_gaps(label: &str, needle: &str) -> Option<u32> {
+    let mut rest = label.chars().enumerate();
+    let mut first = None;
+    let mut last = 0;
+    for n in needle.chars() {
+        let (i, _) = rest.find(|(_, c)| *c == n)?;
+        first.get_or_insert(i);
+        last = i;
+    }
+    let span = last - first? + 1;
+    Some((span - needle.chars().count()) as u32)
 }
 
 /// Feeds the editor's completion menu.
@@ -287,17 +313,25 @@ impl CompletionProvider for Provider {
             start: text.offset_to_position(range.start + from),
             end: text.offset_to_position(range.end + from),
         };
+        let typed = window_text[range.clone()].to_lowercase();
         let items = list
             .into_iter()
             .take(200)
-            .map(|c| CompletionItem {
-                label: c.label,
-                detail: Some(c.detail),
-                text_edit: Some(CompletionTextEdit::Edit(TextEdit {
-                    range: lsp_range,
-                    new_text: c.insert,
-                })),
-                ..CompletionItem::default()
+            .map(|c| {
+                // The menu only paints a prefix. An empty filter_text skips that
+                // paint, so a contains or subsequence hit is not highlighted on
+                // characters that did not match.
+                let prefix = c.label.to_lowercase().starts_with(&typed);
+                CompletionItem {
+                    label: c.label,
+                    detail: Some(c.detail),
+                    filter_text: (!prefix).then(String::new),
+                    text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                        range: lsp_range,
+                        new_text: c.insert,
+                    })),
+                    ..CompletionItem::default()
+                }
             })
             .collect();
         Task::ready(Ok(CompletionResponse::Array(items)))
@@ -467,5 +501,58 @@ mod tests {
         // `info` is inside `actor_info`, after the prefix matches
         let got = run("info|", Dialect::MySql, &none);
         assert!(got.iter().position(|l| l == "actor_info").is_some());
+    }
+
+    #[test]
+    fn subsequence_matches_rank_after_tighter_hits() {
+        let outline = Outline {
+            tables: vec![
+                OutlineTable {
+                    name: "mocfg".into(),
+                    ..OutlineTable::default()
+                },
+                OutlineTable {
+                    name: "x_mocfg_y".into(),
+                    ..OutlineTable::default()
+                },
+                OutlineTable {
+                    name: "mount_cfgs".into(),
+                    ..OutlineTable::default()
+                },
+                OutlineTable {
+                    name: "m_x_o_x_c_f_g".into(),
+                    ..OutlineTable::default()
+                },
+            ],
+            ..Outline::default()
+        };
+        let labels = |text: &str| {
+            let offset = text.find('|').unwrap();
+            let text = text.replace('|', "");
+            let none = |_: &str| None;
+            complete(
+                &text,
+                offset,
+                &Sources {
+                    dialect: Dialect::Sqlite,
+                    current: None,
+                    outline: Some(&outline),
+                    others: &none,
+                    snippets: &[],
+                },
+            )
+            .1
+            .into_iter()
+            .map(|c| c.label)
+            .collect::<Vec<_>>()
+        };
+        let got = labels("mocfg|");
+        let pos = |name: &str| got.iter().position(|l| l == name).unwrap();
+        assert!(pos("mocfg") < pos("x_mocfg_y"));
+        assert!(pos("x_mocfg_y") < pos("mount_cfgs"));
+        assert!(pos("mount_cfgs") < pos("m_x_o_x_c_f_g"));
+        assert!(labels("MOCFG|").contains(&"mount_cfgs".to_string()));
+        assert!(labels("munt|").contains(&"mount_cfgs".to_string()));
+        assert!(!labels("moxnt|").iter().any(|l| l == "mount_cfgs"));
     }
 }
