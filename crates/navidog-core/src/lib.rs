@@ -5,6 +5,7 @@
 extern crate gpui_kit as gpui;
 
 pub mod actions;
+pub mod column_widths;
 pub mod connection;
 pub mod crypto;
 pub mod favorites;

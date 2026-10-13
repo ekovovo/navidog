@@ -1,9 +1,9 @@
 //! Code completion info (30-query-editor.md §4): tables, views, functions and every column of a
 //! database (PostgreSQL: a schema), fetched in one go, kept in memory and written to
-//! `outline/<connection>/<database>[/<schema>].json` in the config folder.
+//! `profiles/<connection>/.outline/<database>[/<schema>].json` in the config folder.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use gpui_kit::{App, AppContext as _, Context, Entity, Global, Task};
@@ -198,19 +198,21 @@ pub async fn fetch(rel: &mut dyn Relational, scope: &Scope, system: bool) -> DbR
     Ok(out)
 }
 
-fn dir() -> PathBuf {
-    navidog_core::paths::config_dir().join("outline")
-}
-
-/// Not under `profiles/`, so a database named "outline" cannot clash with a query folder.
-pub fn path(scope: &Scope) -> PathBuf {
-    let base = dir()
+fn path_in(root: &Path, scope: &Scope) -> PathBuf {
+    // A leading dot cannot clash with a database folder: those names encode `.` as `%2E`.
+    let base = root
+        .join("profiles")
         .join(&scope.connection)
+        .join(".outline")
         .join(encode_segment(&scope.database));
     match &scope.schema {
         Some(s) => base.join(format!("{}.json", encode_segment(s))),
         None => base.with_extension("json"),
     }
+}
+
+pub fn path(scope: &Scope) -> PathBuf {
+    path_in(&navidog_core::paths::config_dir(), scope)
 }
 
 pub fn load(scope: &Scope) -> Option<Outline> {
@@ -222,6 +224,15 @@ pub fn save(scope: &Scope, outline: &Outline) {
         && let Err(e) = navidog_core::paths::write_atomic(&path(scope), &bytes)
     {
         tracing::warn!("saving code completion info failed: {e}");
+    }
+}
+
+fn clear_files() {
+    let root = navidog_core::paths::config_dir();
+    if let Ok(entries) = std::fs::read_dir(root.join("profiles")) {
+        for entry in entries.flatten() {
+            let _ = std::fs::remove_dir_all(entry.path().join(".outline"));
+        }
     }
 }
 
@@ -293,6 +304,10 @@ impl OutlineCache {
         let task = cx.spawn(async move |this, cx| {
             let result = job.await;
             let _ = this.update(cx, |this, cx| {
+                // Dropped with the connection, or cleared: do not write the file back.
+                if !this.tasks.contains_key(&key) {
+                    return;
+                }
                 this.tasks.remove(&key);
                 let state = match result {
                     Ok(Ok(o)) => {
@@ -319,8 +334,23 @@ impl OutlineCache {
     pub fn clear_all(&mut self, cx: &mut Context<Self>) {
         self.map.clear();
         self.tasks.clear();
-        let _ = std::fs::remove_dir_all(dir());
+        clear_files();
         cx.notify();
+    }
+
+    /// Drops cached outlines for a connection that is about to be deleted, so a finished fetch
+    /// does not recreate `.outline` after the profile directory is removed.
+    pub fn forget_connection(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.map.retain(|scope, _| scope.connection != id);
+        self.tasks.retain(|scope, _| scope.connection != id);
+        cx.notify();
+    }
+
+    pub fn drop_connection(id: &str, cx: &mut App) {
+        if !cx.has_global::<GlobalOutlines>() {
+            return;
+        }
+        Self::global(cx).update(cx, |cache, cx| cache.forget_connection(id, cx));
     }
 }
 
@@ -334,11 +364,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn paths_encode_names_outside_profiles() {
+    fn paths_encode_names_inside_the_connection_folder() {
+        let root = Path::new("/cfg");
         let s = Scope::new("c1", "a/b", Some("public".into()));
-        let p = path(&s);
-        assert!(p.ends_with("outline/c1/a%2Fb/public.json"), "{p:?}");
+        let p = path_in(root, &s);
+        assert!(
+            p.ends_with("profiles/c1/.outline/a%2Fb/public.json"),
+            "{p:?}"
+        );
         let m = Scope::new("c1", "sakila", None);
-        assert!(path(&m).ends_with("outline/c1/sakila.json"));
+        assert!(path_in(root, &m).ends_with("profiles/c1/.outline/sakila.json"));
+        let dotted = Scope::new("c1", ".outline", None);
+        assert!(path_in(root, &dotted).ends_with("profiles/c1/.outline/%2Eoutline.json"));
     }
 }

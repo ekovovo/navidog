@@ -1,5 +1,8 @@
 //! Virtual groups (F-NAV-007): user-defined folders that group the objects of one category,
-//! saved in `vgroup.json`. Connection groups live in the connection store instead.
+//! one `.vgroups.json` per connection. Connection groups live in the connection store instead.
+
+use std::collections::{BTreeMap, HashSet};
+use std::path::{Path, PathBuf};
 
 use gpui_kit::{App, AppContext as _, Context, Entity, Global};
 use serde::{Deserialize, Serialize};
@@ -17,12 +20,13 @@ pub struct VirtualGroup {
     pub members: Vec<String>,
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct VirtualGroups {
     groups: Vec<VirtualGroup>,
-    /// Where to save; `None` keeps the groups in memory (tests)
-    #[serde(skip)]
-    path: Option<std::path::PathBuf>,
+    /// Config directory; `None` keeps the groups in memory (tests)
+    root: Option<PathBuf>,
+    /// Connections that have a `.vgroups.json`, so an emptied one can be deleted
+    written: HashSet<String>,
 }
 
 struct GlobalGroups(Entity<VirtualGroups>);
@@ -34,23 +38,34 @@ impl VirtualGroups {
     }
 
     fn load() -> Self {
-        let path = paths::config_dir().join("vgroup.json");
-        let mut groups: Self = std::fs::read(&path)
-            .ok()
-            .and_then(|b| serde_json::from_slice(&b).ok())
-            .unwrap_or_default();
-        groups.path = Some(path);
-        groups
+        let root = paths::config_dir();
+        let (groups, written) = load_all(&root);
+        Self {
+            groups,
+            root: Some(root),
+            written,
+        }
     }
 
     fn commit(&mut self, cx: &mut Context<Self>) {
-        if let Some(path) = &self.path {
-            let bytes = serde_json::to_vec_pretty(self).expect("virtual groups serialize");
-            if let Err(err) = paths::write_atomic(path, &bytes) {
-                tracing::error!("failed to save vgroup.json: {err}");
-            }
+        if let Some(root) = self.root.clone() {
+            save_all(&root, &self.groups, &mut self.written);
         }
         cx.notify();
+    }
+
+    /// Drops this connection's groups without writing. The profile directory is about to go.
+    pub fn forget_connection(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.groups.retain(|g| g.scope.connection != id);
+        self.written.remove(id);
+        cx.notify();
+    }
+
+    pub fn drop_connection(id: &str, cx: &mut App) {
+        if !cx.has_global::<GlobalGroups>() {
+            return;
+        }
+        Self::global(cx).update(cx, |groups, cx| groups.forget_connection(id, cx));
     }
 
     /// Groups of one category, in creation order.
@@ -132,6 +147,95 @@ impl VirtualGroups {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+struct StoredGroup {
+    id: String,
+    name: String,
+    database: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    schema: Option<String>,
+    kind: ObjectKind,
+    members: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct StoredFile {
+    version: u32,
+    groups: Vec<StoredGroup>,
+}
+
+fn file_path(root: &Path, connection: &str) -> PathBuf {
+    root.join("profiles").join(connection).join(".vgroups.json")
+}
+
+fn load_all(root: &Path) -> (Vec<VirtualGroup>, HashSet<String>) {
+    let mut groups = Vec::new();
+    let mut written = HashSet::new();
+    let Ok(entries) = std::fs::read_dir(root.join("profiles")) else {
+        return (groups, written);
+    };
+    for entry in entries.flatten() {
+        let Ok(id) = entry.file_name().into_string() else {
+            continue;
+        };
+        let Ok(bytes) = std::fs::read(entry.path().join(".vgroups.json")) else {
+            continue;
+        };
+        let Ok(file) = serde_json::from_slice::<StoredFile>(&bytes) else {
+            continue;
+        };
+        written.insert(id.clone());
+        for group in file.groups {
+            groups.push(VirtualGroup {
+                id: group.id,
+                name: group.name,
+                scope: Scope::new(&id, group.database, group.schema),
+                kind: group.kind,
+                members: group.members,
+            });
+        }
+    }
+    (groups, written)
+}
+
+fn save_all(root: &Path, groups: &[VirtualGroup], written: &mut HashSet<String>) {
+    let mut by: BTreeMap<&str, Vec<&VirtualGroup>> = BTreeMap::new();
+    for group in groups {
+        by.entry(group.scope.connection.as_str())
+            .or_default()
+            .push(group);
+    }
+    let mut next = HashSet::new();
+    for (id, groups) in &by {
+        let file = StoredFile {
+            version: 1,
+            groups: groups
+                .iter()
+                .map(|group| StoredGroup {
+                    id: group.id.clone(),
+                    name: group.name.clone(),
+                    database: group.scope.database.clone(),
+                    schema: group.scope.schema.clone(),
+                    kind: group.kind,
+                    members: group.members.clone(),
+                })
+                .collect(),
+        };
+        let Ok(bytes) = serde_json::to_vec_pretty(&file) else {
+            continue;
+        };
+        if let Err(err) = paths::write_atomic(&file_path(root, id), &bytes) {
+            tracing::error!("failed to save virtual groups: {err}");
+        } else {
+            next.insert((*id).to_string());
+        }
+    }
+    for id in written.difference(&next) {
+        let _ = std::fs::remove_file(file_path(root, id));
+    }
+    *written = next;
+}
+
 pub(crate) fn init(cx: &mut App) {
     let groups = cx.new(|_| VirtualGroups::load());
     cx.set_global(GlobalGroups(groups));
@@ -165,5 +269,54 @@ mod tests {
             // Views of the same scope have their own groups
             assert_eq!(g.groups_for(&scope, ObjectKind::View).count(), 0);
         });
+    }
+
+    #[test]
+    fn groups_split_by_connection() {
+        let root = std::env::temp_dir().join(format!("navidog-vgroups-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let saved = vec![
+            VirtualGroup {
+                id: "vg-1".into(),
+                name: "A".into(),
+                scope: Scope::new("c-a", "db", None),
+                kind: ObjectKind::Table,
+                members: vec!["t".into()],
+            },
+            VirtualGroup {
+                id: "vg-2".into(),
+                name: "B".into(),
+                scope: Scope::new("c-b", ".vgroups.json", None),
+                kind: ObjectKind::View,
+                members: Vec::new(),
+            },
+        ];
+        let mut written = HashSet::new();
+        save_all(&root, &saved, &mut written);
+        let (groups, written) = load_all(&root);
+        assert!(written.contains("c-a") && written.contains("c-b"));
+        let a = groups.iter().find(|g| g.scope.connection == "c-a").unwrap();
+        assert!(a.scope.schema.is_none());
+        assert_eq!(a.members, ["t"]);
+        let meta = file_path(&root, "c-b");
+        assert!(meta.is_file());
+        assert_ne!(
+            meta,
+            root.join("profiles")
+                .join("c-b")
+                .join(crate::queries::encode_segment(".vgroups.json"))
+        );
+
+        let mut written = written;
+        let kept: Vec<_> = groups
+            .iter()
+            .filter(|g| g.scope.connection == "c-a")
+            .cloned()
+            .collect();
+        save_all(&root, &kept, &mut written);
+        assert!(file_path(&root, "c-a").is_file());
+        assert!(!file_path(&root, "c-b").exists());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

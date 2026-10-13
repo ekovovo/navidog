@@ -131,7 +131,7 @@ pub struct Scope { pub database: String, pub schema: Option<String> }
 
 ## 7. 其他功能
 
-- **虚拟组**（F-NAV-007）：保存在 `vgroup.json`，键是“连接 ID + 对象分类 + 作用域”；右键“管理组”可以新建组、添加到组、从组中排除；支持拖放。
+- **虚拟组**（F-NAV-007）：每个连接一份，保存在该连接目录的 `.vgroups.json`（作用域不重复连接 ID）；右键“管理组”可以新建组、添加到组、从组中排除；支持拖放。
 - **收藏夹**（F-APP-011）：保存在 `favorites.json`；新增“收藏夹”菜单；⌥⇧1-9 添加，⌃⇧1-9 打开。
 - **navidog URI**（F-APP-014、F-APP-015）：格式为 `navidog://open?conn=<名称>&host=<主机>&db=<库>&schema=<模式>&kind=<分类>&name=<对象>`；连接映射规则见 `share_uri.html`。
 - **管理连接窗口**（F-CONN-015）：用表格列出全部连接；工具栏提供新建、编辑、标星、隐藏、删除；搜索时匹配名称、主机、端口和用户名，并高亮匹配内容。

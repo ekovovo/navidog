@@ -387,7 +387,7 @@ impl ResultGrid {
         self.scroll_to_row(pos.0, cx);
     }
 
-    /// Remembers resized columns by name and writes them to settings for the open table.
+    /// Remembers resized columns by name and writes them for the open table.
     fn store_widths(&mut self, reported: &[Pixels], cx: &mut Context<Self>) {
         let Some(target) = self.target.clone() else {
             return;
@@ -411,13 +411,10 @@ impl ResultGrid {
                 map.insert(SharedString::from(name.as_str()), px(*width));
             }
         });
-        if changed.is_empty() || !cx.has_global::<Settings>() {
+        if changed.is_empty() {
             return;
         }
-        let key = width_key(&target.scope, &target.table);
-        Settings::update(cx, |s| {
-            s.column_widths.entry(key).or_default().extend(changed);
-        });
+        navidog_core::column_widths::store(&target.scope, &target.table, &changed);
     }
 
     pub fn scroll_to_row(&self, row: usize, cx: &mut App) {
@@ -743,31 +740,14 @@ fn grid_font_pt(cx: &App) -> Option<f32> {
     (!s.use_default_grid_font).then_some(s.grid_font_pt.clamp(*range.start(), *range.end()))
 }
 
-fn width_key(scope: &Scope, table: &str) -> String {
-    format!(
-        "{}\u{1f}{}\u{1f}{}\u{1f}{table}",
-        scope.connection,
-        scope.database,
-        scope.schema.as_deref().unwrap_or("")
-    )
-}
-
-fn load_widths(target: &GridTarget, cx: &App) -> BTreeMap<SharedString, Pixels> {
-    if !cx.has_global::<Settings>() {
-        return BTreeMap::new();
-    }
-    Settings::global(cx)
-        .column_widths
-        .get(&width_key(&target.scope, &target.table))
-        .map(|cols| {
-            cols.iter()
-                .map(|(name, width)| {
-                    // raw-px: persisted column widths are already pixels
-                    (SharedString::from(name.clone()), px(*width))
-                })
-                .collect()
+fn load_widths(target: &GridTarget, _: &App) -> BTreeMap<SharedString, Pixels> {
+    navidog_core::column_widths::load(&target.scope, &target.table)
+        .into_iter()
+        .map(|(name, width)| {
+            // raw-px: persisted column widths are already pixels
+            (SharedString::from(name), px(width))
         })
-        .unwrap_or_default()
+        .collect()
 }
 
 /// How many leading rows to measure. A table page is already bounded; a query result can be the

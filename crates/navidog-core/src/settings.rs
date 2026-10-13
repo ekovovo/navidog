@@ -188,8 +188,6 @@ pub struct Settings {
     pub row_shade: RowShade,
     /// Objects tab detail view: hidden property columns per object kind ("Choose Columns")
     pub object_hidden_columns: std::collections::BTreeMap<String, Vec<String>>,
-    /// Table viewer column widths in pixels, keyed by scope and table then column name
-    pub column_widths: std::collections::BTreeMap<String, std::collections::BTreeMap<String, f32>>,
 
     // Query editor and results (30-query-editor.md, 31-query-results.md)
     /// Run: keep going after a failed statement
@@ -262,7 +260,6 @@ impl Default for Settings {
             grid_font_pt: 13.,
             row_shade: RowShade::Alternate,
             object_hidden_columns: Default::default(),
-            column_widths: Default::default(),
             continue_on_error: false,
             results_position: ResultsPosition::Below,
             show_after_run: ShowAfterRun::Result,

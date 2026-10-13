@@ -173,16 +173,32 @@ M1 实现以下菜单。各菜单的完整结构参考 `reference/tree/MainMenu.
 
 ## 11. 配置文件
 
-所有文件都在 `~/Library/Application Support/navidog/` 下：
+所有文件都在 `~/Library/Application Support/navidog/` 下（`NAVIDOG_HOME` 可覆盖）。不打开某个连接也要读的留在顶层；只有用到该连接时才读写的放进 `profiles/<连接 ID>/`。
+
+顶层：
 
 | 文件 | 内容 | 所属 |
 | --- | --- | --- |
-| `settings.json` | 偏好设置 | `navidog-core` |
+| `settings.json` | 偏好设置（主题、外观、语言、记录、编辑器、启动画面、对象列表隐藏列等）。不含某一个连接的列宽 | `navidog-core` |
 | `state.json` | 窗口位置尺寸、Dock 布局、各窗格显示状态 | `navidog` |
-| `connections.json` | 连接和连接组（密码字段加密），见 [11-connection.md](11-connection.md) | `navidog-core` |
-| `plugins.json` | 插件授权（M5） | `navidog-plugin` |
+| `connections.json` | 全部连接和连接组（密码字段加密），见 [11-connection.md](11-connection.md)。组不属于某一个连接 | `navidog-core` |
+| `favorites.json` | 收藏夹和最近打开。菜单直接读，不打开连接 | `navidog-core` |
+| `snippets.json` | 自定义代码段，按数据库类型，不按连接 | `navidog-core` |
+| `autosave/` | 未保存查询的自动恢复。启动时读，不打开连接 | `navidog-query` |
+| `plugins/` | 插件目录（M5） | `navidog-plugin` |
 
-所有 JSON 都带 `"version"` 字段。写入时先写到临时文件，再原子替换，避免崩溃时损坏配置。
+`profiles/<连接 ID>/`（连接表单里的设置位置；删除连接时整个目录删掉）：
+
+| 文件 | 内容 |
+| --- | --- |
+| `<数据库>[/<模式>]/<名称>.sql` | 已保存查询 |
+| `.column-widths.json` | 拖过的列宽。键是 `数据库\u001f模式\u001f表`（没有模式时中间为空），值是列名到像素，只含拖过的列 |
+| `.outline/<数据库>[/<模式>].json` | 代码补全信息（表、视图、字段、函数） |
+| `.vgroups.json` | 这个连接的虚拟组。scope 不重复连接 ID |
+
+以 `.` 开头的是本程序的元数据。数据库目录名会把开头的 `.` 编成 `%2E`，所以不会和这些文件或 `.outline` 目录撞名。
+
+JSON 写入时先写到临时文件，再原子替换，避免崩溃时损坏配置。`.column-widths.json` 和 `.vgroups.json` 带 `"version"` 字段。
 
 ## 12. 验收清单
 

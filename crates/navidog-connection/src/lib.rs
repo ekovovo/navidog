@@ -230,6 +230,8 @@ fn confirm_delete_connection(window: &mut Window, cx: &mut App) {
             .cancel_text(t!("conn.cancel").to_string())
             .on_ok(move |_, _, cx| {
                 Sessions::global(cx).update(cx, |s, cx| s.close(&id, cx));
+                navidog_core::vgroups::VirtualGroups::drop_connection(&id, cx);
+                navidog_db::outline::OutlineCache::drop_connection(&id, cx);
                 ConnectionStore::global(cx).update(cx, |s, cx| s.remove(&id, cx));
                 let _ = std::fs::remove_dir_all(navidog_core::paths::profile_dir(&id));
                 Workspace::global(cx).update(cx, |w, cx| w.select(Selection::None, cx));
