@@ -24,6 +24,9 @@ query:
   continue_on_error:
     en: Continue on Error
     zh-CN: 遇到错误时继续
+  keep_results:
+    en: Keep Previous Results
+    zh-CN: 保留之前的查询结果
   stop:
     en: Stop
     zh-CN: 停止

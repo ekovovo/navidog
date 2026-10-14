@@ -38,7 +38,7 @@ use navidog_util::sql_format::CommentMode;
 use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 
-use crate::results::Results;
+use crate::results::{CloseAllResults, CloseResultTab, Results, TogglePinTab, UnpinAllTabs};
 use crate::run::{Live, RunKind};
 
 pub(crate) const PANEL: &str = "QueryEditor";
@@ -53,6 +53,7 @@ actions!(
         Stop,
         Explain,
         ToggleContinueOnError,
+        ToggleKeepResults,
         ToggleWordWrap,
         ZoomIn,
         ZoomOut,
@@ -1009,6 +1010,11 @@ impl QueryEditor {
                 Settings::global(cx).continue_on_error,
                 Box::new(ToggleContinueOnError),
             )
+            .menu_with_check(
+                t!("query.keep_results").to_string(),
+                Settings::global(cx).keep_results,
+                Box::new(ToggleKeepResults),
+            )
     }
 
     fn has_selection(&self, cx: &App) -> bool {
@@ -1428,6 +1434,35 @@ impl Render for QueryEditor {
             .on_action(|_: &ToggleContinueOnError, _, cx| {
                 Settings::update(cx, |s| s.continue_on_error = !s.continue_on_error)
             })
+            .on_action(|_: &ToggleKeepResults, _, cx| {
+                Settings::update(cx, |s| s.keep_results = !s.keep_results)
+            })
+            // Result-tab menus dispatch along the focused element (usually the SQL editor)
+            // and bubble to this root. Handlers on the results pane never see them.
+            .on_action(
+                cx.listener(|this, a: &TogglePinTab, _, cx| this.results.toggle_pin(a.id, cx)),
+            )
+            .on_action(
+                cx.listener(|this, a: &CloseResultTab, _, cx| this.results.close_tab(a.id, cx)),
+            )
+            .on_action(cx.listener(|this, _: &UnpinAllTabs, _, cx| {
+                let ids: Vec<u64> = this
+                    .results
+                    .tabs
+                    .iter()
+                    .filter(|t| t.pinned)
+                    .map(|t| t.id)
+                    .collect();
+                for id in ids.into_iter().rev() {
+                    this.results.toggle_pin(id, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &CloseAllResults, _, cx| {
+                let ids: Vec<u64> = this.results.tabs.iter().map(|t| t.id).collect();
+                for id in ids {
+                    this.results.close_tab(id, cx);
+                }
+            }))
             .on_action(cx.listener(|this, a: &PickConnection, window, cx| {
                 this.pick_connection(a.id.to_string(), window, cx)
             }))

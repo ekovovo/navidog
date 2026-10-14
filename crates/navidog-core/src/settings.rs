@@ -192,6 +192,8 @@ pub struct Settings {
     // Query editor and results (30-query-editor.md, 31-query-results.md)
     /// Run: keep going after a failed statement
     pub continue_on_error: bool,
+    /// Run: leave previous result and explain tabs in place (31 §2)
+    pub keep_results: bool,
     pub results_position: ResultsPosition,
     pub show_after_run: ShowAfterRun,
     /// MySQL / MariaDB: profile the run and diff the session status
@@ -261,6 +263,7 @@ impl Default for Settings {
             row_shade: RowShade::Alternate,
             object_hidden_columns: Default::default(),
             continue_on_error: false,
+            keep_results: false,
             results_position: ResultsPosition::Below,
             show_after_run: ShowAfterRun::Result,
             show_profile: false,

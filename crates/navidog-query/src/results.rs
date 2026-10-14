@@ -137,6 +137,8 @@ pub(crate) struct Results {
     pub only_errors: bool,
     /// Result and explain tabs made by the current run, for naming and the cap
     results_this_run: usize,
+    /// `next_id` at the start of the current run. Tabs above this were created by it.
+    run_floor: u64,
     explains_this_run: usize,
     /// MySQL "Show Profile and Status" tabs of the last run
     profile: Option<Entity<ResultGrid>>,
@@ -183,6 +185,7 @@ impl Results {
             ended: None,
             only_errors: false,
             results_this_run: 0,
+            run_floor: 0,
             explains_this_run: 0,
             profile: None,
             status: None,
@@ -195,18 +198,21 @@ impl Results {
         self.started.is_some()
     }
 
-    /// Each run starts by dropping the tabs that are not pinned (31 §2).
-    pub fn begin_run(&mut self, cx: &mut Context<QueryEditor>) {
-        let dropped: Vec<u64> = self
-            .tabs
-            .iter()
-            .filter(|t| !t.pinned)
-            .map(|t| t.id)
-            .collect();
-        for id in dropped {
-            self.subscriptions.remove(&id);
+    /// Each run drops the tabs that are not pinned, unless `keep` is set (31 §2).
+    pub fn begin_run(&mut self, keep: bool, cx: &mut Context<QueryEditor>) {
+        if !keep {
+            let dropped: Vec<u64> = self
+                .tabs
+                .iter()
+                .filter(|t| !t.pinned)
+                .map(|t| t.id)
+                .collect();
+            for id in dropped {
+                self.subscriptions.remove(&id);
+            }
+            self.tabs.retain(|t| t.pinned);
         }
-        self.tabs.retain(|t| t.pinned);
+        self.run_floor = self.next_id;
         self.rows.clear();
         self.messages_text.clear();
         self.results_this_run = 0;
@@ -323,7 +329,12 @@ impl Results {
     /// Picks the page "View > Show After Execution" asks for.
     pub fn end_run(&mut self, explain: bool, cx: &mut Context<QueryEditor>) {
         self.ended = Some(chrono::Local::now());
-        let first_new = self.tabs.iter().find(|t| !t.pinned).map(|t| t.id);
+        let first_new = self
+            .tabs
+            .iter()
+            .filter(|t| t.id > self.run_floor)
+            .map(|t| t.id)
+            .min();
         self.page = match Settings::global(cx).show_after_run {
             ShowAfterRun::Result => first_new.map(Page::Tab).unwrap_or(Page::Messages),
             ShowAfterRun::Messages if !explain => Page::Messages,
@@ -1107,6 +1118,7 @@ impl QueryEditor {
         label: String,
         page: Page,
         pinned: bool,
+        close: Option<u64>,
         cx: &mut Context<Self>,
     ) -> gpui_kit::Stateful<gpui_kit::Div> {
         let p = palette(cx);
@@ -1134,6 +1146,19 @@ impl QueryEditor {
                 truncated(SharedString::from(format!("{id}-label")), label)
                     .max_w(tokens::editor_tab::TITLE_MAX_WIDTH.rems()),
             )
+            .when_some(close, |d, tab_id| {
+                d.child(
+                    Button::new(SharedString::from(format!("result-close-{tab_id}")))
+                        .ghost()
+                        .xsmall()
+                        .icon(lucide("x"))
+                        .tooltip(t!("query.close").to_string())
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            cx.stop_propagation();
+                            this.results.close_tab(tab_id, cx);
+                        })),
+                )
+            })
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.results.page = page;
                 cx.notify();
@@ -1154,11 +1179,13 @@ impl QueryEditor {
             let id = t.id;
             let lines = t.info.lines(&t.sql);
             let pinned = t.pinned;
+            let close = Settings::global(cx).keep_results.then_some(id);
             this.tab_button(
                 SharedString::from(format!("result-tab-{id}")),
                 t.name.clone(),
                 Page::Tab(id),
                 pinned,
+                close,
                 cx,
             )
             .when(pinned, |d| {
@@ -1220,6 +1247,7 @@ impl QueryEditor {
                 t!("query.messages").to_string(),
                 Page::Messages,
                 false,
+                None,
                 cx,
             )
             .into_any_element(),
@@ -1230,6 +1258,7 @@ impl QueryEditor {
                 t!("query.summary").to_string(),
                 Page::Summary,
                 false,
+                None,
                 cx,
             )
             .into_any_element(),
@@ -1247,6 +1276,7 @@ impl QueryEditor {
                     t!("query.profile").to_string(),
                     Page::Profile,
                     false,
+                    None,
                     cx,
                 )
                 .into_any_element(),
@@ -1257,6 +1287,7 @@ impl QueryEditor {
                     t!("query.status").to_string(),
                     Page::Status,
                     false,
+                    None,
                     cx,
                 )
                 .into_any_element(),
@@ -1309,30 +1340,6 @@ impl QueryEditor {
             .id("query-results")
             .size_full()
             .min_h_0()
-            .on_action(
-                cx.listener(|this, a: &TogglePinTab, _, cx| this.results.toggle_pin(a.id, cx)),
-            )
-            .on_action(
-                cx.listener(|this, a: &CloseResultTab, _, cx| this.results.close_tab(a.id, cx)),
-            )
-            .on_action(cx.listener(|this, _: &UnpinAllTabs, _, cx| {
-                let ids: Vec<u64> = this
-                    .results
-                    .tabs
-                    .iter()
-                    .filter(|t| t.pinned)
-                    .map(|t| t.id)
-                    .collect();
-                for id in ids.into_iter().rev() {
-                    this.results.toggle_pin(id, cx);
-                }
-            }))
-            .on_action(cx.listener(|this, _: &CloseAllResults, _, cx| {
-                let ids: Vec<u64> = this.results.tabs.iter().map(|t| t.id).collect();
-                for id in ids {
-                    this.results.close_tab(id, cx);
-                }
-            }))
             .child(
                 h_flex()
                     .h(tokens::result::TAB_HEIGHT.rems())

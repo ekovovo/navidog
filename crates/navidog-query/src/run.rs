@@ -195,7 +195,8 @@ impl QueryEditor {
         let Some(session) = self.session_job(dialect, cx) else {
             return;
         };
-        self.results.begin_run(cx);
+        self.results
+            .begin_run(Settings::global(cx).keep_results, cx);
         self.clear_diagnostics(cx);
         self.running = true;
         let stop = Arc::new(AtomicBool::new(false));

@@ -162,7 +162,7 @@ fn format_menu() -> Menu {
 }
 
 /// Query menu (31 §8). Shown only while a query editor is the active tab.
-fn query_menu(continue_on_error: bool) -> Menu {
+fn query_menu(continue_on_error: bool, keep_results: bool) -> Menu {
     Menu::new(t!("menu.query").to_string()).items([
         MenuItem::action(t!("menu.run").to_string(), query::Run),
         MenuItem::action(t!("menu.run_current").to_string(), query::RunCurrent),
@@ -172,6 +172,11 @@ fn query_menu(continue_on_error: bool) -> Menu {
             t!("menu.continue_on_error").to_string(),
             Box::new(query::ToggleContinueOnError),
             continue_on_error,
+        ),
+        checked(
+            t!("menu.keep_results").to_string(),
+            Box::new(query::ToggleKeepResults),
+            keep_results,
         ),
     ])
 }
@@ -486,7 +491,10 @@ pub fn set_menus(cx: &mut App) {
     // After View: query + format, or table, or neither (10-shell.md).
     match surface.surface {
         navidog_ui::tabs::MenuSurface::Query => {
-            menus.insert(4, query_menu(settings.continue_on_error));
+            menus.insert(
+                4,
+                query_menu(settings.continue_on_error, settings.keep_results),
+            );
             menus.insert(5, format_menu());
         }
         navidog_ui::tabs::MenuSurface::Table => {

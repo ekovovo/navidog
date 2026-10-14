@@ -331,6 +331,81 @@ fn runs_scripts_into_messages_summary_and_editable_results(cx: &mut TestAppConte
     .unwrap();
     cx.run_until_parked();
     cx.update(|cx| assert!(!editor.read(cx).results_page));
+
+    // Without keep_results the next run replaces unpinned tabs, and they have no close button.
+    cx.update(|cx| Settings::update(cx, |s| s.results_position = ResultsPosition::Below));
+    set_text(cx, handle, &editor, "SELECT 1 AS n");
+    run(cx, handle, &editor, RunKind::All);
+    idle(cx, &editor);
+    let replaced = cx.update(|cx| editor.read(cx).results.tabs[0].id);
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(
+            window
+                .try_find(gpui_kit::SharedString::from(format!(
+                    "result-close-{replaced}"
+                )))
+                .is_none()
+        );
+    })
+    .unwrap();
+    set_text(cx, handle, &editor, "SELECT 2 AS n");
+    run(cx, handle, &editor, RunKind::All);
+    idle(cx, &editor);
+    let kept = cx.update(|cx| {
+        let tabs = &editor.read(cx).results.tabs;
+        assert_eq!(tabs.len(), 1);
+        assert_ne!(tabs[0].id, replaced);
+        tabs[0].id
+    });
+
+    // With it on, the previous tab stays, the new one is current, and its close button works.
+    cx.update(|cx| Settings::update(cx, |s| s.keep_results = true));
+    set_text(cx, handle, &editor, "SELECT 3 AS n");
+    run(cx, handle, &editor, RunKind::All);
+    idle(cx, &editor);
+    let current = cx.update(|cx| {
+        let e = editor.read(cx);
+        assert_eq!(e.results.tabs.len(), 2);
+        assert_eq!(e.results.tabs[0].id, kept);
+        assert_eq!(e.results.rows.len(), 1);
+        let current = e.results.tabs[1].id;
+        assert!(matches!(
+            e.results.page,
+            crate::results::Page::Tab(id) if id == current
+        ));
+        current
+    });
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        let id = gpui_kit::SharedString::from(format!("result-close-{kept}"));
+        assert!(window.try_find(id.clone()).is_some());
+        window.click(id, cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update(|cx| {
+        let e = editor.read(cx);
+        assert_eq!(e.results.tabs.len(), 1);
+        assert_eq!(e.results.tabs[0].id, current);
+        assert!(matches!(
+            e.results.page,
+            crate::results::Page::Tab(id) if id == current
+        ));
+    });
+
+    // The context menu dispatches along the focused SQL editor and bubbles to this root.
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        editor.update(cx, |e, cx| {
+            e.editor.update(cx, |ed, cx| ed.focus(window, cx));
+        });
+        window.dispatch_action(Box::new(crate::results::TogglePinTab { id: current }), cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update(|cx| assert!(editor.read(cx).results.tabs[0].pinned));
+    cx.update(|cx| Settings::update(cx, |s| s.keep_results = false));
 }
 
 #[gpui_kit::test]
