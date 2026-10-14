@@ -1101,9 +1101,23 @@ impl TableViewer {
         self.show_filter = !self.show_filter;
         if self.show_filter {
             self.focus_filter_input(window, cx);
+        } else if self.focus_handle.contains_focused(window, cx) {
+            // The focused field is in this pane and unmounts with it. Leave focus on the
+            // grid, or the shortcut has nowhere to land and cannot open the pane again.
+            self.focus_grid(window, cx);
         }
         self.note_menu(cx);
         cx.notify();
+    }
+
+    /// Where keyboard input goes once a pane that held it has closed.
+    fn focus_grid(&self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.form {
+            window.focus(&self.focus_handle, cx);
+        } else {
+            let handle = self.grid.read(cx).focus_handle(cx);
+            window.focus(&handle, cx);
+        }
     }
 
     /// Text mode focuses the WHERE field. The builder has no WHERE field, so the first
