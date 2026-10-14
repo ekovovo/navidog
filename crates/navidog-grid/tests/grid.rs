@@ -494,9 +494,7 @@ fn click_past_the_last_column_selects_the_row(cx: &mut TestAppContext) {
         })
     });
 
-    let selection = |cx: &mut TestAppContext| {
-        cx.update(|cx| grid.read(cx).model(cx).selection())
-    };
+    let selection = |cx: &mut TestAppContext| cx.update(|cx| grid.read(cx).model(cx).selection());
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
         window.render_frame(cx);

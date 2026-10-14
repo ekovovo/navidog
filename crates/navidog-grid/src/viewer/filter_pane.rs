@@ -265,12 +265,13 @@ impl TableViewer {
         let label = |s: &'static str| div().text_color(p.label_secondary).child(s);
         h_flex()
             .h(tokens::viewer::FILTER_HEIGHT.rems())
+            .items_center()
             .px_2()
             .gap_2()
             .child(label("WHERE"))
-            .child(Input::new(&self.filter).xsmall().flex_1().min_w_0())
+            .child(Input::new(&self.filter).small().flex_1().min_w_0())
             .child(label("ORDER BY"))
-            .child(Input::new(&self.order).xsmall().flex_1().min_w_0())
+            .child(Input::new(&self.order).small().flex_1().min_w_0())
     }
 
     pub(super) fn render_rule(&self, index: usize, cx: &mut Context<Self>) -> impl IntoElement {
@@ -282,6 +283,7 @@ impl TableViewer {
         };
         h_flex()
             .h(tokens::viewer::FILTER_HEIGHT.rems())
+            .items_center()
             .px_2()
             .gap_1()
             .min_w_0()
@@ -334,10 +336,10 @@ impl TableViewer {
                     })),
             )
             .when(rule.op.needs_value(), |row| {
-                row.child(Input::new(&rule.value).xsmall().flex_1().min_w_0())
+                row.child(Input::new(&rule.value).small().flex_1().min_w_0())
             })
             .when(rule.op.needs_second(), |row| {
-                row.child(Input::new(&rule.value2).xsmall().flex_1().min_w_0())
+                row.child(Input::new(&rule.value2).small().flex_1().min_w_0())
             })
             .child(
                 Button::new(ElementId::Name(format!("filter-remove-{index}").into()))

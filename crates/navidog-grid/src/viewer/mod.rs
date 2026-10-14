@@ -16,16 +16,17 @@ use gpui_kit::component::input::{
     Editor, EditorState, Escape, Input, InputEvent, InputState, Textarea, TextareaState,
 };
 use gpui_kit::component::native_menu::NativeMenu;
+use gpui_kit::component::resizable::{resizable_panel, v_resizable};
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{
     Disableable as _, Selectable as _, Sizable as _, WindowExt as _, h_flex, v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    App, AppContext as _, ClickEvent, Context, ElementId, Entity, EventEmitter, FocusHandle,
-    Focusable, Image, InteractiveElement as _, IntoElement, KeyBinding, ParentElement as _,
-    PathPromptOptions, Render, SharedString, StatefulInteractiveElement as _, Styled as _,
-    Subscription, Task, WeakEntity, Window, actions, div, img,
+    AnyElement, App, AppContext as _, ClickEvent, Context, ElementId, Entity, EventEmitter,
+    FocusHandle, Focusable, Image, InteractiveElement as _, IntoElement, KeyBinding,
+    ParentElement as _, PathPromptOptions, Render, SharedString, StatefulInteractiveElement as _,
+    Styled as _, Subscription, Task, WeakEntity, Window, actions, div, img, px,
 };
 use navidog_core::object::{ObjectKind, ObjectRef, Scope};
 use navidog_core::settings::Settings;
@@ -159,6 +160,8 @@ pub struct TableViewer {
     group_negate: bool,
     /// Cell editor under the grid. `None` hides it (F-DATA-011).
     editor: Option<Kind>,
+    /// Dragged cell-editor height in pixels. `None` uses the default until the user drags.
+    cell_editor_px: Option<f32>,
     editor_input: Entity<TextareaState>,
     /// JSON tab. Separate from `editor_input` so it can use the JSON highlighter.
     json_input: Entity<EditorState>,
@@ -631,6 +634,7 @@ impl TableViewer {
                 grouped: false,
                 group_negate: false,
                 editor: None,
+                cell_editor_px: None,
                 editor_cell: None,
                 editor_note: SharedString::default(),
                 image: None,
@@ -1093,10 +1097,25 @@ impl TableViewer {
         self.note_menu(cx);
     }
 
-    fn toggle_filter_pane(&mut self, cx: &mut Context<Self>) {
+    fn toggle_filter_pane(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.show_filter = !self.show_filter;
+        if self.show_filter {
+            self.focus_filter_input(window, cx);
+        }
         self.note_menu(cx);
         cx.notify();
+    }
+
+    /// Text mode focuses the WHERE field. The builder has no WHERE field, so the first
+    /// condition's value takes its place; an empty builder leaves focus where it was.
+    fn focus_filter_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.builder {
+            if let Some(rule) = self.rules.first() {
+                rule.value.update(cx, |s, cx| s.focus(window, cx));
+            }
+        } else {
+            self.filter.update(cx, |s, cx| s.focus(window, cx));
+        }
     }
 
     /// "Query Table": `SELECT * FROM` this table, in a new query, then run.
@@ -1371,7 +1390,9 @@ impl TableViewer {
             .child(
                 button("toggle-filter", "funnel", t!("viewer.filter").to_string())
                     .selected(self.show_filter)
-                    .on_click(cx.listener(|this, _, _, cx| this.toggle_filter_pane(cx))),
+                    .on_click(
+                        cx.listener(|this, _, window, cx| this.toggle_filter_pane(window, cx)),
+                    ),
             )
             .child(
                 button("viewer-find", "search", t!("viewer.find").to_string())
@@ -1661,6 +1682,44 @@ impl TableViewer {
                     .child(t!("viewer.per_page").to_string()),
             )
     }
+
+    /// Grid or form, with the cell editor as a draggable split when it is open.
+    fn render_main(&self, form: bool, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let body = div()
+            .size_full()
+            .min_h_0()
+            .min_w_0()
+            .overflow_hidden()
+            .when(!form, |d| d.child(self.grid.clone()))
+            .when(form, |d| d.child(self.render_form(cx)));
+        if self.editor.is_none() {
+            return body.into_any_element();
+        }
+        let rem = window.rem_size();
+        // Two button rows. The text area is the rest of the default height.
+        let chrome = tokens::viewer::FILTER_HEIGHT.to_pixels(rem) * 2.;
+        // raw-px: the divider position the user dragged to, kept in pixels
+        let height = self
+            .cell_editor_px
+            .map(px)
+            .unwrap_or_else(|| chrome + tokens::viewer::CELL_EDITOR_HEIGHT.to_pixels(rem));
+        let viewer = cx.entity();
+        v_resizable("viewer-cell-split")
+            .on_resize(move |state, _, cx| {
+                let Some(size) = state.read(cx).sizes().get(1).copied() else {
+                    return;
+                };
+                viewer.update(cx, |this, _| this.cell_editor_px = Some(f32::from(size)));
+            })
+            .child(resizable_panel().child(body))
+            .child(
+                resizable_panel()
+                    .size(height)
+                    .size_range(chrome..gpui_kit::Pixels::MAX)
+                    .child(self.render_editor(cx)),
+            )
+            .into_any_element()
+    }
 }
 
 impl Render for TableViewer {
@@ -1703,7 +1762,11 @@ impl Render for TableViewer {
                 this.show_find = true;
                 this.find_step(true, cx);
             }))
-            .on_action(cx.listener(|this, _: &ToggleFilter, _, cx| this.toggle_filter_pane(cx)))
+            .on_action(
+                cx.listener(|this, _: &ToggleFilter, window, cx| {
+                    this.toggle_filter_pane(window, cx)
+                }),
+            )
             .on_action(cx.listener(|this, _: &BeginTransaction, _, cx| this.begin_transaction(cx)))
             .on_action(cx.listener(|this, _: &CommitTransaction, window, cx| {
                 this.apply_changes(true, window, cx)
@@ -1785,10 +1848,8 @@ impl Render for TableViewer {
                     .min_h_0()
                     .min_w_0()
                     .overflow_hidden()
-                    .when(!form, |d| d.child(self.grid.clone()))
-                    .when(form, |d| d.child(self.render_form(cx))),
+                    .child(self.render_main(form, window, cx)),
             )
-            .when(self.editor.is_some(), |v| v.child(self.render_editor(cx)))
             .child(self.render_bottom_bar(cx))
     }
 }

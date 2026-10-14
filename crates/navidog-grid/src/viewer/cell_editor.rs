@@ -233,19 +233,14 @@ impl TableViewer {
         let (_, _, text, type_name) = self
             .focused_cell(cx)
             .unwrap_or_else(|| (0, 0, String::new(), String::new()));
-        // Tabs and the button row sit in this chrome; the text area takes the rest and
-        // scrolls inside itself. The pane can shrink so a short window keeps the bottom bar.
-        let chrome = tokens::viewer::FILTER_HEIGHT.rems() * 2.;
+        // Kind tabs and the button row stay put; the text area fills the split and scrolls
+        // inside itself. The divider above this pane is the top edge.
         v_flex()
             .id("cell-editor")
-            .w_full()
+            .size_full()
             .min_w_0()
-            .h(tokens::viewer::CELL_EDITOR_HEIGHT.rems() + chrome)
-            .min_h(chrome)
-            .flex_shrink(1.)
+            .min_h_0()
             .overflow_hidden()
-            .border_t_1()
-            .border_color(p.separator)
             .px_2()
             .py_1()
             .gap_1()
@@ -341,9 +336,11 @@ impl TableViewer {
             .when(kind == Kind::Image, |pane| {
                 pane.when_some(self.image.clone(), |pane, image| {
                     pane.child(
-                        img(image)
-                            .max_h(tokens::viewer::CELL_EDITOR_HEIGHT.rems())
-                            .max_w(tokens::form::FIELD_WIDTH.rems()),
+                        div().flex_1().min_h_0().overflow_hidden().child(
+                            img(image)
+                                .max_h_full()
+                                .max_w(tokens::form::FIELD_WIDTH.rems()),
+                        ),
                     )
                 })
                 .child(
