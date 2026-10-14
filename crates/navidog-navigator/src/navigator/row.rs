@@ -299,6 +299,7 @@ impl NavigatorPanel {
             .gap(tokens::navigator::FILTER_ICON_GAP.rems())
             .child(
                 Input::new(&self.filter)
+                    .id("nav-search")
                     .h(tokens::navigator::FILTER_SEARCH_HEIGHT.rems())
                     .prefix(Icon::new(IconName::Search).small())
                     .cleanable(true)

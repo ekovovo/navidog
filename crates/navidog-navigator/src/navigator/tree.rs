@@ -15,6 +15,20 @@ pub(super) struct TreeBuilder<'a> {
     pub(super) show_objects: bool,
 }
 
+/// Groups, connections, databases, schemas, categories and virtual groups.
+/// Objects and the rows under a table are matches, not their ancestors.
+fn search_opens(node: &Node) -> bool {
+    matches!(
+        node,
+        Node::Group(_)
+            | Node::Connection(_)
+            | Node::Database(..)
+            | Node::Schema(_)
+            | Node::Category(..)
+            | Node::VGroup(..)
+    )
+}
+
 impl TreeBuilder<'_> {
     pub(super) fn matches(&self, label: &str) -> bool {
         !self.filtering || label.to_lowercase().contains(self.query)
@@ -92,8 +106,11 @@ impl TreeBuilder<'_> {
                 .is_none_or(|t| t.as_ref() == c.driver)
     }
 
+    /// Search opens the containers above a match. A table and the folders under
+    /// it stay as the user left them: forcing those open shows "Loading…" rows
+    /// whose catalog fetch never starts.
     pub(super) fn expanded(&self, node: &Node) -> bool {
-        self.filtering || self.panel.expanded.contains(&node.id())
+        self.panel.expanded.contains(&node.id()) || (self.filtering && search_opens(node))
     }
 
     pub(super) fn item(
