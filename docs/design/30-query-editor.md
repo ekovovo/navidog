@@ -15,7 +15,7 @@
 
 ## 1. 技术验证：SQL 编辑器（M3 开工后先做，结论写回本节）
 
-gpui-kit 0.7.1（`9c4b175`）的 `EditorState::new(window, cx).language("sql")` 已经提供：
+gpui-kit 0.7.3 的 `EditorState::new(window, cx).language("sql")` 已经提供：
 - 行号、软换行、制表符宽度和硬制表符、缩进线，都可以在运行时切换；
 - 代码折叠（折叠区间来自 tree-sitter）；
 - 增加和减少缩进（`Indent`、`Outdent`）；

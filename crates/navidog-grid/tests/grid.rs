@@ -5,7 +5,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use gpui_kit::component::v_flex;
-use gpui_kit::test::{ClickOptions, TestWindowExt as _};
+use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{
     AppContext as _, Context, ElementId, Entity, FocusHandle, InputEvent as _,
     InteractiveElement as _, IntoElement, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent,
@@ -420,11 +420,29 @@ fn right_click_focuses_the_grid_so_the_menu_item_runs(cx: &mut TestAppContext) {
         let x = tokens::grid::ROW_NUMBER_WIDTH.to_pixels(rem)
             + fit(rem, "id", &["1"])
             + fit(rem, "name", &["a"]) / 2.;
-        window.click_with_options(
-            gpui_kit::ElementId::NamedInteger("row".into(), 0),
-            ClickOptions::new()
-                .with_button(MouseButton::Right)
-                .with_offset(gpui_kit::point(x, rem / 2.)),
+        let row = window
+            .find(ElementId::NamedInteger("row".into(), 0))
+            .bounds();
+        let position = gpui_kit::point(row.origin.x + x, row.origin.y + rem / 2.);
+        window.dispatch_event(
+            MouseDownEvent {
+                button: MouseButton::Right,
+                position,
+                modifiers: Modifiers::none(),
+                click_count: 1,
+                first_mouse: false,
+            }
+            .to_platform_input(),
+            cx,
+        );
+        window.dispatch_event(
+            MouseUpEvent {
+                button: MouseButton::Right,
+                position,
+                modifiers: Modifiers::none(),
+                click_count: 1,
+            }
+            .to_platform_input(),
             cx,
         );
     })

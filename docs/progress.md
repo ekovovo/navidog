@@ -211,7 +211,6 @@ M2 的任务都已完成，逐项记录见 git 历史；M2 的功能状态仍在
 | 双击列顶右边框把该列再调成适合内容（`data_format.html`）。`DataTable` 的拖动手柄在 gpui-kit 内部，delegate 挂不上 | M2 | gpui-kit 把双击列边交给 delegate 后再做 |
 | 网格字体只改字号，字体系族仍是界面默认字体；没有系统字体面板 | M2 | 需要选字体时再接系统字体面板 |
 | 关掉“修改后同步记录”后，未填写的新列在提交前显示 `(Default)`，生成值要手动刷新才出现；每三行底纹不涂表格下方的空白行 | M2 | 无 |
-| `gpui-kit` 用 git patch 钉在 `9c4b175`，为了 `DataTable::header_row_height`（#3420，尚未发版） | M2 | 上游发版后删掉 `Cargo.toml` 里的 patch，改回 crates.io |
 | 对象选项卡固定为第一个，拖走会弹回。选项卡条滚动时它仍一起移动：gpui-kit 的 TabBar 没有单个选项卡冻结 | M2 | 向 gpui-component 要选项卡条前缀，或自绘选项卡条 |
 | 网格列线、新增行、选中选项卡和工具栏图标的颜色按一张深色截图暂定 | M2 | 与 Navicat 并排实测后替换 |
 | macOS 调试构建读取本机密钥时，系统可能连续弹出两个钥匙串授权框。“始终允许”绑在代码签名上，每次编译签名都变 | M1 | 正式签名（M15）后授权才能留下来。读取仍用 `keyring`，见 [12-secrets.md](design/12-secrets.md) |

@@ -15,8 +15,6 @@
 # checks that each package can be packed.
 #
 # Workspace path dependencies must set `version` (see the root Cargo.toml).
-# The [patch.crates-io] override is not part of the published crate, so the
-# verify build uses the crates.io copy of those dependencies.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

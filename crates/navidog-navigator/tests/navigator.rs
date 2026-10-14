@@ -3,9 +3,9 @@
 
 use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{
-    AppContext as _, Context, FocusHandle, InteractiveElement as _, IntoElement, Modifiers,
-    ParentElement as _, Render, Styled as _, TestAppContext, Window, WindowBounds, WindowOptions,
-    div, point, size,
+    AppContext as _, Context, FocusHandle, InputEvent as _, InteractiveElement as _, IntoElement,
+    Modifiers, ParentElement as _, Render, Styled as _, TestAppContext, Window, WindowBounds,
+    WindowOptions, div, point, size,
 };
 use navidog_core::actions::{NewGroup, RenameGroup};
 use navidog_core::connection::Connection;
@@ -121,9 +121,7 @@ fn multi_select_drag_and_rename(cx: &mut TestAppContext) {
 
     cx.update_window(handle, |_, window, cx| {
         window.click(row_a.clone(), cx);
-        // Restores the previous modifiers, so later plain clicks are not ⌘-clicks
-        window.click_with_modifiers(row_b.clone(), Modifiers::command(), cx);
-        window.render_frame(cx);
+        command_click(window, row_b.clone(), cx);
     })
     .unwrap();
     assert_eq!(
@@ -261,4 +259,52 @@ fn multi_select_drag_and_rename(cx: &mut TestAppContext) {
     .unwrap();
     let _ = host;
     let _ = std::fs::remove_dir_all(home);
+}
+
+/// ⌘-click. `Window::click` in gpui-kit 0.7.3 always sends empty modifiers, so the
+/// modifier has to ride on the mouse events. Reset afterwards so later clicks stay plain.
+fn command_click(window: &mut Window, id: impl Into<gpui_kit::ElementId>, cx: &mut gpui_kit::App) {
+    window.render_frame(cx);
+    let position = window.find(id).bounds().center();
+    let modifiers = Modifiers::command();
+    let button = gpui_kit::MouseButton::Left;
+    window.dispatch_event(
+        gpui_kit::MouseMoveEvent {
+            position,
+            pressed_button: None,
+            modifiers,
+        }
+        .to_platform_input(),
+        cx,
+    );
+    window.dispatch_event(
+        gpui_kit::MouseDownEvent {
+            button,
+            position,
+            modifiers,
+            click_count: 1,
+            first_mouse: false,
+        }
+        .to_platform_input(),
+        cx,
+    );
+    window.dispatch_event(
+        gpui_kit::MouseUpEvent {
+            button,
+            position,
+            modifiers,
+            click_count: 1,
+        }
+        .to_platform_input(),
+        cx,
+    );
+    window.dispatch_event(
+        gpui_kit::ModifiersChangedEvent {
+            modifiers: Modifiers::default(),
+            capslock: window.capslock(),
+        }
+        .to_platform_input(),
+        cx,
+    );
+    window.render_frame(cx);
 }

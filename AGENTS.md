@@ -22,7 +22,7 @@ navidog 用 gpui-kit 0.7 复刻 Navicat Premium 17（macOS）。决策、架构�
 - **数据库调用**：驱动在 `navidog_db::runtime` 上执行，界面用 `Sessions::run_rel`（元数据会话）或 `sessions::run_on`（自己持有的会话，表查看器这类编辑器经 `Sessions::new_session` 获得），在 `cx.spawn` 中等待结果。
 - 组件能力不够时在外层补（delegate、自定义渲染），再不行基于 `gpui-base` 自建；gpui-kit 不 fork，`gpui-pre-*` 不单独覆盖。依赖不引入 GPL。
 
-## gpui-kit 0.7.1 已知的坑
+## gpui-kit 0.7.3 已知的坑
 
 - 切换外观时，只有带 `highlight` 的主题才会替换编辑器配色，所以 `themes/navicat.json` 的两套主题都要写全 `highlight`（`editor.*` 和 `syntax`）。没开 tree-sitter 特性时，gpui-component 用的高亮器存根不认 `editor.*` 键，测试主题的 crate 要开 `tree-sitter-sql`。
 - `DataTable` 只在按下和抬起是同一格时发出 `SelectCell`；单元格不进测试元素注册表，UI 测试用 `click_at(("row", n), 偏移)` 点击。
@@ -34,7 +34,7 @@ navidog 用 gpui-kit 0.7 复刻 Navicat Premium 17（macOS）。决策、架构�
 - 编辑器自带的键（`Input` context 里的 ⌘.、⌘F、Tab、Esc、回车）在外层 key context 里绑不过它：改绑写成后代谓词，如 `"QueryEditor > Input"`；要在编辑器处理之前截获 Tab、回车、Esc、Copy，用外层元素的 `capture_action`。
 - `EditorState::set_scroll_offset` 不夹住范围，滚过末尾显示一片空白。滚到最后一行按行数、行高和视口高度自己算（`navidog_query::history::scroll_to_end`）。
 - 对话框内容比对话框本身宽时，超出部分的点击落在遮罩上，会直接关闭对话框；窄对话框的按钮行要放得下（用图标按钮或分两行）。
-- 需要带修饰键的点击（⌘ 点按）时，用 `window.click_with_modifiers(id, Modifiers::command(), cx)`，示例见 `crates/navidog-navigator/tests/navigator.rs`。测试辅助 `click` 沿用窗口当前的修饰键，自己用 `window.dispatch_event` 发带 `modifiers` 的鼠标事件会让修饰键一直保持按下，之后的普通单击都变成 ⌘ 点按。换 gpui-kit 版本后要跑全量测试。
+- `window.click` 总是发送空修饰键。⌘ 点按要派发带 `Modifiers::command()` 的鼠标事件，发完后把修饰键复位，示例见 `crates/navidog-navigator/tests/navigator.rs` 的 `command_click`。换 gpui-kit 版本后要跑全量测试。
 
 ## 验证
 
