@@ -10,14 +10,15 @@ use gpui_kit::component::dock::{
 use gpui_kit::component::input::{Escape, Input, InputEvent, InputState};
 use gpui_kit::component::list::ListItem;
 use gpui_kit::component::native_menu::NativeMenu;
-use gpui_kit::component::tree::{TreeEntry, TreeEvent, TreeItem, TreeState, tree};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{Icon, IconName, Selectable as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::base::{Tree, TreeEntry, TreeEvent, TreeItem, TreeState};
 use gpui_kit::{
     AnyElement, App, AppContext as _, ClickEvent, Context, ElementId, Entity, EventEmitter,
     FocusHandle, Focusable, Global, Hsla, InteractiveElement as _, IntoElement, MouseButton,
     MouseDownEvent, ParentElement as _, Render, SharedString, StatefulInteractiveElement as _,
-    Styled as _, StyledImage as _, Subscription, WeakEntity, Window, div, img,
+    StyleRefinement, Styled as _, StyledImage as _, Subscription, WeakEntity, Window, div, img,
 };
 use navidog_core::actions::*;
 use navidog_core::connection::Connection;
@@ -801,16 +802,29 @@ impl Render for NavigatorPanel {
         }
         self.autoscroll(window, cx);
         let p = palette(cx);
+        let scroll = self.tree.read(cx).scroll_handle().clone();
         let this = cx.entity().downgrade();
-        let tree_view = tree(&self.tree, move |ix, entry, selected, window, cx| {
-            this.upgrade()
-                .map(|panel| {
-                    panel.update(cx, |panel, cx| {
-                        panel.render_row(entry, selected, window, cx)
+        // The styled tree wraps every row in an empty context menu, and that popup takes focus.
+        // Native menu items dispatch along the focused element, so the row actions never run.
+        let tree_view = Tree::new(&self.tree)
+            .item(move |ix, entry, state, window, cx| {
+                let selected = state.is_selected();
+                let item = this
+                    .upgrade()
+                    .map(|panel| {
+                        panel.update(cx, |panel, cx| {
+                            panel.render_row(entry, selected, window, cx)
+                        })
                     })
-                })
-                .unwrap_or_else(|| ListItem::new(ix))
-        });
+                    .unwrap_or_else(|| ListItem::new(ix));
+                item.disabled(entry.is_disabled())
+                    .selected(selected)
+                    .secondary_selected(state.is_right_clicked())
+                    .into_any_element()
+            })
+            .list_style(StyleRefinement::default().flex_grow_1().size_full())
+            .relative()
+            .size_full();
         let filter = self.render_filter(cx);
         // Rows stop propagation of their right-click and drop, so these only fire on the blank area
         let body = div()
@@ -828,7 +842,12 @@ impl Render for NavigatorPanel {
             .on_drop(cx.listener(|_, d: &DraggedConnections, _, cx| {
                 move_connections(&d.ids(cx), None, cx)
             }))
-            .child(tree_view);
+            .child(
+                div()
+                    .size_full()
+                    .child(tree_view)
+                    .vertical_scrollbar(&scroll),
+            );
         let filter = if self.view.filter_on_top {
             div().border_b_1().border_color(p.separator).child(filter)
         } else {

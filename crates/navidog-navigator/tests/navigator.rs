@@ -3,9 +3,9 @@
 
 use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{
-    AppContext as _, Context, FocusHandle, InputEvent as _, InteractiveElement as _, IntoElement,
-    Modifiers, ParentElement as _, Render, Styled as _, TestAppContext, Window, WindowBounds,
-    WindowOptions, div, point, size,
+    AppContext as _, Context, FocusHandle, Focusable as _, InputEvent as _,
+    InteractiveElement as _, IntoElement, Modifiers, ParentElement as _, Render, Styled as _,
+    TestAppContext, Window, WindowBounds, WindowOptions, div, point, size,
 };
 use navidog_core::actions::{NewGroup, RenameGroup};
 use navidog_core::connection::Connection;
@@ -255,6 +255,22 @@ fn multi_select_drag_and_rename(cx: &mut TestAppContext) {
         window.click("nav-filter-starred", cx);
         window.render_frame(cx);
         assert!(window.try_find(row_b.clone()).is_some());
+    })
+    .unwrap();
+
+    // A row's right-click used to open the styled tree's empty popup, which took focus.
+    // Menu items dispatch along the focused element, so they never reached the navigator.
+    let nav = cx.update(|cx| host.read(cx).navigator.focus_handle(cx));
+    cx.update_window(handle, |_, window, cx| window.right_click(row_a.clone(), cx))
+        .unwrap();
+    cx.run_until_parked();
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(
+            window.focused(cx).as_ref(),
+            Some(&nav),
+            "right-click keeps focus on the navigator"
+        );
     })
     .unwrap();
     let _ = host;
