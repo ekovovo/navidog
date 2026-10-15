@@ -23,7 +23,7 @@ navidog-navigator = { version = "0.0.1", path = "crates/navidog-navigator" }
 navidog-grid = { version = "0.0.1", path = "crates/navidog-grid" }
 navidog-query = { version = "0.0.1", path = "crates/navidog-query" }
 
-gpui-kit = "0.7"
+gpui-kit = { version = "0.7", features = ["gpui-fast"] }
 rust-i18n = "4"
 anyhow = "1"
 thiserror = "2"
