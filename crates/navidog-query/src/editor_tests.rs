@@ -94,7 +94,8 @@ fn set_text(
 
 #[gpui_kit::test]
 fn runs_scripts_into_messages_summary_and_editable_results(cx: &mut TestAppContext) {
-    let home = std::env::temp_dir().join(format!("navidog-query-test-{}", std::process::id()));
+    let home =
+        std::env::temp_dir().join(format!("navidog-query-test-scripts-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&home);
     std::fs::create_dir_all(&home).unwrap();
     let file = home.join("q.db");
@@ -103,7 +104,7 @@ fn runs_scripts_into_messages_summary_and_editable_results(cx: &mut TestAppConte
         "CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT); \
          INSERT INTO t(name) VALUES ('a'), ('b')",
     );
-    // SAFETY: the crate's other tests do not read NAVIDOG_HOME
+    // SAFETY: this test owns this directory; the other tests use their own
     unsafe { std::env::set_var("NAVIDOG_HOME", &home) };
 
     let id = cx.update(|cx| {
@@ -231,9 +232,11 @@ fn runs_scripts_into_messages_summary_and_editable_results(cx: &mut TestAppConte
         })
     });
     run(cx, handle, &editor, RunKind::All);
+    // Enter confirms the parameter dialog; a click on the footer can miss it.
+    cx.executor().advance_clock(Duration::from_millis(300));
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
-        window.click("params-ok", cx);
+        window.press("enter", cx);
     })
     .unwrap();
     idle(cx, &editor);
@@ -410,9 +413,10 @@ fn runs_scripts_into_messages_summary_and_editable_results(cx: &mut TestAppConte
 
 #[gpui_kit::test]
 fn typing_a_character_does_not_reenter_the_editor(cx: &mut TestAppContext) {
-    let home = std::env::temp_dir().join(format!("navidog-query-test-{}", std::process::id()));
+    let home =
+        std::env::temp_dir().join(format!("navidog-query-test-typing-{}", std::process::id()));
     std::fs::create_dir_all(&home).unwrap();
-    // SAFETY: the crate's other tests set the same value
+    // SAFETY: this test owns this directory; the other tests use their own
     unsafe { std::env::set_var("NAVIDOG_HOME", &home) };
     cx.update(|cx| {
         gpui_kit::init(cx);
@@ -450,9 +454,10 @@ fn typing_a_character_does_not_reenter_the_editor(cx: &mut TestAppContext) {
 
 #[gpui_kit::test]
 fn format_commands_undo_in_one_step_and_the_stack_cycles(cx: &mut TestAppContext) {
-    let home = std::env::temp_dir().join(format!("navidog-query-test-{}", std::process::id()));
+    let home =
+        std::env::temp_dir().join(format!("navidog-query-test-format-{}", std::process::id()));
     std::fs::create_dir_all(&home).unwrap();
-    // SAFETY: both tests of this binary set the same value
+    // SAFETY: this test owns this directory; the other tests use their own
     unsafe { std::env::set_var("NAVIDOG_HOME", &home) };
     cx.update(|cx| {
         gpui_kit::init(cx);
@@ -583,9 +588,9 @@ fn format_commands_undo_in_one_step_and_the_stack_cycles(cx: &mut TestAppContext
 
 #[gpui_kit::test]
 fn saves_untitled_queries_reloads_outside_edits_and_recovers(cx: &mut TestAppContext) {
-    let home = std::env::temp_dir().join(format!("navidog-query-test-{}", std::process::id()));
+    let home = std::env::temp_dir().join(format!("navidog-query-test-save-{}", std::process::id()));
     std::fs::create_dir_all(&home).unwrap();
-    // SAFETY: every test of this binary sets the same value
+    // SAFETY: this test owns this directory; the other tests use their own
     unsafe { std::env::set_var("NAVIDOG_HOME", &home) };
     cx.update(|cx| {
         gpui_kit::init(cx);
@@ -700,7 +705,8 @@ fn saves_untitled_queries_reloads_outside_edits_and_recovers(cx: &mut TestAppCon
 
 #[gpui_kit::test]
 fn history_log_follows_the_log_and_the_console_runs_statements(cx: &mut TestAppContext) {
-    let home = std::env::temp_dir().join(format!("navidog-query-test-{}", std::process::id()));
+    let home =
+        std::env::temp_dir().join(format!("navidog-query-test-console-{}", std::process::id()));
     std::fs::create_dir_all(&home).unwrap();
     let file = home.join("console.db");
     let _ = std::fs::remove_file(&file);
@@ -708,7 +714,7 @@ fn history_log_follows_the_log_and_the_console_runs_statements(cx: &mut TestAppC
         &file,
         "CREATE TABLE c(id INTEGER PRIMARY KEY, v TEXT); INSERT INTO c(v) VALUES ('x')",
     );
-    // SAFETY: every test of this binary sets the same value
+    // SAFETY: this test owns this directory; the other tests use their own
     unsafe { std::env::set_var("NAVIDOG_HOME", &home) };
     let id = cx.update(|cx| {
         gpui_kit::init(cx);
