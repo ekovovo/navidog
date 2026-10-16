@@ -25,6 +25,15 @@ impl Render for Host {
     }
 }
 
+/// Select-all is cmd-a on macOS and ctrl-a elsewhere.
+fn select_all_key() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "cmd-a"
+    } else {
+        "ctrl-a"
+    }
+}
+
 /// Waits for the driver, which runs on the tokio runtime, to report the connection open.
 fn wait_open(cx: &mut TestAppContext, id: &str) {
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -93,17 +102,22 @@ fn creates_and_opens_sqlite_connection(cx: &mut TestAppContext) {
             driver: "sqlite".into(),
         }),
     );
+    cx.executor().advance_clock(Duration::from_millis(300));
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
-        // Pick "new SQLite 3" and fill in the file path and connection name;
-        // RadioGroup uses the index as the child id
-        window
-            .within("sqlite-type")
-            .click(gpui_kit::ElementId::Integer(1), cx);
+        // Pick "new SQLite 3" and fill in the file path and connection name.
+        // RadioGroup uses the index as the child id. The indicator sits at the
+        // top-left; the row center can miss it.
+        window.within("sqlite-type").click_at(
+            gpui_kit::ElementId::Integer(1),
+            // raw-px: click the radio indicator, not the row center
+            gpui_kit::point(gpui_kit::px(8.), gpui_kit::px(8.)),
+            cx,
+        );
         window.click("file-browse-input", cx);
         window.input(&db_file.to_string_lossy(), cx);
         window.click("conn-name", cx);
-        window.press("cmd-a", cx);
+        window.press(select_all_key(), cx);
         window.input("测试库", cx);
         window.click("ok", cx);
         window.render_frame(cx);
@@ -182,7 +196,7 @@ fn creates_and_opens_sqlite_connection(cx: &mut TestAppContext) {
             window.try_find(("manage-conn", 0usize)).is_none(),
             "no connection matches"
         );
-        window.press("cmd-a", cx);
+        window.press(select_all_key(), cx);
         window.input("测试", cx);
         window.render_frame(cx);
         window.click(("manage-conn", 0usize), cx);

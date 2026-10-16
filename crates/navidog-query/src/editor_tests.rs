@@ -1,7 +1,7 @@
 //! Headless query editor tests on a real SQLite file: running scripts, messages and summary,
 //! stopping at errors, result naming, parameters and editing a single-table result.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use gpui_kit::test::TestWindowExt as _;
@@ -78,6 +78,20 @@ fn idle(cx: &mut TestAppContext, editor: &Entity<QueryEditor>) {
     });
 }
 
+/// One test at a time. `NAVIDOG_HOME` is process-global, and `name_ok` reads it
+/// again later, so the guard must live until the test returns.
+fn isolate_home(name: &str) -> (MutexGuard<'static, ()>, std::path::PathBuf) {
+    static LOCK: Mutex<()> = Mutex::new(());
+    let guard = LOCK.lock().unwrap();
+    let home =
+        std::env::temp_dir().join(format!("navidog-query-test-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(&home).unwrap();
+    // SAFETY: `guard` is held until the caller returns, so no other test reads this variable.
+    unsafe { std::env::set_var("NAVIDOG_HOME", &home) };
+    (guard, home)
+}
+
 fn set_text(
     cx: &mut TestAppContext,
     handle: AnyWindowHandle,
@@ -94,18 +108,13 @@ fn set_text(
 
 #[gpui_kit::test]
 fn runs_scripts_into_messages_summary_and_editable_results(cx: &mut TestAppContext) {
-    let home =
-        std::env::temp_dir().join(format!("navidog-query-test-scripts-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&home);
-    std::fs::create_dir_all(&home).unwrap();
+    let (_home, home) = isolate_home("scripts");
     let file = home.join("q.db");
     sql(
         &file,
         "CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT); \
          INSERT INTO t(name) VALUES ('a'), ('b')",
     );
-    // SAFETY: this test owns this directory; the other tests use their own
-    unsafe { std::env::set_var("NAVIDOG_HOME", &home) };
 
     let id = cx.update(|cx| {
         gpui_kit::init(cx);
@@ -413,11 +422,7 @@ fn runs_scripts_into_messages_summary_and_editable_results(cx: &mut TestAppConte
 
 #[gpui_kit::test]
 fn typing_a_character_does_not_reenter_the_editor(cx: &mut TestAppContext) {
-    let home =
-        std::env::temp_dir().join(format!("navidog-query-test-typing-{}", std::process::id()));
-    std::fs::create_dir_all(&home).unwrap();
-    // SAFETY: this test owns this directory; the other tests use their own
-    unsafe { std::env::set_var("NAVIDOG_HOME", &home) };
+    let (_home, _dir) = isolate_home("typing");
     cx.update(|cx| {
         gpui_kit::init(cx);
         navidog_core::init(cx);
@@ -454,11 +459,7 @@ fn typing_a_character_does_not_reenter_the_editor(cx: &mut TestAppContext) {
 
 #[gpui_kit::test]
 fn format_commands_undo_in_one_step_and_the_stack_cycles(cx: &mut TestAppContext) {
-    let home =
-        std::env::temp_dir().join(format!("navidog-query-test-format-{}", std::process::id()));
-    std::fs::create_dir_all(&home).unwrap();
-    // SAFETY: this test owns this directory; the other tests use their own
-    unsafe { std::env::set_var("NAVIDOG_HOME", &home) };
+    let (_home, _dir) = isolate_home("format");
     cx.update(|cx| {
         gpui_kit::init(cx);
         navidog_core::init(cx);
@@ -588,10 +589,7 @@ fn format_commands_undo_in_one_step_and_the_stack_cycles(cx: &mut TestAppContext
 
 #[gpui_kit::test]
 fn saves_untitled_queries_reloads_outside_edits_and_recovers(cx: &mut TestAppContext) {
-    let home = std::env::temp_dir().join(format!("navidog-query-test-save-{}", std::process::id()));
-    std::fs::create_dir_all(&home).unwrap();
-    // SAFETY: this test owns this directory; the other tests use their own
-    unsafe { std::env::set_var("NAVIDOG_HOME", &home) };
+    let (_home, _dir) = isolate_home("save");
     cx.update(|cx| {
         gpui_kit::init(cx);
         navidog_core::init(cx);
@@ -705,17 +703,12 @@ fn saves_untitled_queries_reloads_outside_edits_and_recovers(cx: &mut TestAppCon
 
 #[gpui_kit::test]
 fn history_log_follows_the_log_and_the_console_runs_statements(cx: &mut TestAppContext) {
-    let home =
-        std::env::temp_dir().join(format!("navidog-query-test-console-{}", std::process::id()));
-    std::fs::create_dir_all(&home).unwrap();
+    let (_home, home) = isolate_home("console");
     let file = home.join("console.db");
-    let _ = std::fs::remove_file(&file);
     sql(
         &file,
         "CREATE TABLE c(id INTEGER PRIMARY KEY, v TEXT); INSERT INTO c(v) VALUES ('x')",
     );
-    // SAFETY: this test owns this directory; the other tests use their own
-    unsafe { std::env::set_var("NAVIDOG_HOME", &home) };
     let id = cx.update(|cx| {
         gpui_kit::init(cx);
         navidog_core::init(cx);
