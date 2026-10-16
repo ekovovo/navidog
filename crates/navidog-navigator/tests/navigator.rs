@@ -260,6 +260,10 @@ fn multi_select_drag_and_rename(cx: &mut TestAppContext) {
 
     // A row's right-click used to open the styled tree's empty popup, which took focus.
     // Menu items dispatch along the focused element, so they never reached the navigator.
+    // The row focuses the navigator before the menu opens. A native menu leaves that
+    // focus in place. Linux draws the menu in the window and focuses it, after capturing
+    // the navigator as the action context.
+    #[cfg(not(target_os = "linux"))]
     let nav = cx.update(|cx| host.read(cx).navigator.focus_handle(cx));
     cx.update_window(handle, |_, window, cx| {
         window.right_click(row_a.clone(), cx)
@@ -268,6 +272,12 @@ fn multi_select_drag_and_rename(cx: &mut TestAppContext) {
     cx.run_until_parked();
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
+        #[cfg(target_os = "linux")]
+        assert!(
+            window.try_find("popup-menu").is_some(),
+            "right-click opens the menu; its action context is the navigator"
+        );
+        #[cfg(not(target_os = "linux"))]
         assert_eq!(
             window.focused(cx).as_ref(),
             Some(&nav),

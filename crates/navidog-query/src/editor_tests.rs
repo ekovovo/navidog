@@ -605,8 +605,17 @@ fn saves_untitled_queries_reloads_outside_edits_and_recovers(cx: &mut TestAppCon
     let _ = navidog_core::queries::delete(&scope, "first");
     navidog_core::queries::write(&scope, "taken", "SELECT 0").unwrap();
     let (handle, editor) = cx.update(|cx| {
+        // raw-px: wider than the 870pt recovery dialog, so OK is not on the mask
+        let test_size = size(gpui_kit::px(1200.), gpui_kit::px(800.));
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(gpui_kit::Bounds {
+                origin: Default::default(),
+                size: test_size,
+            })),
+            ..Default::default()
+        };
         let mut editor = None;
-        let handle = gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+        let handle = gpui_kit::open_window(options, cx, |window, cx| {
             let e = QueryEditor::new(
                 QuerySource::Untitled(1),
                 Target {
@@ -691,17 +700,11 @@ fn saves_untitled_queries_reloads_outside_edits_and_recovers(cx: &mut TestAppCon
         window.render_frame(cx);
     })
     .unwrap();
-    // The dialog slides in. A click during that misses the OK button on Intel.
+    // The dialog slides in. A click during that misses the OK button.
     cx.executor().advance_clock(Duration::from_millis(300));
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
-        let size = window.find("recover-ok").bounds().size;
-        // The button's right edge can lie on the mask; its left side stays inside.
-        window.click_at(
-            "recover-ok",
-            gpui_kit::point(size.width * 0.25, size.height * 0.5),
-            cx,
-        );
+        window.click("recover-ok", cx);
     })
     .unwrap();
     cx.run_until_parked();

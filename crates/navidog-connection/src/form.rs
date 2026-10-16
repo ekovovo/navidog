@@ -9,8 +9,9 @@ use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{IndexPath, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Context, Entity, IntoElement, ParentElement as _,
-    PathPromptOptions, Render, SharedString, Styled as _, Task, Window, div,
+    AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
+    ParentElement as _, PathPromptOptions, Render, SharedString, Styled as _, Task,
+    TestSupportExt as _, Window, div,
 };
 use navidog_core::connection::{
     AttachedDatabase, Connection, DatabaseItem, HostPreference, Member, SecretField, SshAuth,
@@ -736,7 +737,19 @@ impl ConnectionForm {
                     RadioGroup::vertical("sqlite-type")
                         .selected_index(Some(usize::from(create_new)))
                         .child(Radio::new("existing").label(t!("conn.sqlite_existing").to_string()))
-                        .child(Radio::new("new").label(t!("conn.sqlite_new").to_string()))
+                        // The group stretches to the column, so the row's center is
+                        // empty space past the label. The label hugs its text.
+                        .child(
+                            Radio::new("new")
+                                .accessibility_label(t!("conn.sqlite_new").to_string())
+                                .child(
+                                    div()
+                                        .id("sqlite-new")
+                                        .self_start()
+                                        .child(t!("conn.sqlite_new").to_string())
+                                        .test_support(),
+                                ),
+                        )
                         .on_click(cx.listener(|this, ix: &usize, _, cx| {
                             this.draft.general.create_new = *ix == 1;
                             cx.notify();

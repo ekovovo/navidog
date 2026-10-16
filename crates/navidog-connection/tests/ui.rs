@@ -96,21 +96,7 @@ fn creates_and_opens_sqlite_connection(cx: &mut TestAppContext) {
     cx.executor().advance_clock(Duration::from_millis(300));
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
-        // Pick "new SQLite 3". The row can be wider than its label, so the
-        // center misses, and the indicator's top-left misses on macOS. The
-        // label starts just past the 1rem indicator.
-        let radio = gpui_kit::ElementId::Integer(1);
-        let size = window
-            .within("sqlite-type")
-            .find(radio.clone())
-            .bounds()
-            .size;
-        let rem = window.rem_size();
-        let x = (rem * 2.5).min(size.width * 0.9);
-        let y = size.height * 0.5;
-        window
-            .within("sqlite-type")
-            .click_at(radio, gpui_kit::point(x, y), cx);
+        window.click("sqlite-new", cx);
         window.click("file-browse-input", cx);
         window.input(&db_file.to_string_lossy(), cx);
         window.click("conn-name", cx);

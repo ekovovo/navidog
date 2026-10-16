@@ -460,8 +460,14 @@ fn right_click_focuses_the_grid_so_the_menu_item_runs(cx: &mut TestAppContext) {
     })
     .unwrap();
     // RightClickedCell is emitted, so selection and focus land after that update.
-    // dispatch_action records the focused element immediately, the way a later menu click does.
+    // A native menu leaves that focus in place, so Copy dispatched now hits the grid.
+    // Linux draws the menu in the window and focuses it; the Copy item dispatches
+    // to the grid captured before the menu opened. Copy follows set-empty, set-null,
+    // and a separator.
     cx.update_window(handle, |_, window, cx| {
+        #[cfg(target_os = "linux")]
+        window.within("popup-menu").click(ElementId::Integer(3), cx);
+        #[cfg(not(target_os = "linux"))]
         window.dispatch_action(Box::new(navidog_grid::grid::Copy), cx);
     })
     .unwrap();
