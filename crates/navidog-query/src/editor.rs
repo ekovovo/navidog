@@ -281,7 +281,13 @@ impl BasePanel for QueryEditor {
     fn set_active(&mut self, active: bool, window: &mut Window, cx: &mut Context<Self>) {
         let panel = PanelId::from(cx.entity_id());
         tabs::set_active(panel, active, cx);
-        tabs::set_surface(panel, active, tabs::MenuSurface::Query, false, false, cx);
+        tabs::set_surface(
+            panel,
+            active,
+            tabs::MenuSurface::Query,
+            tabs::TableMenu::default(),
+            cx,
+        );
         if active {
             set_active_editor(cx.entity().downgrade(), cx);
             self.publish_context(cx);

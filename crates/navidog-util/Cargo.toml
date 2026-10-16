@@ -8,5 +8,7 @@ repository.workspace = true
 description = "Pure helpers shared by the navidog crates. No UI and no database drivers."
 
 [dependencies]
+chrono.workspace = true
+semver = "1"
 serde_json.workspace = true
 sqlformat = "0.5"

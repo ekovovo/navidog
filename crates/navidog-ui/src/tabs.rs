@@ -141,6 +141,13 @@ pub enum MenuSurface {
     Table,
 }
 
+/// Table-menu checks that only a table viewer fills in. Query editors pass [`TableMenu::default`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct TableMenu {
+    pub in_transaction: bool,
+    pub filter_open: bool,
+}
+
 /// The object pane's active editor, observed by the shell when it rebuilds the menu bar.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct ActiveMenu {
@@ -162,8 +169,7 @@ pub fn set_surface(
     panel: PanelId,
     active: bool,
     surface: MenuSurface,
-    in_transaction: bool,
-    filter_open: bool,
+    table: TableMenu,
     cx: &mut App,
 ) {
     let current = active_menu(cx);
@@ -171,8 +177,8 @@ pub fn set_surface(
         ActiveMenu {
             surface,
             panel: Some(panel),
-            table_in_transaction: in_transaction,
-            filter_open,
+            table_in_transaction: table.in_transaction,
+            filter_open: table.filter_open,
         }
     } else if current.panel == Some(panel) {
         ActiveMenu::default()
@@ -185,21 +191,15 @@ pub fn set_surface(
 }
 
 /// Table-only menu checks (transaction, filter pane) while that table stays active.
-pub fn set_table_menu(panel: PanelId, in_transaction: bool, filter_open: bool, cx: &mut App) {
+pub fn set_table_menu(panel: PanelId, table: TableMenu, cx: &mut App) {
     let current = active_menu(cx);
-    if current.panel != Some(panel)
-        || (current.table_in_transaction == in_transaction && current.filter_open == filter_open)
-    {
+    if current.panel != Some(panel) {
         return;
     }
-    cx.set_global(ActiveMenu {
-        table_in_transaction: in_transaction,
-        filter_open,
-        ..current
-    });
+    set_surface(panel, true, current.surface, table, cx);
 }
 
-/// `名称 @库 (连接名)`. Either piece missing leaves just the name.
+/// `name @database (connection)`. Either piece missing leaves just the name.
 pub fn object_label(name: &str, database: Option<&str>, connection: Option<&str>) -> String {
     match (
         database.map(str::trim).filter(|s| !s.is_empty()),

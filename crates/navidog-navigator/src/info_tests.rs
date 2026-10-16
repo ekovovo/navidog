@@ -58,7 +58,8 @@ fn query_pages_follow_the_editor(cx: &mut TestAppContext) {
             .unwrap();
         s.close().await.unwrap();
     });
-    // SAFETY: the only test in this crate that sets NAVIDOG_HOME
+    // SAFETY: `lock` is held for this test, so no other test in this crate reads the variable.
+    let _home = crate::test_env::lock();
     unsafe { std::env::set_var("NAVIDOG_HOME", &home) };
     let id = cx.update(|cx| {
         gpui_kit::init(cx);

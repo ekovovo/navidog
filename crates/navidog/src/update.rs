@@ -19,8 +19,10 @@ use gpui_kit::{
 };
 use navidog_core::settings::Settings;
 use navidog_ui::tokens;
+use navidog_util::update::{
+    asset_identity, hex_encode, newer_version, nightly_is_newer, notes_preview,
+};
 use rust_i18n::t;
-use semver::Version;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
@@ -29,7 +31,6 @@ const LATEST_API: &str = "https://api.github.com/repos/xhofe/navidog/releases/la
 const RELEASES_PAGE: &str = "https://github.com/xhofe/navidog/releases/latest";
 const RELEASE_LIST_API: &str = "https://api.github.com/repos/xhofe/navidog/releases?per_page=15";
 const NIGHTLY_TAG: &str = "nightly";
-const NIGHTLY_GRACE: chrono::TimeDelta = chrono::TimeDelta::minutes(15);
 const MAX_DOWNLOAD: u64 = 512 * 1024 * 1024;
 const USER_AGENT: &str = concat!("navidog/", env!("CARGO_PKG_VERSION"));
 
@@ -145,59 +146,6 @@ struct GithubRelease {
 struct GithubAsset {
     name: String,
     browser_download_url: String,
-}
-
-/// `Some(version)` when `raw` is a semver strictly newer than `current`.
-pub fn newer_version(raw: &str, current: &str) -> Option<String> {
-    let latest = Version::parse(raw.trim().trim_start_matches('v')).ok()?;
-    let current = Version::parse(current).ok()?;
-    (latest > current).then(|| latest.to_string())
-}
-
-/// A nightly published at `published_at` is newer than this build when it is
-/// more than 15 minutes later. The grace skips the upload that is still
-/// finishing for the build that is running.
-pub fn nightly_is_newer(published_at: &str, built_at: &str) -> bool {
-    let (Ok(published), Ok(built)) = (
-        chrono::DateTime::parse_from_rfc3339(published_at.trim()),
-        chrono::DateTime::parse_from_rfc3339(built_at.trim()),
-    ) else {
-        return false;
-    };
-    published - built > NIGHTLY_GRACE
-}
-
-/// `(os, arch, kind)` of a file the publish workflow uploads.
-pub fn asset_identity(name: &str) -> Option<(&'static str, String, &'static str)> {
-    if let Some(arch) = name
-        .strip_prefix("Navidog-")
-        .and_then(|rest| rest.strip_suffix(".dmg"))
-    {
-        return Some(("macos", arch.to_string(), "dmg"));
-    }
-    let rest = name.strip_prefix("navidog-")?;
-    if let Some(arch) = rest.strip_suffix(".AppImage.tar.gz") {
-        return Some(("linux", arch.to_string(), "appimage"));
-    }
-    let (os, file) = rest.split_once('-')?;
-    let os = match os {
-        "macos" => "macos",
-        "windows" => "windows",
-        "linux" => "linux",
-        _ => return None,
-    };
-    const KINDS: [(&str, &str); 6] = [
-        (".tar.gz", "tarball"),
-        (".msi.zip", "msizip"),
-        (".msi", "msi"),
-        (".zip", "zip"),
-        (".deb", "deb"),
-        (".rpm", "rpm"),
-    ];
-    KINDS.iter().find_map(|(suffix, kind)| {
-        file.strip_suffix(suffix)
-            .map(|arch| (os, arch.to_string(), *kind))
-    })
 }
 
 fn pick_asset_for(assets: &[ManifestAsset], os: &str, arch: &str) -> Option<UpdateAsset> {
@@ -445,16 +393,6 @@ pub fn download_verified(asset: &UpdateAsset) -> Result<PathBuf, String> {
         return Err("checksum".into());
     }
     Ok(path)
-}
-
-fn hex_encode(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        out.push(HEX[(byte >> 4) as usize] as char);
-        out.push(HEX[(byte & 0xf) as usize] as char);
-    }
-    out
 }
 
 #[cfg(any(test, target_os = "macos"))]
@@ -777,18 +715,6 @@ impl Render for UpdateDialog {
     }
 }
 
-fn notes_preview(notes: &str) -> String {
-    let notes = notes.trim();
-    if notes.chars().count() <= 800 {
-        return notes.to_string();
-    }
-    let mut end = 800;
-    while !notes.is_char_boundary(end) {
-        end -= 1;
-    }
-    format!("{}…", &notes[..end])
-}
-
 #[cfg(target_os = "macos")]
 fn open_restart(window: &mut Window, cx: &mut App) {
     window.open_dialog(cx, |dialog, window, _| {
@@ -831,52 +757,6 @@ mod tests {
             url: format!("https://example.test/{name}"),
             sha256: "abc".into(),
         }
-    }
-
-    #[test]
-    fn newer_version_compares_semver() {
-        assert_eq!(newer_version("v0.2.0", "0.1.0").as_deref(), Some("0.2.0"));
-        assert!(newer_version("0.1.0", "0.1.0").is_none());
-        assert!(newer_version("0.0.9", "0.1.0").is_none());
-        assert!(newer_version("nightly", "0.1.0").is_none());
-    }
-
-    #[test]
-    fn nightly_is_newer_after_the_grace_window() {
-        assert!(!nightly_is_newer(
-            "2026-10-16T00:10:00Z",
-            "2026-10-16T00:00:00Z"
-        ));
-        assert!(nightly_is_newer(
-            "2026-10-16T00:20:00Z",
-            "2026-10-16T00:00:00Z"
-        ));
-        assert!(!nightly_is_newer("not-a-date", "2026-10-16T00:00:00Z"));
-    }
-
-    #[test]
-    fn asset_names_map_to_os_arch_and_kind() {
-        assert_eq!(
-            asset_identity("Navidog-aarch64.dmg"),
-            Some(("macos", "aarch64".into(), "dmg"))
-        );
-        assert_eq!(
-            asset_identity("navidog-aarch64.AppImage.tar.gz"),
-            Some(("linux", "aarch64".into(), "appimage"))
-        );
-        assert_eq!(
-            asset_identity("navidog-windows-x86_64.msi"),
-            Some(("windows", "x86_64".into(), "msi"))
-        );
-        assert_eq!(
-            asset_identity("navidog-windows-x86_64.msi.zip"),
-            Some(("windows", "x86_64".into(), "msizip"))
-        );
-        assert_eq!(
-            asset_identity("navidog-linux-x86_64.tar.gz"),
-            Some(("linux", "x86_64".into(), "tarball"))
-        );
-        assert!(asset_identity("SHA256SUMS").is_none());
     }
 
     #[test]

@@ -184,7 +184,7 @@ gpui-kit 的[编码指南](https://gpui-kit.com/zh-CN/docs/coding-guides)和[设
 | M12 | 同步（本地目录或 Git），替代 Navicat Cloud | `navidog-core` |
 | M13 | HTTP 隧道 | `navidog-db` |
 | M14 | 其他数据库，按类别接入 | `navidog-db` 及各 feature crate |
-| M15 | 发布：签名、公证、多平台安装包、应用内更新 | 打包脚本、`navidog` |
+| M15 | 发布：签名、公证、多平台安装包、应用内更新。打包和应用内更新已提前落地；里程碑未关闭，因为公证和配置迁移还没做 | 打包脚本、`navidog` |
 
 ### 每个里程碑的完成标准
 - CI 通过：fmt、clippy、单元测试、headless UI 测试、裸值检查。

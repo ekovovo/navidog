@@ -405,4 +405,28 @@ mod tests {
         });
         panic!("fields and children did not both finish: {state:?}");
     }
+
+    #[gpui_kit::test]
+    fn a_saved_query_is_listed_under_queries(cx: &mut gpui_kit::TestAppContext) {
+        let _home = crate::test_env::lock();
+        let dir = std::env::temp_dir().join(format!("navidog-query-list-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // SAFETY: `lock` is held until this test returns.
+        unsafe { std::env::set_var("NAVIDOG_HOME", &dir) };
+        let scope = Scope::new("c1", "sakila", None);
+        let path = navidog_core::queries::path(&scope, "actor");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "SELECT 1").unwrap();
+        let catalog = cx.new(|_| Catalog::default());
+        catalog.update(cx, |cat, cx| {
+            cat.ensure_objects(&scope, ObjectKind::Query, true, cx);
+        });
+        let names: Vec<String> =
+            catalog.read_with(cx, |cat, _| match cat.objects(&scope, ObjectKind::Query) {
+                Some(Load::Ready(list)) => list.iter().map(|o| o.name.clone()).collect(),
+                other => panic!("query category was not ready: {other:?}"),
+            });
+        assert_eq!(names, vec!["actor".to_string()]);
+    }
 }

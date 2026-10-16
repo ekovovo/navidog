@@ -268,8 +268,10 @@ impl BasePanel for TableViewer {
             panel,
             active,
             tabs::MenuSurface::Table,
-            self.in_transaction,
-            self.show_filter,
+            tabs::TableMenu {
+                in_transaction: self.in_transaction,
+                filter_open: self.show_filter,
+            },
             cx,
         );
         let workspace = Workspace::global(cx);
@@ -737,45 +739,57 @@ impl TableViewer {
             .await;
             let pending_close = this
                 .update(cx, |this, cx| {
-                    match columns {
-                        Ok(Ok((dialect, columns))) => {
-                            this.dialect = Some(dialect);
-                            this.columns = columns;
-                            this.grid.update(cx, |g, cx| {
-                                g.set_target(
-                                    Some(GridTarget {
-                                        dialect,
-                                        scope: this.object.scope.clone(),
-                                        table: this.object.name.clone(),
-                                    }),
-                                    cx,
-                                )
-                            });
-                        }
-                        Ok(Err(e)) => this.status = e.to_string().into(),
-                        Err(e) => this.status = e.to_string().into(),
-                    }
-                    this.session = Some(shared);
-                    this.cancel = cancel;
-                    this.load_foreign_keys(cx);
-                    // Back after a reopen with edits pending: keep the rows they belong to; they
-                    // commit on the new session. A reload would discard them.
-                    if this.grid.read(cx).model(cx).has_changes() {
-                        this.set_busy(false, cx);
-                        this.status = SharedString::default();
-                    } else {
-                        this.reload(true, cx);
-                    }
-                    if Settings::global(cx).auto_begin_transaction {
-                        this.begin_transaction(cx);
-                    }
-                    this.close_after_commit && !this.busy
+                    this.apply_connected(columns, shared, cancel, cx)
                 })
                 .unwrap_or(false);
             if pending_close {
                 cx.update(|cx| TableViewer::resume_close(this.clone(), cx));
             }
         }));
+    }
+
+    /// Catalog columns and the viewer's own session, then the first page. Returns whether a
+    /// close that waited on this load should continue.
+    fn apply_connected(
+        &mut self,
+        columns: Result<navidog_db::DbResult<(Dialect, Vec<ColumnInfo>)>, tokio::task::JoinError>,
+        shared: SharedSession,
+        cancel: Option<CancelHandle>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        match columns {
+            Ok(Ok((dialect, columns))) => {
+                self.dialect = Some(dialect);
+                self.columns = columns;
+                self.grid.update(cx, |g, cx| {
+                    g.set_target(
+                        Some(GridTarget {
+                            dialect,
+                            scope: self.object.scope.clone(),
+                            table: self.object.name.clone(),
+                        }),
+                        cx,
+                    )
+                });
+            }
+            Ok(Err(e)) => self.status = e.to_string().into(),
+            Err(e) => self.status = e.to_string().into(),
+        }
+        self.session = Some(shared);
+        self.cancel = cancel;
+        self.load_foreign_keys(cx);
+        // Back after a reopen with edits pending: keep the rows they belong to; they
+        // commit on the new session. A reload would discard them.
+        if self.grid.read(cx).model(cx).has_changes() {
+            self.set_busy(false, cx);
+            self.status = SharedString::default();
+        } else {
+            self.reload(true, cx);
+        }
+        if Settings::global(cx).auto_begin_transaction {
+            self.begin_transaction(cx);
+        }
+        self.close_after_commit && !self.busy
     }
 
     fn load_foreign_keys(&mut self, cx: &mut Context<Self>) {
@@ -884,60 +898,7 @@ impl TableViewer {
                 .map_err(|e| e.to_string())
                 .and_then(|r| r.map_err(|e| e.to_string()));
             let pending_close = this
-                .update(cx, |this, cx| {
-                    this.set_busy(false, cx);
-                    match result {
-                        Ok(mut sets) if !sets.is_empty() => {
-                            let set = sets.swap_remove(0);
-                            let pk = |name: &str| {
-                                this.columns.iter().any(|c| c.name == name && c.primary_key)
-                            };
-                            let columns: Vec<GridColumn> = set
-                                .columns
-                                .iter()
-                                .map(|c| {
-                                    let info = this.columns.iter().find(|i| i.name == c.name);
-                                    let type_name = info
-                                        .map(|i| i.type_name.clone())
-                                        .filter(|t| !t.is_empty())
-                                        .unwrap_or_else(|| c.type_name.clone());
-                                    let read_only = c.name == "_rowid";
-                                    GridColumn {
-                                        name: if read_only {
-                                            "ROWID".into()
-                                        } else {
-                                            c.name.clone().into()
-                                        },
-                                        type_name: type_name.into(),
-                                        primary_key: pk(&c.name),
-                                        comment: info
-                                            .and_then(|i| i.comment.clone())
-                                            .map(Into::into),
-                                        read_only,
-                                    }
-                                })
-                                .collect();
-                            let rows: Vec<Vec<Cell>> = set
-                                .rows
-                                .into_iter()
-                                .map(|r| r.into_iter().map(|v| v.map(Into::into)).collect())
-                                .collect();
-                            this.raw_columns = columns;
-                            this.raw_rows = rows;
-                            this.reproject(cx);
-                            if std::mem::take(&mut this.add_after_commit) {
-                                this.insert_row(cx);
-                            }
-                        }
-                        Ok(_) => {}
-                        Err(e) => {
-                            this.add_after_commit = false;
-                            this.status = e.into();
-                        }
-                    }
-                    cx.notify();
-                    this.close_after_commit && !this.busy
-                })
+                .update(cx, |this, cx| this.apply_page(result, cx))
                 .unwrap_or(false);
             if pending_close {
                 cx.update(|cx| TableViewer::resume_close(this.clone(), cx));
@@ -955,6 +916,63 @@ impl TableViewer {
                 });
             }
         }));
+    }
+
+    /// Projects one loaded page onto the grid. Returns whether a close that waited on this load
+    /// should continue.
+    fn apply_page(
+        &mut self,
+        result: Result<Vec<ResultSet>, String>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.set_busy(false, cx);
+        match result {
+            Ok(mut sets) if !sets.is_empty() => {
+                let set = sets.swap_remove(0);
+                let pk = |name: &str| self.columns.iter().any(|c| c.name == name && c.primary_key);
+                let columns: Vec<GridColumn> = set
+                    .columns
+                    .iter()
+                    .map(|c| {
+                        let info = self.columns.iter().find(|i| i.name == c.name);
+                        let type_name = info
+                            .map(|i| i.type_name.clone())
+                            .filter(|t| !t.is_empty())
+                            .unwrap_or_else(|| c.type_name.clone());
+                        let read_only = c.name == "_rowid";
+                        GridColumn {
+                            name: if read_only {
+                                "ROWID".into()
+                            } else {
+                                c.name.clone().into()
+                            },
+                            type_name: type_name.into(),
+                            primary_key: pk(&c.name),
+                            comment: info.and_then(|i| i.comment.clone()).map(Into::into),
+                            read_only,
+                        }
+                    })
+                    .collect();
+                let rows: Vec<Vec<Cell>> = set
+                    .rows
+                    .into_iter()
+                    .map(|r| r.into_iter().map(|v| v.map(Into::into)).collect())
+                    .collect();
+                self.raw_columns = columns;
+                self.raw_rows = rows;
+                self.reproject(cx);
+                if std::mem::take(&mut self.add_after_commit) {
+                    self.insert_row(cx);
+                }
+            }
+            Ok(_) => {}
+            Err(e) => {
+                self.add_after_commit = false;
+                self.status = e.into();
+            }
+        }
+        cx.notify();
+        self.close_after_commit && !self.busy
     }
 
     /// Reloads after the page, sort, filter or limit changed. Like leaving a modified row
@@ -1116,8 +1134,10 @@ impl TableViewer {
     fn note_menu(&self, cx: &mut Context<Self>) {
         tabs::set_table_menu(
             PanelId::from(cx.entity_id()),
-            self.in_transaction,
-            self.show_filter,
+            tabs::TableMenu {
+                in_transaction: self.in_transaction,
+                filter_open: self.show_filter,
+            },
             cx,
         );
     }

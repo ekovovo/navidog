@@ -1653,4 +1653,22 @@ mod tests {
         sort_rows(&mut rows, 0, false);
         assert_eq!(rows[0], vec![Some("10".to_string())]);
     }
+
+    #[test]
+    fn pinned_hover_lists_when_and_where() {
+        let info = RunInfo {
+            at: chrono::Local::now(),
+            query_time: Duration::from_millis(1500),
+            connection: "local".into(),
+            connection_id: "c1".into(),
+            database: Some("sakila".into()),
+            schema: None,
+            dialect: Some(Dialect::MySql),
+        };
+        let lines = info.lines("SELECT 1");
+        assert!(lines.iter().any(|(_, v)| v == "local"));
+        assert!(lines.iter().any(|(_, v)| v == "sakila"));
+        assert!(lines.iter().any(|(_, v)| v == "SELECT 1"));
+        assert!(lines.iter().any(|(_, v)| v == "1.500s"));
+    }
 }

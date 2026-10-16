@@ -25,8 +25,6 @@ serde_json.workspace = true
 tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
-chrono.workspace = true
-semver = "1"
 sha2 = "0.10"
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 mimalloc = { version = "0.1", optional = true }

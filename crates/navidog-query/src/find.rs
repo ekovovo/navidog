@@ -4,20 +4,18 @@
 
 use std::ops::Range;
 
-use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::Sizable as _;
 use gpui_kit::component::input::{
     Input, InputEvent, InputState, RangeDecoration, RangeDecorationCollection, RangeDecorationStyle,
 };
 use gpui_kit::component::native_menu::NativeMenu;
-use gpui_kit::component::{Disableable as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    AppContext as _, ClickEvent, Context, Entity, InteractiveElement as _, IntoElement,
-    ParentElement as _, StatefulInteractiveElement as _, Styled as _, Subscription, Window,
-    actions, div,
+    AppContext as _, ClickEvent, Context, Entity, IntoElement, ParentElement as _, Styled as _,
+    Subscription, Window, actions, div,
 };
-use navidog_ui::assets::lucide;
-use navidog_ui::{palette, tokens};
+use navidog_ui::find_bar::{FindBar, ReplaceRow};
+use navidog_ui::palette;
 use regex::{Regex, RegexBuilder};
 use rust_i18n::t;
 
@@ -343,119 +341,41 @@ impl QueryEditor {
         } else {
             t!("query.find").to_string()
         };
-        h_flex()
-            .px_2()
-            .py_1()
-            .gap_1()
-            .items_start()
-            .border_b_1()
-            .border_color(p.separator)
-            .child(
-                h_flex()
-                    .id("find-mode")
-                    .flex_none()
-                    .px_2()
-                    .gap_1()
-                    .h(tokens::query::FIND_CONTROL_HEIGHT.rems())
-                    .items_center()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(if self.find.error {
-                        p.danger
-                    } else {
-                        p.separator
-                    })
-                    .bg(p.fill_tertiary)
-                    .cursor_pointer()
-                    .child(mode)
-                    .child(
-                        lucide("chevron-down")
-                            .size(tokens::navigator::ROW_ICON.rems())
-                            .text_color(p.label_secondary),
-                    )
-                    .on_click(cx.listener(|this, e: &ClickEvent, window, cx| {
-                        this.focus_for_menu(window, cx);
-                        this.find_menu().show(e.position(), window, cx);
-                    })),
-            )
-            .child(
-                v_flex()
+        let replace = self.find.replace_mode.then(|| {
+            ReplaceRow::new(
+                "find-replace-one",
+                "find-replace-all",
+                div()
                     .flex_1()
                     .min_w_0()
-                    .gap_1()
-                    .child(
-                        h_flex()
-                            .gap_1()
-                            .items_center()
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .rounded_md()
-                                    .when(self.find.error, |d| d.border_1().border_color(p.danger))
-                                    .child(Input::new(&self.find.query).small()),
-                            )
-                            .child(
-                                Button::new("find-prev")
-                                    .ghost()
-                                    .small()
-                                    .icon(lucide("chevron-left"))
-                                    .disabled(count == 0)
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.find_step(false, window, cx)
-                                    })),
-                            )
-                            .child(
-                                Button::new("find-next")
-                                    .ghost()
-                                    .small()
-                                    .icon(lucide("chevron-right"))
-                                    .disabled(count == 0)
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.find_step(true, window, cx)
-                                    })),
-                            )
-                            .child(
-                                Button::new("find-done")
-                                    .small()
-                                    .label(t!("query.find_done").to_string())
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.close_find(window, cx)
-                                    })),
-                            ),
-                    )
-                    .when(self.find.replace_mode, |col| {
-                        col.child(
-                            h_flex()
-                                .gap_1()
-                                .items_center()
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .child(Input::new(&self.find.replacement).small()),
-                                )
-                                .child(
-                                    Button::new("find-replace-one")
-                                        .small()
-                                        .label(t!("query.replace").to_string())
-                                        .disabled(count == 0)
-                                        .on_click(cx.listener(|this, _, window, cx| {
-                                            this.replace_one(window, cx)
-                                        })),
-                                )
-                                .child(
-                                    Button::new("find-replace-all")
-                                        .small()
-                                        .label(t!("query.replace_all").to_string())
-                                        .disabled(count == 0)
-                                        .on_click(cx.listener(|this, _, window, cx| {
-                                            this.replace_every(window, cx)
-                                        })),
-                                ),
-                        )
-                    }),
+                    .child(Input::new(&self.find.replacement).small()),
+                t!("query.replace").to_string(),
+                t!("query.replace_all").to_string(),
             )
+            .disabled(count == 0)
+            .on_one(cx.listener(|this, _, window, cx| this.replace_one(window, cx)))
+            .on_all(cx.listener(|this, _, window, cx| this.replace_every(window, cx)))
+        });
+        FindBar::new(
+            mode,
+            div()
+                .flex_1()
+                .min_w_0()
+                .rounded_md()
+                .when(self.find.error, |d| d.border_1().border_color(p.danger))
+                .child(Input::new(&self.find.query).small()),
+            t!("query.find_done").to_string(),
+        )
+        .invalid(self.find.error)
+        .nav_disabled(count == 0)
+        .on_mode(cx.listener(|this, e: &ClickEvent, window, cx| {
+            this.focus_for_menu(window, cx);
+            this.find_menu().show(e.position(), window, cx);
+        }))
+        .on_prev(cx.listener(|this, _, window, cx| this.find_step(false, window, cx)))
+        .on_next(cx.listener(|this, _, window, cx| this.find_step(true, window, cx)))
+        .on_done(cx.listener(|this, _, window, cx| this.close_find(window, cx)))
+        .replace(replace)
     }
 }
 

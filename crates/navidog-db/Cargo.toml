@@ -28,4 +28,5 @@ rusqlite = { version = "0.40", features = ["bundled", "column_decltype", "column
 russh = { version = "0.64", default-features = false, features = ["flate2", "ring", "rsa"] }
 
 [dev-dependencies]
+gpui-kit = { workspace = true, features = ["test-support"] }
 tempfile = "3"

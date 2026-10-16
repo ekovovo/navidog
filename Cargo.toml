@@ -52,4 +52,5 @@ strip = "symbols"
 lto = "fat"
 opt-level = "s"
 # panic = "abort"
-# The default opt-level 3: "s" scrolled the result grid about 20% slower (21-table-viewer.md §1)
+# "s" for a smaller binary. The 2026-10-10 spike scrolled about 20% slower than opt-level 3
+# (21-table-viewer.md §1); release keeps "s".

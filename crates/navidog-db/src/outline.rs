@@ -377,4 +377,53 @@ mod tests {
         let dotted = Scope::new("c1", ".outline", None);
         assert!(path_in(root, &dotted).ends_with("profiles/c1/.outline/%2Eoutline.json"));
     }
+
+    #[gpui_kit::test]
+    fn outline_on_disk_is_used_when_auto_update_is_off_and_clear_removes_it(
+        cx: &mut gpui_kit::TestAppContext,
+    ) {
+        use std::sync::Mutex;
+        static LOCK: Mutex<()> = Mutex::new(());
+        let _guard = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let dir = std::env::temp_dir().join(format!("navidog-outline-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // SAFETY: `LOCK` is held until this test returns, and this binary has no other writer.
+        unsafe { std::env::set_var("NAVIDOG_HOME", &dir) };
+
+        let scope = Scope::new("c1", "sakila", None);
+        let outline = Outline {
+            tables: vec![OutlineTable {
+                name: "actor".into(),
+                view: false,
+                columns: vec![("actor_id".into(), "smallint".into())],
+            }],
+            ..Outline::default()
+        };
+        save(&scope, &outline);
+        assert_eq!(
+            load(&scope).unwrap().table("actor").unwrap().columns,
+            vec![("actor_id".into(), "smallint".into())]
+        );
+
+        let cache = cx.update(|cx| {
+            gpui_kit::init(cx);
+            cx.set_global(navidog_core::settings::Settings {
+                auto_update_outline: false,
+                ..navidog_core::settings::Settings::default()
+            });
+            cx.new(|_| OutlineCache::default())
+        });
+        cache.update(cx, |cache, cx| {
+            cache.ensure(&scope, false, cx);
+            assert_eq!(
+                cache.ready(&scope).unwrap().table("actor").unwrap().name,
+                "actor"
+            );
+            assert!(cache.tasks.is_empty(), "a disk hit must not fetch");
+            cache.clear_all(cx);
+            assert!(cache.ready(&scope).is_none());
+        });
+        assert!(load(&scope).is_none());
+    }
 }

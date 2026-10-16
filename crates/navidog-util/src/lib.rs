@@ -6,6 +6,7 @@ pub mod format;
 pub mod sql_format;
 pub mod sql_text;
 pub mod sql_type;
+pub mod update;
 
 /// `s` starts with `prefix`, ignoring ASCII case. Compares bytes, so a multi-byte character at
 /// the cut point cannot panic the way `s[..prefix.len()]` does.

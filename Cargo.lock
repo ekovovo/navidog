@@ -4951,7 +4951,6 @@ name = "navidog"
 version = "0.0.1"
 dependencies = [
  "anyhow",
- "chrono",
  "gpui-kit",
  "mimalloc",
  "navidog-connection",
@@ -4964,7 +4963,6 @@ dependencies = [
  "navidog-ui",
  "navidog-util",
  "rust-i18n",
- "semver",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -5107,6 +5105,8 @@ dependencies = [
 name = "navidog-util"
 version = "0.0.1"
 dependencies = [
+ "chrono",
+ "semver",
  "serde_json",
  "sqlformat",
 ]

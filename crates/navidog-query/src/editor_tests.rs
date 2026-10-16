@@ -419,7 +419,15 @@ fn runs_scripts_into_messages_summary_and_editable_results(cx: &mut TestAppConte
     .unwrap();
     cx.run_until_parked();
     cx.update(|cx| assert!(editor.read(cx).results.tabs[0].pinned));
+    // A pin keeps that result when the next run would otherwise replace it.
     cx.update(|cx| Settings::update(cx, |s| s.keep_results = false));
+    set_text(cx, handle, &editor, "SELECT 4 AS n");
+    run(cx, handle, &editor, RunKind::All);
+    idle(cx, &editor);
+    cx.update(|cx| {
+        let tabs = &editor.read(cx).results.tabs;
+        assert!(tabs.iter().any(|t| t.id == current && t.pinned));
+    });
 }
 
 #[gpui_kit::test]

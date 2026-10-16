@@ -18,6 +18,17 @@ mod snippets;
 #[cfg(test)]
 mod info_tests;
 
+#[cfg(test)]
+mod test_env {
+    use std::sync::{Mutex, MutexGuard};
+
+    /// Serializes tests that write `NAVIDOG_HOME`. The variable is process-global.
+    pub(crate) fn lock() -> MutexGuard<'static, ()> {
+        static LOCK: Mutex<()> = Mutex::new(());
+        LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+}
+
 use gpui_kit::{Action, App, SharedString};
 use navidog_core::object::ObjectKind;
 use navidog_core::registry::{CommandInfo, CommandRegistry, Source};

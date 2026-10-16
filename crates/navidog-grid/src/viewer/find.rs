@@ -137,99 +137,29 @@ impl TableViewer {
     }
 
     pub(super) fn render_find(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let p = palette(cx);
-        h_flex()
-            .px_2()
-            .py_1()
-            .gap_1()
-            .items_start()
-            .border_b_1()
-            .border_color(p.separator)
-            .child(
-                h_flex()
-                    .id("find-mode")
-                    .flex_none()
-                    .px_2()
-                    .gap_1()
-                    .h(tokens::query::FIND_CONTROL_HEIGHT.rems())
-                    .items_center()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(p.separator)
-                    .bg(p.fill_tertiary)
-                    .cursor_pointer()
-                    .child(self.find_mode_label())
-                    .child(
-                        lucide("chevron-down")
-                            .size(tokens::navigator::ROW_ICON.rems())
-                            .text_color(p.label_secondary),
-                    )
-                    .on_click(cx.listener(|this, e: &ClickEvent, window, cx| {
-                        this.focus_for_menu(window, cx);
-                        this.find_menu().show(e.position(), window, cx);
-                    })),
+        let replace = (self.replace_mode && !self.find_columns).then(|| {
+            navidog_ui::find_bar::ReplaceRow::new(
+                "replace-one",
+                "replace-all",
+                Input::new(&self.replace_input).small().flex_1(),
+                t!("viewer.replace").to_string(),
+                t!("viewer.replace_all").to_string(),
             )
-            .child(
-                v_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .gap_1()
-                    .child(
-                        h_flex()
-                            .gap_1()
-                            .items_center()
-                            .child(Input::new(&self.find_input).small().flex_1())
-                            .child(
-                                Button::new("find-prev")
-                                    .small()
-                                    .ghost()
-                                    .icon(lucide("chevron-left"))
-                                    .on_click(
-                                        cx.listener(|this, _, _, cx| this.find_step(false, cx)),
-                                    ),
-                            )
-                            .child(
-                                Button::new("find-next")
-                                    .small()
-                                    .ghost()
-                                    .icon(lucide("chevron-right"))
-                                    .on_click(
-                                        cx.listener(|this, _, _, cx| this.find_step(true, cx)),
-                                    ),
-                            )
-                            .child(
-                                Button::new("find-done")
-                                    .small()
-                                    .label(t!("viewer.find_done").to_string())
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.close_find(window, cx)
-                                    })),
-                            ),
-                    )
-                    .when(self.replace_mode && !self.find_columns, |col| {
-                        col.child(
-                            h_flex()
-                                .gap_1()
-                                .items_center()
-                                .child(Input::new(&self.replace_input).small().flex_1())
-                                .child(
-                                    Button::new("replace-one")
-                                        .small()
-                                        .label(t!("viewer.replace").to_string())
-                                        .on_click(
-                                            cx.listener(|this, _, _, cx| this.replace_current(cx)),
-                                        ),
-                                )
-                                .child(
-                                    Button::new("replace-all")
-                                        .small()
-                                        .label(t!("viewer.replace_all").to_string())
-                                        .on_click(
-                                            cx.listener(|this, _, _, cx| this.replace_every(cx)),
-                                        ),
-                                ),
-                        )
-                    }),
-            )
+            .on_one(cx.listener(|this, _, _, cx| this.replace_current(cx)))
+            .on_all(cx.listener(|this, _, _, cx| this.replace_every(cx)))
+        });
+        navidog_ui::find_bar::FindBar::new(
+            self.find_mode_label(),
+            Input::new(&self.find_input).small().flex_1(),
+            t!("viewer.find_done").to_string(),
+        )
+        .on_mode(cx.listener(|this, e: &ClickEvent, window, cx| {
+            this.focus_for_menu(window, cx);
+            this.find_menu().show(e.position(), window, cx);
+        }))
+        .on_prev(cx.listener(|this, _, _, cx| this.find_step(false, cx)))
+        .on_next(cx.listener(|this, _, _, cx| this.find_step(true, cx)))
+        .on_done(cx.listener(|this, _, window, cx| this.close_find(window, cx)))
+        .replace(replace)
     }
 }
