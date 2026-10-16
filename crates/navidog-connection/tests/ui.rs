@@ -58,6 +58,10 @@ fn creates_and_opens_sqlite_connection(cx: &mut TestAppContext) {
         navidog_connection::init(cx);
         // Keep away from the keychain
         ConnectionStore::global(cx).update(cx, |s, _| s.set_key(Key::random()));
+        // Reduced motion settles the dialog entrance on its first frame. A click
+        // samples one frame's bounds and hit tests them against the next, so an
+        // entrance still sliding on the real clock lands it on the row above.
+        cx.set_reduce_motion(true);
     });
     let (handle, host) = cx.update(|cx| {
         // raw-px: test window size

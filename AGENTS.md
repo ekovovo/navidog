@@ -34,6 +34,7 @@ navidog 用 gpui-kit 0.7 复刻 Navicat Premium 17（macOS）。决策、架构�
 - 编辑器自带的键（`Input` context 里的 ⌘.、⌘F、Tab、Esc、回车）在外层 key context 里绑不过它：改绑写成后代谓词，如 `"QueryEditor > Input"`；要在编辑器处理之前截获 Tab、回车、Esc、Copy，用外层元素的 `capture_action`。
 - `EditorState::set_scroll_offset` 不夹住范围，滚过末尾显示一片空白。滚到最后一行按行数、行高和视口高度自己算（`navidog_query::history::scroll_to_end`）。
 - 对话框内容比对话框本身宽时，超出部分的点击落在遮罩上，会直接关闭对话框；窄对话框的按钮行要放得下（用图标按钮或分两行）。
+- `window.click(id)` 拿当前帧的元素位置、对下一帧的命中框做判断，而对话框入场是走真实时钟的滑动（`advance_clock` 推不动它）。慢机器上元素在两次渲染之间移开，点击就落到相邻元素或遮罩上，同一份代码时好时坏。打开对话框后再点击的测试在初始化时 `cx.set_reduce_motion(true)`，让入场停在第一帧。
 - `window.click` 总是发送空修饰键。⌘ 点按要派发带 `Modifiers::command()` 的鼠标事件，发完后把修饰键复位，示例见 `crates/navidog-navigator/tests/navigator.rs` 的 `command_click`。换 gpui-kit 版本后要跑全量测试。
 
 ## 验证

@@ -600,6 +600,10 @@ fn saves_untitled_queries_reloads_outside_edits_and_recovers(cx: &mut TestAppCon
         navidog_db::init(cx);
         navidog_grid::init(cx);
         crate::init(cx);
+        // Reduced motion settles the dialog entrance on its first frame. A click
+        // samples one frame's bounds and hit tests them against the next, so an
+        // entrance still sliding on the real clock can miss a small button.
+        cx.set_reduce_motion(true);
     });
     let scope = navidog_core::object::Scope::new("save-test", "main", None);
     let _ = navidog_core::queries::delete(&scope, "first");
@@ -700,8 +704,8 @@ fn saves_untitled_queries_reloads_outside_edits_and_recovers(cx: &mut TestAppCon
         window.render_frame(cx);
     })
     .unwrap();
-    // The dialog slides in. A click during that misses the OK button.
-    cx.executor().advance_clock(Duration::from_millis(300));
+    // Reduced motion settles the dialog on its first frame, so the click cannot
+    // miss a button that the entrance slide is still moving.
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
         window.click("recover-ok", cx);
