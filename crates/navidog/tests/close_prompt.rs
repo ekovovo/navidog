@@ -1,5 +1,5 @@
 //! Headless test of closing a table viewer tab with an uncommitted edit: ⌘W asks first and keeps
-//! the tab, and "Commit" writes the edit and then closes it.
+//! the tab, and confirming the prompt writes the edit and then closes it.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -32,6 +32,8 @@ fn wait(cx: &mut TestAppContext, what: &str, done: impl Fn(&mut TestAppContext) 
     while !done(cx) {
         assert!(Instant::now() < deadline, "timed out waiting for {what}");
         cx.run_until_parked();
+        // Headless timers (the dialog entrance among them) only fire when the clock moves.
+        cx.executor().advance_clock(Duration::from_millis(20));
         std::thread::sleep(Duration::from_millis(20));
     }
 }
@@ -176,10 +178,13 @@ fn closing_a_tab_with_an_edit_asks_and_commits(cx: &mut TestAppContext) {
         [vec![Some("a".to_string())]]
     );
 
-    // "Commit" writes the edit, then the tab closes
+    // Confirm writes the edit, then the tab closes. The prompt's OK action is Enter
+    // (`on_ok`); a headless click on the footer button does not reach it. Let the
+    // dialog finish sliding in before the key, or the entrance frame eats it.
+    cx.executor().advance_clock(Duration::from_millis(300));
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
-        window.click("close-commit", cx);
+        window.press("enter", cx);
     })
     .unwrap();
     wait(cx, "the commit and the tab to close", |cx| {

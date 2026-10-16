@@ -1,9 +1,7 @@
 //! Stamps the build channel and time into the binary.
 //!
-//! vergen 10 needs rustc 1.96, above this workspace's MSRV (`rust-version`
-//! 1.94), so the stamp is set here. CI exports `NAVIDOG_BUILD_TIMESTAMP`
-//! (RFC 3339). A local build keeps a fixed epoch so `cargo build` does not
-//! rebuild the crate on every invocation.
+//! CI exports `NAVIDOG_BUILD_TIMESTAMP` (RFC 3339). A local build keeps a
+//! fixed epoch so `cargo build` does not rebuild the crate on every invocation.
 
 fn main() {
     println!("cargo:rerun-if-env-changed=NAVIDOG_BUILD_CHANNEL");

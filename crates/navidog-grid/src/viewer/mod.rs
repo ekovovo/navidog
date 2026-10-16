@@ -453,6 +453,21 @@ impl TableViewer {
         self.apply_changes(true, window, cx);
     }
 
+    /// Sends a close-prompt commit that was skipped because a load still held `busy`.
+    /// The commit completion path closes the tab itself and must not call this.
+    fn resume_close(viewer: WeakEntity<Self>, cx: &mut App) {
+        let Some(handle) = cx.active_window() else {
+            return;
+        };
+        let _ = handle.update(cx, |_, window, cx| {
+            let _ = viewer.update(cx, |this, cx| {
+                if this.close_after_commit && !this.busy {
+                    this.apply_changes(true, window, cx);
+                }
+            });
+        });
+    }
+
     /// Closes this tab past its own prompt.
     fn close_now(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.close_approved = true;
@@ -720,40 +735,46 @@ impl TableViewer {
                 })
             })
             .await;
-            let _ = this.update(cx, |this, cx| {
-                match columns {
-                    Ok(Ok((dialect, columns))) => {
-                        this.dialect = Some(dialect);
-                        this.columns = columns;
-                        this.grid.update(cx, |g, cx| {
-                            g.set_target(
-                                Some(GridTarget {
-                                    dialect,
-                                    scope: this.object.scope.clone(),
-                                    table: this.object.name.clone(),
-                                }),
-                                cx,
-                            )
-                        });
+            let pending_close = this
+                .update(cx, |this, cx| {
+                    match columns {
+                        Ok(Ok((dialect, columns))) => {
+                            this.dialect = Some(dialect);
+                            this.columns = columns;
+                            this.grid.update(cx, |g, cx| {
+                                g.set_target(
+                                    Some(GridTarget {
+                                        dialect,
+                                        scope: this.object.scope.clone(),
+                                        table: this.object.name.clone(),
+                                    }),
+                                    cx,
+                                )
+                            });
+                        }
+                        Ok(Err(e)) => this.status = e.to_string().into(),
+                        Err(e) => this.status = e.to_string().into(),
                     }
-                    Ok(Err(e)) => this.status = e.to_string().into(),
-                    Err(e) => this.status = e.to_string().into(),
-                }
-                this.session = Some(shared);
-                this.cancel = cancel;
-                this.load_foreign_keys(cx);
-                // Back after a reopen with edits pending: keep the rows they belong to; they
-                // commit on the new session. A reload would discard them.
-                if this.grid.read(cx).model(cx).has_changes() {
-                    this.set_busy(false, cx);
-                    this.status = SharedString::default();
-                } else {
-                    this.reload(true, cx);
-                }
-                if Settings::global(cx).auto_begin_transaction {
-                    this.begin_transaction(cx);
-                }
-            });
+                    this.session = Some(shared);
+                    this.cancel = cancel;
+                    this.load_foreign_keys(cx);
+                    // Back after a reopen with edits pending: keep the rows they belong to; they
+                    // commit on the new session. A reload would discard them.
+                    if this.grid.read(cx).model(cx).has_changes() {
+                        this.set_busy(false, cx);
+                        this.status = SharedString::default();
+                    } else {
+                        this.reload(true, cx);
+                    }
+                    if Settings::global(cx).auto_begin_transaction {
+                        this.begin_transaction(cx);
+                    }
+                    this.close_after_commit && !this.busy
+                })
+                .unwrap_or(false);
+            if pending_close {
+                cx.update(|cx| TableViewer::resume_close(this.clone(), cx));
+            }
         }));
     }
 
@@ -862,57 +883,66 @@ impl TableViewer {
                 .await
                 .map_err(|e| e.to_string())
                 .and_then(|r| r.map_err(|e| e.to_string()));
-            let _ = this.update(cx, |this, cx| {
-                this.set_busy(false, cx);
-                match result {
-                    Ok(mut sets) if !sets.is_empty() => {
-                        let set = sets.swap_remove(0);
-                        let pk = |name: &str| {
-                            this.columns.iter().any(|c| c.name == name && c.primary_key)
-                        };
-                        let columns: Vec<GridColumn> = set
-                            .columns
-                            .iter()
-                            .map(|c| {
-                                let info = this.columns.iter().find(|i| i.name == c.name);
-                                let type_name = info
-                                    .map(|i| i.type_name.clone())
-                                    .filter(|t| !t.is_empty())
-                                    .unwrap_or_else(|| c.type_name.clone());
-                                let read_only = c.name == "_rowid";
-                                GridColumn {
-                                    name: if read_only {
-                                        "ROWID".into()
-                                    } else {
-                                        c.name.clone().into()
-                                    },
-                                    type_name: type_name.into(),
-                                    primary_key: pk(&c.name),
-                                    comment: info.and_then(|i| i.comment.clone()).map(Into::into),
-                                    read_only,
-                                }
-                            })
-                            .collect();
-                        let rows: Vec<Vec<Cell>> = set
-                            .rows
-                            .into_iter()
-                            .map(|r| r.into_iter().map(|v| v.map(Into::into)).collect())
-                            .collect();
-                        this.raw_columns = columns;
-                        this.raw_rows = rows;
-                        this.reproject(cx);
-                        if std::mem::take(&mut this.add_after_commit) {
-                            this.insert_row(cx);
+            let pending_close = this
+                .update(cx, |this, cx| {
+                    this.set_busy(false, cx);
+                    match result {
+                        Ok(mut sets) if !sets.is_empty() => {
+                            let set = sets.swap_remove(0);
+                            let pk = |name: &str| {
+                                this.columns.iter().any(|c| c.name == name && c.primary_key)
+                            };
+                            let columns: Vec<GridColumn> = set
+                                .columns
+                                .iter()
+                                .map(|c| {
+                                    let info = this.columns.iter().find(|i| i.name == c.name);
+                                    let type_name = info
+                                        .map(|i| i.type_name.clone())
+                                        .filter(|t| !t.is_empty())
+                                        .unwrap_or_else(|| c.type_name.clone());
+                                    let read_only = c.name == "_rowid";
+                                    GridColumn {
+                                        name: if read_only {
+                                            "ROWID".into()
+                                        } else {
+                                            c.name.clone().into()
+                                        },
+                                        type_name: type_name.into(),
+                                        primary_key: pk(&c.name),
+                                        comment: info
+                                            .and_then(|i| i.comment.clone())
+                                            .map(Into::into),
+                                        read_only,
+                                    }
+                                })
+                                .collect();
+                            let rows: Vec<Vec<Cell>> = set
+                                .rows
+                                .into_iter()
+                                .map(|r| r.into_iter().map(|v| v.map(Into::into)).collect())
+                                .collect();
+                            this.raw_columns = columns;
+                            this.raw_rows = rows;
+                            this.reproject(cx);
+                            if std::mem::take(&mut this.add_after_commit) {
+                                this.insert_row(cx);
+                            }
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            this.add_after_commit = false;
+                            this.status = e.into();
                         }
                     }
-                    Ok(_) => {}
-                    Err(e) => {
-                        this.add_after_commit = false;
-                        this.status = e.into();
-                    }
-                }
-                cx.notify();
-            });
+                    cx.notify();
+                    this.close_after_commit && !this.busy
+                })
+                .unwrap_or(false);
+            if pending_close {
+                cx.update(|cx| TableViewer::resume_close(this.clone(), cx));
+                return;
+            }
             if let Some(total) = total {
                 let n = total
                     .await
@@ -967,8 +997,8 @@ impl TableViewer {
         let Some(session) = self.session.clone() else {
             return;
         };
-        // The statements of a running commit already went to the server; a second commit of the
-        // same changes would insert twice
+        // Statements already in flight must not be sent again. A close-prompt commit keeps
+        // `close_after_commit`; the load that holds `busy` resumes it when it finishes.
         if self.busy {
             return;
         }

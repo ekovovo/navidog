@@ -789,6 +789,7 @@ fn notes_preview(notes: &str) -> String {
     format!("{}…", &notes[..end])
 }
 
+#[cfg(target_os = "macos")]
 fn open_restart(window: &mut Window, cx: &mut App) {
     window.open_dialog(cx, |dialog, window, _| {
         dialog
