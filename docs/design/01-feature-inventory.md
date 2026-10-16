@@ -30,7 +30,7 @@
 | F-APP-015 | 通过 URI 共享 | 在信息窗格“常规”页生成对象的 URI，可选隐藏主机信息。 | share_uri | M2 |
 | F-APP-016 | 自动恢复 | 定期保存未保存的查询和设计器内容，异常退出后提示恢复。 | preferences_auto_recovery | M3 |
 | F-APP-017 | 日志文件 | `tracing` 应用日志、SQL 执行日志、命令行日志，存放在 `~/Library/Logs/navidog/`。 | log_files | M1（应用日志）、M3（SQL 日志） |
-| F-APP-018 | 关于与检查更新 | “关于 navidog”窗口。“检查更新”读取 GitHub Releases 的 `latest.json`，有新版本时在应用内下载并校验 SHA-256 后安装。偏好设置可包含预发布和 nightly。启动时最多每两天检查一次，可关掉。 | about | M1、M15 |
+| F-APP-018 | 关于与检查更新 | “关于 navidog”窗口。“检查更新”读取 GitHub Releases 的 `latest.json`，有新版本时在应用内下载并校验 SHA-256 后安装。没有发布版本和网络失败分开提示。菜单回调没有活动窗口时用最前面的窗口。偏好设置可包含预发布和 nightly。启动时最多每两天检查一次，可关掉。 | about | M1、M15 |
 | F-APP-019 | 欢迎界面 | 首次启动的引导窗口，没有连接时对象窗格显示“点击工具栏中的‘连接’开始”。 | — | M1 |
 
 ## PREF 偏好设置

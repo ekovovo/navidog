@@ -708,6 +708,9 @@ update:
   uptodate:
     en: Navidog is up to date.
     zh-CN: Navidog 已是最新版本。
+  unpublished:
+    en: No release has been published yet.
+    zh-CN: 还没有发布版本。
   failed:
     en: "Could not check for updates: %{detail}"
     zh-CN: "无法检查更新：%{detail}"

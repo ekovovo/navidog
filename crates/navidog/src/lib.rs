@@ -177,6 +177,28 @@ fn open_main_window(
     .expect("无法打开主窗口")
 }
 
+/// The key window, else the frontmost, else any window GPUI still has open.
+fn front_window(cx: &App) -> Option<gpui_kit::AnyWindowHandle> {
+    cx.active_window()
+        .or_else(|| cx.window_stack().and_then(|stack| stack.into_iter().next()))
+        .or_else(|| cx.windows().into_iter().next())
+}
+
+/// Menu actions are dispatched inside `window.update`. Updating that same
+/// window again finds its slot empty and the `Result` was ignored, so the
+/// click did nothing. Run after this update puts the window back.
+fn on_front_window(cx: &mut App, f: impl FnOnce(&mut gpui_kit::Window, &mut App) + 'static) {
+    let Some(window) = front_window(cx) else {
+        tracing::warn!("menu action had no window");
+        return;
+    };
+    cx.defer(move |cx| {
+        if let Err(err) = window.update(cx, |_, window, cx| f(window, cx)) {
+            tracing::warn!(%err, "menu action could not reach its window");
+        }
+    });
+}
+
 fn register_app_actions(cx: &mut App) {
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.on_action(|_: &Hide, cx| cx.hide());
@@ -186,18 +208,12 @@ fn register_app_actions(cx: &mut App) {
     cx.on_action(|_: &BringAllToFront, cx| cx.activate(true));
     cx.on_action(|_: &Preferences, cx| preferences::open(cx));
     cx.on_action(|_: &CheckForUpdates, cx| {
-        let Some(window) = cx.active_window() else {
-            return;
-        };
-        let _ = window.update(cx, |_, window, cx| update::manual_check(window, cx));
+        on_front_window(cx, |window, cx| update::manual_check(window, cx));
     });
     cx.on_action(|_: &OpenHelp, cx| cx.open_url(REPO));
     cx.on_action(|_: &ReportIssue, cx| cx.open_url(&format!("{REPO}/issues/new")));
     cx.on_action(|_: &About, cx| {
-        let Some(window) = cx.active_window() else {
-            return;
-        };
-        let _ = window.update(cx, |_, window, cx| {
+        on_front_window(cx, |window, cx| {
             window.open_alert_dialog(cx, |alert, _, _| {
                 alert
                     .title("Navidog")

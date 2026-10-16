@@ -70,7 +70,7 @@ M2 的任务都已完成，逐项记录见 git 历史；M2 的功能状态仍在
 | F-APP-009 浅色与深色外观 | 完成 | snapshot、theme 单元测试 | |
 | F-APP-010 界面语言 | 完成 | settings 单元测试、目测 | |
 | F-APP-017 日志文件 | 部分 | | 应用日志已完成；SQL 日志在 M3 |
-| F-APP-018 关于与检查更新 | 完成 | update 单元测试、目测 | 稳定渠道读 `latest.json`，预发布渠道含 nightly。下载校验 SHA-256。启动检查最多每两天一次 |
+| F-APP-018 关于与检查更新 | 完成 | update 单元测试、目测 | 稳定渠道读 `latest.json`，预发布渠道含 nightly。下载校验 SHA-256。启动检查最多每两天一次。手动检查：没有活动窗口时用最前面的窗口；还没有发布版本单独提示 |
 | F-APP-019 欢迎界面 | 部分 | snapshot | 有空状态提示；首次启动引导窗口未做 |
 | F-PREF-001 偏好设置窗口 | 完成 | 目测 | |
 | F-PREF-002 常规 | 完成 | settings 单元测试、theme 单元测试、snapshot | 主题（Navidog、Default，默认 Navidog）、外观、语言、自动连接、显示模式下的对象、显示表下的对象（默认开）。已经写进 settings.json 的 false 不会被改掉 |
