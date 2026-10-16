@@ -3,6 +3,7 @@
 
 use std::collections::HashSet;
 
+use gpui_kit::base::{Tree, TreeEntry, TreeEvent, TreeItem, TreeState};
 use gpui_kit::component::button::ButtonVariants as _;
 use gpui_kit::component::dock::{
     BasePanel, Panel, PanelEvent, PanelId, panel_handle, register_panel,
@@ -13,7 +14,6 @@ use gpui_kit::component::native_menu::NativeMenu;
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{Icon, IconName, Selectable as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
-use gpui_kit::base::{Tree, TreeEntry, TreeEvent, TreeItem, TreeState};
 use gpui_kit::{
     AnyElement, App, AppContext as _, ClickEvent, Context, ElementId, Entity, EventEmitter,
     FocusHandle, Focusable, Global, Hsla, InteractiveElement as _, IntoElement, MouseButton,

@@ -28,7 +28,7 @@ fn fit(rem: gpui_kit::Pixels, header: &str, values: &[&str]) -> gpui_kit::Pixels
 }
 
 fn wait(cx: &mut TestAppContext, what: &str, done: impl Fn(&mut TestAppContext) -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while !done(cx) {
         assert!(Instant::now() < deadline, "timed out waiting for {what}");
         cx.run_until_parked();

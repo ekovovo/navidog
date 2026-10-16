@@ -261,8 +261,10 @@ fn multi_select_drag_and_rename(cx: &mut TestAppContext) {
     // A row's right-click used to open the styled tree's empty popup, which took focus.
     // Menu items dispatch along the focused element, so they never reached the navigator.
     let nav = cx.update(|cx| host.read(cx).navigator.focus_handle(cx));
-    cx.update_window(handle, |_, window, cx| window.right_click(row_a.clone(), cx))
-        .unwrap();
+    cx.update_window(handle, |_, window, cx| {
+        window.right_click(row_a.clone(), cx)
+    })
+    .unwrap();
     cx.run_until_parked();
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);

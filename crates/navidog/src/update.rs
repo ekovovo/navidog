@@ -98,6 +98,7 @@ pub struct UpdateInfo {
 
 pub enum Delivery {
     /// The running `.app` was replaced. Restart to use it.
+    #[cfg(target_os = "macos")]
     Replaced,
     /// The installer was handed to the operating system.
     HandedToOs,
@@ -456,6 +457,7 @@ fn hex_encode(bytes: &[u8]) -> String {
     out
 }
 
+#[cfg(any(test, target_os = "macos"))]
 pub fn bundle_from_exe(path: &Path) -> Option<PathBuf> {
     let mut cursor = path.to_path_buf();
     loop {
@@ -701,6 +703,7 @@ impl UpdateDialog {
             let _ = this.update_in(cx, |this, window, cx| {
                 this.busy = false;
                 match result {
+                    #[cfg(target_os = "macos")]
                     Ok((Delivery::Replaced, _)) => {
                         window.close_dialog(cx);
                         open_restart(window, cx);
