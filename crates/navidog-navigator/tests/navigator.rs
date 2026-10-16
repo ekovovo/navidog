@@ -3,10 +3,13 @@
 
 use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{
-    AppContext as _, Context, FocusHandle, Focusable as _, InputEvent as _,
-    InteractiveElement as _, IntoElement, Modifiers, ParentElement as _, Render, Styled as _,
-    TestAppContext, Window, WindowBounds, WindowOptions, div, point, size,
+    AppContext as _, Context, FocusHandle, InputEvent as _, InteractiveElement as _, IntoElement,
+    Modifiers, ParentElement as _, Render, Styled as _, TestAppContext, Window, WindowBounds,
+    WindowOptions, div, point, size,
 };
+// `focus_handle` comes from `Focusable`; the only call is inside the non-Linux branch below
+#[cfg(not(target_os = "linux"))]
+use gpui_kit::Focusable as _;
 use navidog_core::actions::{NewGroup, RenameGroup};
 use navidog_core::connection::Connection;
 use navidog_core::crypto::Key;
