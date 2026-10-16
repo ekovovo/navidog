@@ -648,7 +648,7 @@ fn begin_check(manual: bool, window: &mut Window, cx: &mut App) {
         let found = cx
             .background_spawn(async move { fetch_latest_release(include) })
             .await;
-        let _ = cx.update(|cx| {
+        cx.update(|cx| {
             let _ = home.update(cx, |_, window, cx| show_check(found, manual, window, cx));
         });
     })

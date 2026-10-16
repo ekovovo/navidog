@@ -199,7 +199,10 @@ fn on_front_window(cx: &mut App, f: impl FnOnce(&mut gpui_kit::Window, &mut App)
     });
 }
 
-fn register_app_actions(cx: &mut App) {
+/// Wires the app-menu actions to their listeners. The menu bar itself is the platform part
+/// (`menus::set_menus`); this side needs no platform UI, so headless tests use it too. Register
+/// once per app: a second call adds a second listener for every action.
+pub fn register_app_actions(cx: &mut App) {
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.on_action(|_: &Hide, cx| cx.hide());
     cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
@@ -208,7 +211,7 @@ fn register_app_actions(cx: &mut App) {
     cx.on_action(|_: &BringAllToFront, cx| cx.activate(true));
     cx.on_action(|_: &Preferences, cx| preferences::open(cx));
     cx.on_action(|_: &CheckForUpdates, cx| {
-        on_front_window(cx, |window, cx| update::manual_check(window, cx));
+        on_front_window(cx, update::manual_check);
     });
     cx.on_action(|_: &OpenHelp, cx| cx.open_url(REPO));
     cx.on_action(|_: &ReportIssue, cx| cx.open_url(&format!("{REPO}/issues/new")));
