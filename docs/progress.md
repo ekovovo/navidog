@@ -70,7 +70,7 @@ M2 的任务都已完成，逐项记录见 git 历史；M2 的功能状态仍在
 | F-APP-009 浅色与深色外观 | 完成 | snapshot、theme 单元测试 | |
 | F-APP-010 界面语言 | 完成 | settings 单元测试、目测 | |
 | F-APP-017 日志文件 | 部分 | | 应用日志已完成；SQL 日志在 M3 |
-| F-APP-018 关于与检查更新 | 完成 | 目测 | Sparkle 在 M15 |
+| F-APP-018 关于与检查更新 | 完成 | update 单元测试、目测 | 稳定渠道读 `latest.json`，预发布渠道含 nightly。下载校验 SHA-256。启动检查最多每两天一次 |
 | F-APP-019 欢迎界面 | 部分 | snapshot | 有空状态提示；首次启动引导窗口未做 |
 | F-PREF-001 偏好设置窗口 | 完成 | 目测 | |
 | F-PREF-002 常规 | 完成 | settings 单元测试、theme 单元测试、snapshot | 主题（Navidog、Default，默认 Navidog）、外观、语言、自动连接、显示模式下的对象、显示表下的对象（默认开）。已经写进 settings.json 的 false 不会被改掉 |
@@ -214,7 +214,7 @@ M2 的任务都已完成，逐项记录见 git 历史；M2 的功能状态仍在
 | 对象选项卡固定为第一个，拖走会弹回。选项卡条滚动时它仍一起移动：gpui-kit 的 TabBar 没有单个选项卡冻结 | M2 | 向 gpui-component 要选项卡条前缀，或自绘选项卡条 |
 | 网格列线、新增行、选中选项卡和工具栏图标的颜色按一张深色截图暂定 | M2 | 与 Navicat 并排实测后替换 |
 | macOS 调试构建读取本机密钥时，系统可能连续弹出两个钥匙串授权框。“始终允许”绑在代码签名上，每次编译签名都变 | M1 | 正式签名（M15）后授权才能留下来。读取仍用 `keyring`，见 [12-secrets.md](design/12-secrets.md) |
-| Windows 和 Linux 没有编入 `keyring` 的系统凭据存储，本机密钥不跨进程保留，重启后已保存的密码解不开 | M1 | 需要时打开 `windows-native` 和 Linux 的 secret-service。主密码模式在这些系统上可以跨重启解密 |
+| Apple 公证只在仓库里配了签名证书时执行，否则发布未签名包 | M15 | 配上 `MACOS_CERTIFICATE` 等 secret 后，publish 工作流里的签名步骤会跑 |
 | 数据分析的条形图、高亮颜色不在记录偏好里 | M2 | M10 |
 | 补全浮层没有图标，用说明文字区分对象类型；只能高亮名称开头，包含和跨字符匹配不高亮；关掉“自动选择第一个建议项目”后第一项仍画成选中的样子 | M3 | gpui-kit 的补全浮层支持图标和散点高亮后改用 |
 | 拖进编辑器的文字插在光标处，不在落点；不能从编辑器把代码拖进代码段页 | M3 | gpui-kit 公开坐标到文本位置的换算后改为落点 |
@@ -234,7 +234,7 @@ M2 的任务都已完成，逐项记录见 git 历史；M2 的功能状态仍在
 | 格式与静态检查 | `cargo fmt --all --check`、`cargo clippy --workspace --all-targets -- -D warnings` | CI 执行 |
 | 裸值检查 | `scripts/check-raw-px.sh` | CI 执行 |
 | 单元测试与 headless UI 测试 | `cargo test --workspace` | CI 执行 |
-| 实库测试 | `docker compose up -d --wait && NAVIDOG_LIVE=1 cargo test -p navidog-db --test live` | 本地执行 |
+| 实库测试 | `docker compose up -d --wait && NAVIDOG_LIVE=1 cargo test -p navidog-db --test live` | CI 的 integration 工作流和本地都执行 |
 | 截图 | `cargo test -p navidog --test snapshot` | 本地执行，输出 `target/snapshots/` |
 | 结果网格性能 | `cargo run --release -p navidog-grid --example spike` | 本地执行，需要 Metal |
 | 导航树性能 | `cargo run --release -p navidog-navigator --example tree_spike` | 本地执行，需要 Metal |

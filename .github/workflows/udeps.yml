@@ -1,0 +1,27 @@
+name: Unused dependencies
+
+on:
+  schedule:
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  udeps:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-udeps
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: macos-udeps
+      - name: cargo udeps
+        run: cargo +nightly udeps --workspace

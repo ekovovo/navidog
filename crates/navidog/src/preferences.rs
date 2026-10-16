@@ -413,6 +413,29 @@ impl Preferences {
                         cx.refresh_windows();
                     }),
             )
+            .child(Self::section(t!("menu.check_updates").to_string()))
+            .child(
+                Checkbox::new("auto-update-check")
+                    .label(t!("prefs.auto_update_check").to_string())
+                    .checked(s.auto_update_check)
+                    .on_click(|v: &bool, _, cx| {
+                        let v = *v;
+                        Settings::update(cx, |s| s.auto_update_check = v);
+                    }),
+            )
+            .child(
+                Checkbox::new("update-prerelease")
+                    .label(t!("prefs.update_prerelease").to_string())
+                    .checked(s.include_prerelease(crate::update::is_nightly_build()))
+                    .on_click(|v: &bool, _, cx| {
+                        let v = *v;
+                        Settings::update(cx, |s| s.update_prerelease = Some(v));
+                    }),
+            )
+            .child(form_note(
+                t!("prefs.update_prerelease_desc").to_string(),
+                cx,
+            ))
     }
 
     fn render_advanced(&self, cx: &mut Context<Self>) -> impl IntoElement {

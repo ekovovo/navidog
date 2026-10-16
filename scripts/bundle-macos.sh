@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Builds an unsigned navidog.app and .dmg. Signing, notarization and Sparkle come in M15.
+# Builds an unsigned navidog.app and .dmg for a local check.
+# Tagged releases are built by .github/workflows/publish.yml.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

@@ -13,6 +13,7 @@ mod opening;
 mod popout;
 pub mod preferences;
 pub mod state;
+mod update;
 
 use gpui_kit::component::{TitleBar, WindowExt as _};
 use gpui_kit::{App, AppContext as _, Bounds, WindowBounds, WindowOptions};
@@ -52,6 +53,7 @@ fn init_logging() -> tracing_appender::non_blocking::WorkerGuard {
 
 pub fn run() {
     let _log_guard = init_logging();
+    update::arm_smoke_watchdog();
     gpui_kit::application()
         .with_assets(NavidogAssets)
         .run(|cx| {
@@ -161,7 +163,11 @@ fn open_main_window(
     let options = main_window_options(&state, cx);
     gpui_kit::open_window(options, cx, move |window, cx| {
         apply_theme(Some(window), cx);
+        update::arm_smoke_window(window);
         let view = cx.new(|cx| MainWindow::new(state, window, cx));
+        if !update::is_smoke_test() {
+            update::startup_check(window, cx);
+        }
         if Settings::global(cx).auto_connect_on_startup {
             navidog_connection::auto_connect(window, cx);
         }
@@ -179,7 +185,12 @@ fn register_app_actions(cx: &mut App) {
     cx.on_action(|_: &ShowMainWindow, cx| cx.activate(true));
     cx.on_action(|_: &BringAllToFront, cx| cx.activate(true));
     cx.on_action(|_: &Preferences, cx| preferences::open(cx));
-    cx.on_action(|_: &CheckForUpdates, cx| cx.open_url(&format!("{REPO}/releases")));
+    cx.on_action(|_: &CheckForUpdates, cx| {
+        let Some(window) = cx.active_window() else {
+            return;
+        };
+        let _ = window.update(cx, |_, window, cx| update::manual_check(window, cx));
+    });
     cx.on_action(|_: &OpenHelp, cx| cx.open_url(REPO));
     cx.on_action(|_: &ReportIssue, cx| cx.open_url(&format!("{REPO}/issues/new")));
     cx.on_action(|_: &About, cx| {

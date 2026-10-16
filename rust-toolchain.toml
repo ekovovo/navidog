@@ -1,0 +1,6 @@
+# The compiler this repo builds with. `rust-version` in Cargo.toml is the
+# older MSRV promised to `cargo install`, checked by the `msrv` job.
+# Bump `channel` here and `RUST_TOOLCHAIN` in .github/workflows together.
+[toolchain]
+channel = "1.99.0"
+components = ["clippy", "rustfmt"]

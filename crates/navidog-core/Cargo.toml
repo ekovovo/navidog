@@ -18,7 +18,14 @@ uuid.workspace = true
 chacha20poly1305 = "0.10"
 argon2 = "0.5"
 base64 = "0.22"
+
+# macOS Keychain and Windows Credential Manager. Linux keeps the machine key
+# in a 0600 file (see `crypto::machine_key`); secret-service is not linked.
+[target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3", features = ["apple-native"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
 
 [dev-dependencies]
 gpui-kit = { workspace = true, features = ["test-support"] }

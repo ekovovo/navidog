@@ -1,0 +1,120 @@
+name: Lint
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: 1.99.0
+
+jobs:
+  toolchain-pin:
+    name: toolchain pin in sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: rust-toolchain.toml matches every workflow pin
+        run: |
+          pinned="$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)"
+          test -n "$pinned"
+          bad=0
+          for f in $(grep -l "RUST_TOOLCHAIN:" .github/workflows/*.yml); do
+            if ! grep -q "RUST_TOOLCHAIN: $pinned" "$f"; then
+              echo "::error::$f pins a different RUST_TOOLCHAIN than rust-toolchain.toml ($pinned)"
+              bad=1
+            fi
+          done
+          exit $bad
+
+  msrv:
+    name: msrv
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: read published MSRV
+        id: msrv
+        run: echo "version=$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml | head -1)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: macos-msrv
+      - name: check with the published MSRV
+        run: cargo +${{ steps.msrv.outputs.version }} check --workspace --locked
+
+  macos:
+    name: macos-${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: ${{ matrix.target }}
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: macos-lint-${{ matrix.target }}
+      - name: fmt
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: cargo fmt --all --check
+      - name: raw pixel check
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: scripts/check-raw-px.sh
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: test
+        run: cargo test --workspace
+
+  linux:
+    name: linux-x86_64
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig1-dev libxcb-xfixes0-dev libxkbcommon-dev libxkbcommon-x11-dev libssl-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: linux-lint-x86_64
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: test
+        run: cargo test --workspace
+
+  windows:
+    name: windows-x86_64
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: windows-lint-x86_64
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: test
+        run: cargo test --workspace

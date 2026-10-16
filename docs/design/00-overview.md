@@ -58,7 +58,7 @@ navidog 用 [gpui-kit](https://gpui-kit.com/zh-CN/docs/) 全家桶（GPUI、`gpu
 11. 许可证 Apache-2.0，禁止引入 GPL 依赖。
 12. Bundle ID：`ci.nn.navidog`。
 13. 不做遥测和远程崩溃上报，日志用 `tracing` 写到 `~/Library/Logs/navidog/`；SQL 历史日志按 Navicat 的方式单独记录。
-14. 自动更新：发布阶段采用 Sparkle 2，appcast 托管在 GitHub Releases；之前只提供“检查更新”，跳转到 Releases 页面。
+14. 自动更新：应用内检查 GitHub Releases 上的 `latest.json`（稳定渠道），下载后用清单里的 SHA-256 校验再安装。偏好设置可打开预发布渠道，此时同时提供 tag 预发布和 `main` 上的滚动 nightly。启动时最多每两天检查一次，可关掉；下载只在用户点更新时发生。不做 Sparkle。
 
 **技术**
 1. 依赖 `gpui-kit = "0.7"`，提交 `Cargo.lock`。gpui-kit 自己精确锁定 `gpui-pre`，不要单独覆盖任何 `gpui-pre-*`。
@@ -70,14 +70,14 @@ navidog 用 [gpui-kit](https://gpui-kit.com/zh-CN/docs/) 全家桶（GPUI、`gpu
 7. 主窗口布局：`gpui-component` 的 `DockArea`，默认布局照 Navicat 排列，用 `dump/load` 持久化；插件面板注册为 Dock Panel。
 8. 驱动层：自定义 trait 加原生驱动（`mysql_async`、`tokio-postgres`、`rusqlite`）。核心是 `Driver` 和 `Session` 两个 trait，按类别分出 `Relational`、`Document`、`KeyValue` 三个 trait，一期只实现 `Relational`。
 9. 异步：`navidog-db` 里放一个全局 tokio 多线程运行时；SQLite 走阻塞线程；界面侧用 `cx.spawn` 加 channel 等结果，状态显式区分 idle、loading、loaded、failed，丢弃过期结果。
-10. 连接配置存成 JSON，放在 `~/Library/Application Support/navidog/`。密码字段默认用钥匙串里随机生成的本机密钥加密；用户可设置主密码，此时用 Argon2 派生密钥、XChaCha20-Poly1305 加密，启动时解锁一次。
+10. 连接配置存成 JSON，放在 `~/Library/Application Support/navidog/`。密码字段默认用本机密钥加密：macOS 放登录钥匙串，Windows 放凭据管理器，Linux 放配置目录里权限 `0600` 的文件。用户可设置主密码，此时用 Argon2 派生密钥、XChaCha20-Poly1305 加密，启动时解锁一次。
 11. 一期连接方式：常规、高级、数据库、SSL、SSH（`russh`）；HTTP 隧道放到 M13，服务端脚本自己写。
 12. 注册表从 M1 起建立，内置功能也通过插件将来使用的同一套注册表注册。
 
 **工程**
 1. 仓库结构：Cargo workspace，具体见第 4 节。
 2. 测试数据库：`docker-compose.yml`（MySQL 8、MariaDB 11、PostgreSQL 16，带种子数据），SQLite 用仓库内的测试文件。
-3. CI：GitHub Actions 的 macOS runner，运行 fmt、clippy、单元测试、headless UI 测试和裸值检查；打 tag 时构建 `.dmg`，签名和公证留到 M15。
+3. CI：GitHub Actions。每次推送在 macOS（aarch64 与 Intel）、Linux、Windows 上跑 clippy 和测试，macOS 另跑 fmt 和裸值检查；`main` 上另做三平台的 release 冒烟。打 `v*` tag 时构建 macOS `.dmg`、Windows `.msi`、zip 与 `.msi.zip`、Linux `.deb`、`.rpm`、AppImage 和 tarball（x86_64 与 aarch64），并上传 `latest.json`。`main` 每天滚动发布 `nightly`。Apple 公证在有签名证书时执行，没有证书时上传未签名包。实库测试在 Ubuntu 上用 `docker compose` 跑。
 4. 分支流程：每个里程碑一个分支，通过 PR 合并到 `master`；规格 PR 和代码 PR 分开提。
 5. 模块细节：每份模块规格按 Navicat 现有行为写好默认值，提交评审。
 
@@ -184,7 +184,7 @@ gpui-kit 的[编码指南](https://gpui-kit.com/zh-CN/docs/coding-guides)和[设
 | M12 | 同步（本地目录或 Git），替代 Navicat Cloud | `navidog-core` |
 | M13 | HTTP 隧道 | `navidog-db` |
 | M14 | 其他数据库，按类别接入 | `navidog-db` 及各 feature crate |
-| M15 | 发布：签名、公证、DMG、Sparkle 2 | 打包脚本 |
+| M15 | 发布：签名、公证、多平台安装包、应用内更新 | 打包脚本、`navidog` |
 
 ### 每个里程碑的完成标准
 - CI 通过：fmt、clippy、单元测试、headless UI 测试、裸值检查。

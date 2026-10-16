@@ -669,14 +669,66 @@ prefs:
     en: Saved passwords are protected by a master password.
     zh-CN: 保存的密码受主密码保护。
   master_disabled:
-    en: Saved passwords are encrypted with a key stored in the Keychain.
-    zh-CN: 保存的密码使用钥匙串中的密钥加密。
+    en: Saved passwords are encrypted with a key stored on this computer.
+    zh-CN: 保存的密码使用本机密钥加密。
+  auto_update_check:
+    en: Check for Updates Automatically
+    zh-CN: 自动检查更新
+  update_prerelease:
+    en: Include pre-releases
+    zh-CN: 包含预发布版本
+  update_prerelease_desc:
+    en: Also offer pre-release versions and the nightly build. On for a nightly build unless turned off.
+    zh-CN: 同时提供预发布版本和 nightly 构建。nightly 构建默认开启，可手动关闭。
   ok:
     en: OK
     zh-CN: 确定
   cancel:
     en: Cancel
     zh-CN: 取消
+update:
+  available:
+    en: "Version %{version} is available"
+    zh-CN: "有新版本 %{version}"
+  current:
+    en: "Current version %{version}"
+    zh-CN: "当前版本 %{version}"
+  download:
+    en: Update
+    zh-CN: 更新
+  later:
+    en: Later
+    zh-CN: 以后再说
+  open_page:
+    en: Open Release Page
+    zh-CN: 打开发布页
+  downloading:
+    en: Downloading…
+    zh-CN: 正在下载…
+  uptodate:
+    en: Navidog is up to date.
+    zh-CN: Navidog 已是最新版本。
+  failed:
+    en: "Could not check for updates: %{detail}"
+    zh-CN: "无法检查更新：%{detail}"
+  bad_checksum:
+    en: The download did not match its checksum and was not installed.
+    zh-CN: 下载的文件和校验和不一致，没有安装。
+  install_failed:
+    en: "The update could not be installed: %{detail}"
+    zh-CN: "无法安装更新：%{detail}"
+  handed_off:
+    en: The installer was opened. Finish installing it to start using the new version.
+    zh-CN: 已经打开安装包。安装完成后即可使用新版本。
+  restart_body:
+    en: The new version is installed. Restart to use it.
+    zh-CN: 新版本已经装好。重新启动后开始使用。
+  restart_now:
+    en: Restart Now
+    zh-CN: 立即重新启动
+  restart_later:
+    en: Later
+    zh-CN: 以后再说
 about:
   version:
     en: "Version %{version}"

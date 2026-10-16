@@ -237,6 +237,13 @@ pub struct Settings {
     /// The app log records debug messages
     pub diagnostic_log: bool,
 
+    /// Startup update check. A manual check ignores this.
+    pub auto_update_check: bool,
+    /// `None` follows the build: on for a nightly build, off for a stable one.
+    pub update_prerelease: Option<bool>,
+    /// Unix seconds of the last update check, successful or not.
+    pub update_checked_unix: Option<i64>,
+
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
 }
@@ -289,6 +296,9 @@ impl Default for Settings {
             history_header: HistoryHeader::default(),
             log_dir: None,
             diagnostic_log: false,
+            auto_update_check: true,
+            update_prerelease: None,
+            update_checked_unix: None,
             extra: Default::default(),
         }
     }
@@ -338,6 +348,25 @@ impl Settings {
             .filter(|d| !d.is_empty())
             .map(std::path::PathBuf::from)
             .unwrap_or_else(paths::log_dir)
+    }
+
+    /// At most one automatic check in this many seconds.
+    pub const UPDATE_CHECK_INTERVAL_SECS: i64 = 2 * 24 * 60 * 60;
+
+    /// Whether a check at `now_unix` should run. Manual checks do not call this.
+    pub fn update_check_due(&self, now_unix: i64) -> bool {
+        if !self.auto_update_check {
+            return false;
+        }
+        match self.update_checked_unix {
+            None => true,
+            Some(then) => now_unix.saturating_sub(then) >= Self::UPDATE_CHECK_INTERVAL_SECS,
+        }
+    }
+
+    /// Pre-release and nightly channel. `None` means "follow the build".
+    pub fn include_prerelease(&self, nightly_build: bool) -> bool {
+        self.update_prerelease.unwrap_or(nightly_build)
     }
 
     /// Changes the settings and saves them right away.
@@ -401,6 +430,23 @@ mod tests {
         assert!(!RowShade::Alternate.paints(0));
         assert!(RowShade::EveryThird.paints(2));
         assert!(!RowShade::EveryThird.paints(1));
+    }
+
+    #[test]
+    fn update_check_waits_two_days_unless_turned_off() {
+        let mut s = Settings::default();
+        assert!(s.auto_update_check);
+        assert!(s.update_prerelease.is_none());
+        assert!(s.update_check_due(1_000));
+        assert!(!s.include_prerelease(false));
+        assert!(s.include_prerelease(true));
+        s.update_checked_unix = Some(1_000);
+        assert!(!s.update_check_due(1_000 + Settings::UPDATE_CHECK_INTERVAL_SECS - 1));
+        assert!(s.update_check_due(1_000 + Settings::UPDATE_CHECK_INTERVAL_SECS));
+        s.auto_update_check = false;
+        assert!(!s.update_check_due(1_000 + Settings::UPDATE_CHECK_INTERVAL_SECS));
+        s.update_prerelease = Some(true);
+        assert!(s.include_prerelease(false));
     }
 
     #[test]

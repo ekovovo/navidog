@@ -503,6 +503,7 @@ fn click_past_the_last_column_selects_the_row(cx: &mut TestAppContext) {
         let tail = tokens::grid::ROW_NUMBER_WIDTH.to_pixels(rem)
             + fit(rem, "id", &["1", "2"])
             + fit(rem, "name", &["a", "b"])
+            // raw-px: click the empty tail past the last column
             + gpui_kit::px(40.);
         let mid = rem / 2.;
         window.click_at(
@@ -531,6 +532,7 @@ fn click_past_the_last_column_selects_the_row(cx: &mut TestAppContext) {
         let tail = tokens::grid::ROW_NUMBER_WIDTH.to_pixels(rem)
             + fit(rem, "id", &["1", "2"])
             + fit(rem, "name", &["a", "b"])
+            // raw-px: click the empty tail past the last column
             + gpui_kit::px(40.);
         // Row 2 is the blank row under the records.
         window.click_at(

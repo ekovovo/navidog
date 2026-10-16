@@ -1,0 +1,459 @@
+name: Publish
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+  schedule:
+    # Daily nightly at 18:00 UTC. Skipped when main has not moved.
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  # Baked into the binary. A nightly build follows the pre-release channel.
+  NAVIDOG_BUILD_CHANNEL: ${{ github.ref == 'refs/heads/main' && 'nightly' || 'stable' }}
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: 1.99.0
+  APP_NAME: Navidog
+
+jobs:
+  prepare_vars:
+    runs-on: ubuntu-latest
+    outputs:
+      build_date: ${{ steps.date.outputs.date }}
+      build_rfc3339: ${{ steps.date.outputs.rfc3339 }}
+      should_build: ${{ steps.gate.outputs.should_build }}
+    steps:
+      - name: Get current date
+        id: date
+        run: |
+          echo "date=$(date -u +'%Y-%m-%d %H:%M')" >> "$GITHUB_OUTPUT"
+          echo "rfc3339=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+      - name: Skip scheduled run when main has no new commits
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          should_build=true
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            nightly_sha=$(gh api "repos/${{ github.repository }}/git/refs/tags/nightly" -q .object.sha 2>/dev/null || echo "")
+            if [ "$nightly_sha" = "${{ github.sha }}" ]; then
+              echo "main unchanged since last nightly; skipping"
+              should_build=false
+            fi
+          fi
+          echo "should_build=$should_build" >> "$GITHUB_OUTPUT"
+      - name: Delete old nightly release and tag
+        if: github.ref == 'refs/heads/main' && steps.gate.outputs.should_build == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ids="$(
+            gh api --paginate "repos/${{ github.repository }}/releases" \
+              -q '.[] | select(.tag_name == "nightly") | .id' 2>/dev/null || true
+          )"
+          for id in $ids; do
+            gh api -X DELETE "repos/${{ github.repository }}/releases/$id" || true
+          done
+          gh api -X DELETE "repos/${{ github.repository }}/git/refs/tags/nightly" 2>/dev/null || true
+      - name: Pre-create nightly release
+        if: github.ref == 'refs/heads/main' && steps.gate.outputs.should_build == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create nightly --prerelease --title "Development Build (Nightly)" \
+            --notes "Rolling build from the latest main branch — assets uploading…" || true
+      - name: Pre-create draft release for tag
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          ids="$(
+            gh api --paginate "repos/${{ github.repository }}/releases" \
+              -q ".[] | select(.tag_name == \"${tag}\") | .id" 2>/dev/null || true
+          )"
+          if [ -z "$ids" ]; then
+            gh release create "$tag" --draft --title "$tag" --notes ""
+          fi
+
+  macos:
+    needs: prepare_vars
+    if: needs.prepare_vars.outputs.should_build == 'true'
+    name: macos-${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            arch: aarch64
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            arch: x86_64
+    env:
+      NAVIDOG_BUILD_TIMESTAMP: ${{ needs.prepare_vars.outputs.build_rfc3339 }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: macos-build-${{ matrix.target }}
+      - name: install tools
+        run: |
+          cargo install --locked cargo-bundle@0.11.0
+          brew install create-dmg
+      - name: Import code-signing certificate
+        if: ${{ secrets.MACOS_CERTIFICATE != '' }}
+        env:
+          p12_certificate: ${{ secrets.MACOS_CERTIFICATE }}
+          p12_password: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          security create-keychain -p "" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "" "$KEYCHAIN_PATH"
+          echo "$p12_certificate" | base64 --decode > certificate.p12
+          security import certificate.p12 -k "$KEYCHAIN_PATH" -P "$p12_password" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+      - name: release
+        run: cargo bundle --release -p navidog --target ${{ matrix.target }} --features mimalloc
+      - name: smoke test (first frame must paint)
+        timeout-minutes: 5
+        env:
+          NAVIDOG_SMOKE_TEST: "1"
+          NAVIDOG_HOME: ${{ runner.temp }}/navidog-smoke
+        run: ./target/${{ matrix.target }}/release/navidog
+      - name: sign app
+        if: ${{ secrets.MACOS_CERTIFICATE != '' }}
+        env:
+          CERT_NAME: ${{ secrets.MACOS_CERTIFICATE_NAME }}
+        run: |
+          APP="target/${{ matrix.target }}/release/bundle/osx/${{ env.APP_NAME }}.app"
+          for attempt in 1 2 3 4 5; do
+            if codesign --force --deep --verbose --options runtime --timestamp \
+              --entitlements Entitlements.plist --sign "$CERT_NAME" "$APP"; then
+              break
+            fi
+            [ "$attempt" -eq 5 ] && exit 1
+            sleep 15
+          done
+          if ! codesign -dvv "$APP" 2>&1 | grep -q "^Timestamp="; then
+            echo "no secure timestamp embedded in the signature" >&2
+            exit 1
+          fi
+      - name: create dmg
+        run: |
+          mkdir -p release
+          create-dmg \
+            --volname "${{ env.APP_NAME }} Installer" \
+            --window-pos 200 120 \
+            --window-size 800 400 \
+            --icon-size 100 \
+            --icon "${{ env.APP_NAME }}.app" 200 190 \
+            --hide-extension "${{ env.APP_NAME }}.app" \
+            --app-drop-link 600 185 \
+            "release/${{ env.APP_NAME }}-${{ matrix.arch }}.dmg" \
+            "target/${{ matrix.target }}/release/bundle/osx/${{ env.APP_NAME }}.app"
+      - name: notarize dmg
+        if: ${{ secrets.APPLE_ID != '' }}
+        env:
+          AC_USERNAME: ${{ secrets.APPLE_ID }}
+          AC_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          AC_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          DMG="release/${{ env.APP_NAME }}-${{ matrix.arch }}.dmg"
+          xcrun notarytool submit "$DMG" \
+            --apple-id "$AC_USERNAME" --password "$AC_PASSWORD" --team-id "$AC_TEAM_ID" --wait
+      - name: wait for propagation
+        if: ${{ secrets.APPLE_ID != '' }}
+        run: sleep 30
+      - name: staple DMG
+        if: ${{ secrets.APPLE_ID != '' }}
+        run: xcrun stapler staple "release/${{ env.APP_NAME }}-${{ matrix.arch }}.dmg"
+      - name: checksum
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          mkdir -p meta
+          DMG_NAME="release/${{ env.APP_NAME }}-${{ matrix.arch }}.dmg"
+          NAME="$(basename "$DMG_NAME")"
+          SHA="$(shasum -a 256 "$DMG_NAME" | awk '{print $1}')"
+          SIZE="$(stat -f%z "$DMG_NAME")"
+          echo "macos ${{ matrix.arch }} dmg $NAME $SHA $SIZE" > "meta/macos-${{ matrix.arch }}.txt"
+      - name: upload asset
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./.github/workflows/upload_asset.sh "release/${{ env.APP_NAME }}-${{ matrix.arch }}.dmg"
+      - name: upload checksum meta
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v7
+        with:
+          name: meta-macos-${{ matrix.arch }}
+          path: meta/macos-${{ matrix.arch }}.txt
+      - name: Release nightly assets
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: nightly
+          name: "Development Build (Nightly)"
+          prerelease: true
+          files: release/*.dmg
+          body: "Rolling build from the latest main branch. Build date: ${{ needs.prepare_vars.outputs.build_date }}"
+
+  windows:
+    needs: prepare_vars
+    if: needs.prepare_vars.outputs.should_build == 'true'
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            arch: x86_64
+          - target: aarch64-pc-windows-msvc
+            arch: aarch64
+    env:
+      NAVIDOG_BUILD_TIMESTAMP: ${{ needs.prepare_vars.outputs.build_rfc3339 }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ runner.os }}-${{ matrix.target }}-build
+      - name: release
+        env:
+          RUSTFLAGS: "-C target-feature=+crt-static"
+        shell: pwsh
+        run: |
+          cargo install --locked cargo-wix@0.3.9
+          cargo build --release -p navidog --target ${{ matrix.target }} --features mimalloc
+          Copy-Item "target/${{ matrix.target }}/release/navidog.exe" ./navidog.exe
+          cargo wix --nocapture --no-build -p navidog --target ${{ matrix.target }}
+          $msi = @(
+            "target/wix",
+            "target/${{ matrix.target }}/wix"
+          ) | ForEach-Object { Get-ChildItem $_ -Filter *.msi -ErrorAction SilentlyContinue } | Select-Object -First 1
+          if (-not $msi) { throw "cargo-wix did not write an msi" }
+          Copy-Item $msi.FullName ./navidog.msi
+      - name: smoke test
+        if: matrix.arch == 'x86_64'
+        timeout-minutes: 3
+        shell: pwsh
+        env:
+          NAVIDOG_SMOKE_TEST: "1"
+          NAVIDOG_HOME: ${{ runner.temp }}/navidog-smoke
+        run: |
+          $p = Start-Process -FilePath .\navidog.exe -Wait -PassThru
+          if ($p.ExitCode -ne 0) { exit 1 }
+      - name: package
+        shell: pwsh
+        run: |
+          $zipName = "navidog-windows-${{ matrix.arch }}.zip"
+          Compress-Archive -Path navidog.exe -DestinationPath $zipName
+          echo "ZIP_NAME=$zipName" >> $env:GITHUB_ENV
+
+          $msiName = "navidog-windows-${{ matrix.arch }}.msi"
+          Copy-Item navidog.msi $msiName
+          echo "MSI_NAME=$msiName" >> $env:GITHUB_ENV
+
+          $msiZipName = "navidog-windows-${{ matrix.arch }}.msi.zip"
+          Compress-Archive -Path navidog.msi -DestinationPath $msiZipName
+          echo "MSI_ZIP_NAME=$msiZipName" >> $env:GITHUB_ENV
+      - name: checksum
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path meta | Out-Null
+          $rows = @(
+            @{ name = "$env:ZIP_NAME"; kind = "zip" },
+            @{ name = "$env:MSI_NAME"; kind = "msi" },
+            @{ name = "$env:MSI_ZIP_NAME"; kind = "msizip" }
+          )
+          $lines = foreach ($r in $rows) {
+            $sha = (Get-FileHash $r.name -Algorithm SHA256).Hash.ToLower()
+            $size = (Get-Item $r.name).Length
+            "windows ${{ matrix.arch }} $($r.kind) $($r.name) $sha $size"
+          }
+          Set-Content -Encoding ascii -Path "meta/windows-${{ matrix.arch }}.txt" -Value $lines
+      - name: upload assets
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          ./.github/workflows/upload_asset.sh "./${{ env.ZIP_NAME }}"
+          ./.github/workflows/upload_asset.sh "./${{ env.MSI_NAME }}"
+          ./.github/workflows/upload_asset.sh "./${{ env.MSI_ZIP_NAME }}"
+      - name: upload checksum meta
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v7
+        with:
+          name: meta-windows-${{ matrix.arch }}
+          path: meta/windows-${{ matrix.arch }}.txt
+      - name: Release nightly assets
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: nightly
+          name: "Development Build (Nightly)"
+          prerelease: true
+          body: "Rolling build from the latest main branch. Build date: ${{ needs.prepare_vars.outputs.build_date }}"
+          files: |
+            ${{ env.ZIP_NAME }}
+            ${{ env.MSI_NAME }}
+            ${{ env.MSI_ZIP_NAME }}
+
+  linux:
+    needs: prepare_vars
+    if: needs.prepare_vars.outputs.should_build == 'true'
+    name: linux-${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            arch: x86_64
+            appimagetool: appimagetool-x86_64.AppImage
+          - os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            arch: aarch64
+            appimagetool: appimagetool-aarch64.AppImage
+    env:
+      NAVIDOG_BUILD_TIMESTAMP: ${{ needs.prepare_vars.outputs.build_rfc3339 }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig1-dev libxcb-xfixes0-dev libxkbcommon-dev libxkbcommon-x11-dev libssl-dev dpkg-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ runner.os }}-${{ matrix.target }}-build
+      - name: install appimagetool
+        run: |
+          wget -q "https://github.com/AppImage/appimagetool/releases/download/continuous/${{ matrix.appimagetool }}" -O appimagetool
+          chmod +x appimagetool
+          sudo mv appimagetool /usr/local/bin/
+      - name: release
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: |
+          cargo install --locked cargo-appimage@2.4.0
+          cargo install --locked cargo-deb@3.7.0 cargo-generate-rpm@0.21.0
+          cargo build --release -p navidog --features mimalloc
+          cargo deb -p navidog --no-build -o "./navidog-linux-${{ matrix.arch }}.deb"
+          cargo generate-rpm --manifest-path crates/navidog/Cargo.toml -o "./navidog-linux-${{ matrix.arch }}.rpm"
+          mv target/release/navidog ./navidog
+          chmod +x navidog
+          objdump -p ./navidog | grep GLIBC
+          tar -czvf "navidog-linux-${{ matrix.arch }}.tar.gz" navidog
+          cargo appimage --features mimalloc --manifest-path crates/navidog/Cargo.toml
+          mv target/appimage/navidog.AppImage ./navidog.AppImage
+          tar -czvf "navidog-${{ matrix.arch }}.AppImage.tar.gz" navidog.AppImage
+      - name: smoke test (first frame must paint)
+        continue-on-error: true
+        timeout-minutes: 5
+        env:
+          NAVIDOG_SMOKE_TEST: "1"
+          NAVIDOG_HOME: ${{ runner.temp }}/navidog-smoke
+        run: |
+          sudo apt-get install -y xvfb mesa-vulkan-drivers libvulkan1
+          xvfb-run -a ./navidog
+      - name: checksum
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          mkdir -p meta
+          : > "meta/linux-${{ matrix.arch }}.txt"
+          for entry in \
+            "navidog-linux-${{ matrix.arch }}.tar.gz tarball" \
+            "navidog-${{ matrix.arch }}.AppImage.tar.gz appimage" \
+            "navidog-linux-${{ matrix.arch }}.deb deb" \
+            "navidog-linux-${{ matrix.arch }}.rpm rpm"; do
+            set -- $entry
+            f="$1"; kind="$2"
+            sha="$(sha256sum "$f" | awk '{print $1}')"
+            size="$(stat -c%s "$f")"
+            echo "linux ${{ matrix.arch }} $kind $f $sha $size" >> "meta/linux-${{ matrix.arch }}.txt"
+          done
+      - name: upload assets
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ./.github/workflows/upload_asset.sh "navidog-linux-${{ matrix.arch }}.deb"
+          ./.github/workflows/upload_asset.sh "navidog-linux-${{ matrix.arch }}.rpm"
+          ./.github/workflows/upload_asset.sh "navidog-linux-${{ matrix.arch }}.tar.gz"
+          ./.github/workflows/upload_asset.sh "navidog-${{ matrix.arch }}.AppImage.tar.gz"
+      - name: upload checksum meta
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v7
+        with:
+          name: meta-linux-${{ matrix.arch }}
+          path: meta/linux-${{ matrix.arch }}.txt
+      - name: Release nightly assets
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: nightly
+          name: "Development Build (Nightly)"
+          prerelease: true
+          body: "Rolling build from the latest main branch. Build date: ${{ needs.prepare_vars.outputs.build_date }}"
+          files: |
+            navidog-linux-${{ matrix.arch }}.deb
+            navidog-linux-${{ matrix.arch }}.rpm
+            navidog-linux-${{ matrix.arch }}.tar.gz
+            navidog-${{ matrix.arch }}.AppImage.tar.gz
+
+  checksums:
+    needs: [macos, windows, linux]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: meta-*
+          path: meta
+          merge-multiple: true
+      - name: build SHA256SUMS and latest.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          REPO="${GITHUB_REPOSITORY}"
+          BASE="https://github.com/$REPO/releases/download/$TAG"
+          cat meta/*.txt > all-meta.txt
+          awk '{print $5"  "$4}' all-meta.txt | sort -k2 > SHA256SUMS
+          items=""
+          while read -r os arch kind name sha size; do
+            [ -z "${name:-}" ] && continue
+            item=$(printf '{"os":"%s","arch":"%s","kind":"%s","name":"%s","url":"%s/%s","sha256":"%s","size":%s}' \
+              "$os" "$arch" "$kind" "$name" "$BASE" "$name" "$sha" "$size")
+            if [ -z "$items" ]; then items="$item"; else items="$items,$item"; fi
+          done < all-meta.txt
+          printf '{"version":"%s","tag":"%s","notes":"https://github.com/%s/releases/tag/%s","assets":[%s]}' \
+            "$VERSION" "$TAG" "$REPO" "$TAG" "$items" | jq . > latest.json
+          ./.github/workflows/upload_asset.sh ./SHA256SUMS
+          ./.github/workflows/upload_asset.sh ./latest.json

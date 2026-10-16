@@ -1,0 +1,104 @@
+name: Smoke
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "crates/**"
+      - "locales/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/smoke.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: 1.99.0
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: macos-build-aarch64-apple-darwin
+      - name: build
+        run: cargo build --release -p navidog --features mimalloc
+      - name: smoke test (first frame must paint)
+        timeout-minutes: 5
+        env:
+          NAVIDOG_SMOKE_TEST: "1"
+          NAVIDOG_HOME: ${{ runner.temp }}/navidog-smoke
+        run: ./target/release/navidog
+
+  linux:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig1-dev libxcb-xfixes0-dev libxkbcommon-dev libxkbcommon-x11-dev libssl-dev \
+            xvfb mesa-vulkan-drivers libvulkan1
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: Linux-x86_64-unknown-linux-gnu-build
+      - name: build
+        run: cargo build --release -p navidog --features mimalloc
+      - name: smoke test (window must open)
+        timeout-minutes: 5
+        env:
+          NAVIDOG_SMOKE_TEST: "1"
+          NAVIDOG_SMOKE_GATE: window
+          NAVIDOG_HOME: ${{ runner.temp }}/navidog-smoke
+        run: xvfb-run -a ./target/release/navidog
+      - name: smoke test (first frame must paint)
+        continue-on-error: true
+        timeout-minutes: 5
+        env:
+          NAVIDOG_SMOKE_TEST: "1"
+          NAVIDOG_HOME: ${{ runner.temp }}/navidog-smoke-frame
+        run: xvfb-run -a ./target/release/navidog
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: Windows-x86_64-pc-windows-msvc-build
+      - name: build
+        env:
+          RUSTFLAGS: "-C target-feature=+crt-static"
+        run: cargo build --release -p navidog --target x86_64-pc-windows-msvc --features mimalloc
+      - name: smoke test (first frame must paint)
+        timeout-minutes: 5
+        shell: pwsh
+        env:
+          NAVIDOG_SMOKE_TEST: "1"
+          NAVIDOG_HOME: ${{ runner.temp }}/navidog-smoke
+        run: |
+          $p = Start-Process -FilePath .\target\x86_64-pc-windows-msvc\release\navidog.exe -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Write-Error "smoke test failed: exit code $($p.ExitCode)"; exit 1 }

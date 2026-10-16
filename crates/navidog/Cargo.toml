@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Database client for macOS."
+description = "Database client."
 
 [dependencies]
 gpui-kit.workspace = true
@@ -25,6 +25,15 @@ serde_json.workspace = true
 tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
+chrono.workspace = true
+semver = "1"
+sha2 = "0.10"
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+mimalloc = { version = "0.1", optional = true }
+
+[features]
+# Release and CI builds only (`cargo build --features mimalloc`).
+mimalloc = ["dep:mimalloc"]
 
 [dev-dependencies]
 gpui-kit = { workspace = true, features = ["test-support"] }
@@ -34,3 +43,42 @@ gpui-kit = { workspace = true, features = ["test-support"] }
 name = "snapshot"
 harness = false
 test = false
+
+[target.'cfg(target_os = "windows")'.build-dependencies]
+winres = "0.1"
+
+[package.metadata.bundle]
+name = "Navidog"
+identifier = "ci.nn.navidog"
+icon = ["icons/navidog.icns"]
+category = "public.app-category.developer-tools"
+osx_minimum_system_version = "15.0"
+short_description = "A database client."
+
+[package.metadata.appimage]
+assets = ["assets/navidog.desktop", "icons/navidog.png"]
+icon = "icons/navidog.png"
+desktop_entry = "assets/navidog.desktop"
+
+# Paths are relative to this crate. The workspace target dir is two levels up.
+[package.metadata.deb]
+name = "navidog"
+section = "database"
+priority = "optional"
+depends = "$auto"
+extended-description = "A database client for MySQL, MariaDB, PostgreSQL and SQLite."
+assets = [
+    ["../../target/release/navidog", "usr/bin/", "755"],
+    ["assets/navidog.desktop", "usr/share/applications/navidog.desktop", "644"],
+    ["icons/navidog.png", "usr/share/icons/hicolor/512x512/apps/navidog.png", "644"],
+    ["resources/navidog.svg", "usr/share/icons/hicolor/scalable/apps/navidog.svg", "644"],
+]
+
+[package.metadata.generate-rpm]
+name = "navidog"
+assets = [
+    { source = "../../target/release/navidog", dest = "/usr/bin/navidog", mode = "755" },
+    { source = "assets/navidog.desktop", dest = "/usr/share/applications/navidog.desktop", mode = "644" },
+    { source = "icons/navidog.png", dest = "/usr/share/icons/hicolor/512x512/apps/navidog.png", mode = "644" },
+    { source = "resources/navidog.svg", dest = "/usr/share/icons/hicolor/scalable/apps/navidog.svg", mode = "644" },
+]

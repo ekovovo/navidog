@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product
+    Id="*"
+    Name="Navidog"
+    Language="1033"
+    Version="$(var.Version)"
+    Manufacturer="navidog"
+    UpgradeCode="8f4e2c1a-6b3d-4e7f-9a10-2c5d8e7f6a01">
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Navidog is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+    <Icon Id="ProductIcon" SourceFile="..\icons\navidog.ico" />
+    <Property Id="ARPPRODUCTICON" Value="ProductIcon" />
+    <Feature Id="Main" Title="Navidog" Level="1">
+      <ComponentRef Id="MainExecutable" />
+    </Feature>
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLDIR" Name="Navidog">
+          <Component Id="MainExecutable" Guid="b7c1d2e3-4f56-4789-a012-3456789abcde">
+            <File Id="NavidogExe" Source="$(var.CargoTargetBinDir)\navidog.exe" KeyPath="yes" />
+          </Component>
+        </Directory>
+      </Directory>
+    </Directory>
+  </Product>
+</Wix>

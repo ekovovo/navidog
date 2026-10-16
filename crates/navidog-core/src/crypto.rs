@@ -169,20 +169,22 @@ pub fn unlock_master(mode: &CryptoMode, password: &str) -> Result<Key, CryptoErr
     Ok(key)
 }
 
-/// Reads the machine key from the OS credential store, creating it on first use.
+/// Reads the machine key, creating it on first use.
 ///
-/// On macOS one read can still show two keychain dialogs. Asking only for the
-/// password (and not the keychain item) was tried and did not stop the second
-/// dialog, so this stays on `keyring`. See `docs/design/12-secrets.md`.
+/// macOS uses the login keychain and Windows the Credential Manager. On macOS
+/// one read can still show two keychain dialogs. Asking only for the password
+/// (and not the keychain item) was tried and did not stop the second dialog,
+/// so this stays on `keyring`. See `docs/design/12-secrets.md`.
+///
+/// Linux (and other Unix) writes `machine-key` in the config directory at
+/// mode `0600`. A secret-service daemon is not required, so headless and
+/// Xvfb sessions can still decrypt after a restart.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub fn machine_key() -> Result<Key, CryptoError> {
     let entry = keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)
         .map_err(|e| CryptoError::Keychain(e.to_string()))?;
     match entry.get_password() {
-        Ok(encoded) => {
-            let bytes = B64.decode(encoded).map_err(|_| CryptoError::Format)?;
-            let bytes: [u8; 32] = bytes.try_into().map_err(|_| CryptoError::Format)?;
-            Ok(Key(bytes))
-        }
+        Ok(encoded) => decode_key(&encoded),
         Err(keyring::Error::NoEntry) => {
             let key = Key::random();
             entry
@@ -190,6 +192,53 @@ pub fn machine_key() -> Result<Key, CryptoError> {
                 .map_err(|e| CryptoError::Keychain(e.to_string()))?;
             Ok(key)
         }
+        Err(e) => Err(CryptoError::Keychain(e.to_string())),
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+pub fn machine_key() -> Result<Key, CryptoError> {
+    read_or_create_key_file(&crate::paths::config_dir().join("machine-key"))
+}
+
+fn decode_key(encoded: &str) -> Result<Key, CryptoError> {
+    let bytes = B64
+        .decode(encoded.trim())
+        .map_err(|_| CryptoError::Format)?;
+    let bytes: [u8; 32] = bytes.try_into().map_err(|_| CryptoError::Format)?;
+    Ok(Key(bytes))
+}
+
+/// Creates the file with mode `0600` when it is missing. A second caller sees
+/// the key the first one wrote. Compiled into the macOS test build so the
+/// permission check runs there too; the app itself uses the keychain.
+#[cfg(any(test, not(any(target_os = "macos", target_os = "windows"))))]
+pub(crate) fn read_or_create_key_file(path: &std::path::Path) -> Result<Key, CryptoError> {
+    if let Ok(encoded) = std::fs::read_to_string(path) {
+        return decode_key(&encoded);
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| CryptoError::Keychain(e.to_string()))?;
+    }
+    let key = Key::random();
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    match opts.open(path) {
+        Ok(mut file) => {
+            use std::io::Write;
+            file.write_all(B64.encode(key.0).as_bytes())
+                .map_err(|e| CryptoError::Keychain(e.to_string()))?;
+            Ok(key)
+        }
+        // Another process created it between the read and the create.
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => decode_key(
+            &std::fs::read_to_string(path).map_err(|e| CryptoError::Keychain(e.to_string()))?,
+        ),
         Err(e) => Err(CryptoError::Keychain(e.to_string())),
     }
 }
@@ -214,6 +263,27 @@ mod tests {
                 .decrypt("c-1/general.password", &secret)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn machine_key_file_round_trips_and_is_private() {
+        let dir = std::env::temp_dir().join(format!(
+            "navidog-key-{}-{}",
+            std::process::id(),
+            Key::random().0[0]
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("machine-key");
+        let first = read_or_create_key_file(&path).unwrap();
+        let second = read_or_create_key_file(&path).unwrap();
+        assert_eq!(first.0, second.0);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

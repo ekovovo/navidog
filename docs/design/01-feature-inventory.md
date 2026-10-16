@@ -30,7 +30,7 @@
 | F-APP-015 | 通过 URI 共享 | 在信息窗格“常规”页生成对象的 URI，可选隐藏主机信息。 | share_uri | M2 |
 | F-APP-016 | 自动恢复 | 定期保存未保存的查询和设计器内容，异常退出后提示恢复。 | preferences_auto_recovery | M3 |
 | F-APP-017 | 日志文件 | `tracing` 应用日志、SQL 执行日志、命令行日志，存放在 `~/Library/Logs/navidog/`。 | log_files | M1（应用日志）、M3（SQL 日志） |
-| F-APP-018 | 关于与检查更新 | “关于 navidog”窗口；“检查更新”跳转 GitHub Releases，M15 起换成 Sparkle 2。 | about | M1、M15 |
+| F-APP-018 | 关于与检查更新 | “关于 navidog”窗口。“检查更新”读取 GitHub Releases 的 `latest.json`，有新版本时在应用内下载并校验 SHA-256 后安装。偏好设置可包含预发布和 nightly。启动时最多每两天检查一次，可关掉。 | about | M1、M15 |
 | F-APP-019 | 欢迎界面 | 首次启动的引导窗口，没有连接时对象窗格显示“点击工具栏中的‘连接’开始”。 | — | M1 |
 
 ## PREF 偏好设置
@@ -293,7 +293,7 @@
 
 | 编号 | 功能 | 摘要与验收要点 | 帮助页 | 里程碑 |
 | --- | --- | --- | --- | --- |
-| F-REL-001 | 打包 | 生成 `.app`、`Info.plist`、DMG。 | — | M1（CI 构建）、M15 |
-| F-REL-002 | 签名与公证 | hardened runtime、`codesign`、`notarytool`、`stapler`。 | — | M15 |
-| F-REL-003 | 自动更新 | Sparkle 2，appcast 托管在 GitHub Releases。 | — | M15 |
+| F-REL-001 | 打包 | macOS `.app` 与 DMG，Windows zip、MSI 与 `.msi.zip`，Linux `.deb`、`.rpm`、AppImage 与 tarball，均为 x86_64 和 aarch64。tag 发布附带 `latest.json` 和 `SHA256SUMS`。 | — | M15 |
+| F-REL-002 | 签名与公证 | macOS：hardened runtime、`codesign`、`notarytool`、`stapler`。没有证书时上传未签名包。 | — | M15 |
+| F-REL-003 | 自动更新 | 稳定渠道读 `latest.json`；预发布渠道另读 Releases 列表里的 tag 预发布和 `nightly`。下载后按 SHA-256 校验。macOS 能写到当前 `.app` 时就地替换，否则交给系统打开安装包。 | — | M15 |
 | F-REL-004 | 迁移或升级 | 配置目录版本化，升级时自动迁移旧配置。 | migration | M15 |

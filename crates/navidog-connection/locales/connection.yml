@@ -340,8 +340,8 @@ conn:
     en: A saved password cannot be decrypted with the current key.
     zh-CN: 有保存的密码无法用当前的密钥解开。
   keychain_failed:
-    en: "The Keychain cannot be accessed: %{detail}"
-    zh-CN: "无法访问钥匙串：%{detail}"
+    en: "The machine key cannot be read: %{detail}"
+    zh-CN: "无法读取本机密钥：%{detail}"
   kdf_failed:
     en: "The master password key could not be derived: %{detail}"
     zh-CN: "主密码派生失败：%{detail}"
