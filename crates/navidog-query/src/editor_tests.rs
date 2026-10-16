@@ -82,7 +82,9 @@ fn idle(cx: &mut TestAppContext, editor: &Entity<QueryEditor>) {
 /// again later, so the guard must live until the test returns.
 fn isolate_home(name: &str) -> (MutexGuard<'static, ()>, std::path::PathBuf) {
     static LOCK: Mutex<()> = Mutex::new(());
-    let guard = LOCK.lock().unwrap();
+    // A panicked test poisons the lock. The next test still needs it, or its own
+    // failure is replaced by the poison and never shows up.
+    let guard = LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let home =
         std::env::temp_dir().join(format!("navidog-query-test-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&home);
@@ -687,7 +689,19 @@ fn saves_untitled_queries_reloads_outside_edits_and_recovers(cx: &mut TestAppCon
     cx.update_window(handle, |_, window, cx| {
         crate::recovery::check(window, cx, move |e, _, _| sink.borrow_mut().push(e));
         window.render_frame(cx);
-        window.click("recover-ok", cx);
+    })
+    .unwrap();
+    // The dialog slides in. A click during that misses the OK button on Intel.
+    cx.executor().advance_clock(Duration::from_millis(300));
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        let size = window.find("recover-ok").bounds().size;
+        // The button's right edge can lie on the mask; its left side stays inside.
+        window.click_at(
+            "recover-ok",
+            gpui_kit::point(size.width * 0.25, size.height * 0.5),
+            cx,
+        );
     })
     .unwrap();
     cx.run_until_parked();

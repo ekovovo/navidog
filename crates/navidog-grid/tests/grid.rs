@@ -418,10 +418,9 @@ fn right_click_focuses_the_grid_so_the_menu_item_runs(cx: &mut TestAppContext) {
         window.render_frame(cx);
         window.focus(&focus, cx);
         let rem = window.rem_size();
-        // The name column, past the marker and the id column
-        let x = tokens::grid::ROW_NUMBER_WIDTH.to_pixels(rem)
-            + fit(rem, "id", &["1"])
-            + fit(rem, "name", &["a"]) / 2.;
+        // The id column. The name column's estimated offset misses the cell on Linux,
+        // and a miss leaves the host focused so Copy never runs.
+        let x = tokens::grid::ROW_NUMBER_WIDTH.to_pixels(rem) + fit(rem, "id", &["1"]) / 2.;
         let row = window
             .find(ElementId::NamedInteger("row".into(), 0))
             .bounds();
@@ -468,7 +467,7 @@ fn right_click_focuses_the_grid_so_the_menu_item_runs(cx: &mut TestAppContext) {
     .unwrap();
     cx.run_until_parked();
     let copied = cx.update(|cx| cx.read_from_clipboard().and_then(|c| c.text()));
-    assert_eq!(copied.as_deref(), Some("a"));
+    assert_eq!(copied.as_deref(), Some("1"));
 }
 
 /// The empty tail past the last field is not a cell. Clicking it selects the whole row.

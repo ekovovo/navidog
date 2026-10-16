@@ -77,7 +77,8 @@ jobs:
       - name: clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: test
-        run: cargo test --workspace
+        shell: bash
+        run: scripts/ci-test.sh
 
   linux:
     name: linux-x86_64
@@ -99,7 +100,8 @@ jobs:
       - name: clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: test
-        run: cargo test --workspace
+        shell: bash
+        run: scripts/ci-test.sh
 
   windows:
     name: windows-x86_64
@@ -117,4 +119,5 @@ jobs:
       - name: clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: test
-        run: cargo test --workspace
+        shell: bash
+        run: scripts/ci-test.sh
