@@ -97,7 +97,8 @@ fn select_copy_and_edit(cx: &mut TestAppContext) {
     cx.update_window(handle, |_, window, cx| {
         window.press("enter", cx);
         window.render_frame(cx);
-        window.press("cmd-a", cx);
+        // The cell editor's select-all is secondary-a (cmd on macOS, ctrl elsewhere).
+        window.press("secondary-a", cx);
         window.input("bb", cx);
         window.press("enter", cx);
         window.render_frame(cx);
@@ -130,7 +131,8 @@ fn select_copy_and_edit(cx: &mut TestAppContext) {
     cx.update_window(handle, |_, window, cx| {
         window.press("enter", cx);
         window.render_frame(cx);
-        window.press("cmd-a", cx);
+        // The cell editor's select-all is secondary-a (cmd on macOS, ctrl elsewhere).
+        window.press("secondary-a", cx);
         window.input("Q", cx);
         let rem = window.rem_size();
         // The edited cell is the second data column (name), past the marker and id.
@@ -424,6 +426,17 @@ fn right_click_focuses_the_grid_so_the_menu_item_runs(cx: &mut TestAppContext) {
             .find(ElementId::NamedInteger("row".into(), 0))
             .bounds();
         let position = gpui_kit::point(row.origin.x + x, row.origin.y + rem / 2.);
+        // Hit testing uses the pointer. A bare button event misses the cell on Linux.
+        window.dispatch_event(
+            MouseMoveEvent {
+                position,
+                pressed_button: None,
+                modifiers: Modifiers::none(),
+            }
+            .to_platform_input(),
+            cx,
+        );
+        window.render_frame(cx);
         window.dispatch_event(
             MouseDownEvent {
                 button: MouseButton::Right,

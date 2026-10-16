@@ -491,7 +491,8 @@ fn format_commands_undo_in_one_step_and_the_stack_cycles(cx: &mut TestAppContext
         cx.update_window(handle, |_, window, cx| {
             state.update(cx, |s, cx| s.focus(window, cx));
             window.render_frame(cx);
-            window.press("cmd-z", cx);
+            // Undo is cmd-z on macOS and ctrl-z elsewhere.
+            window.press("secondary-z", cx);
         })
         .unwrap();
         cx.run_until_parked();
@@ -629,7 +630,7 @@ fn saves_untitled_queries_reloads_outside_edits_and_recovers(cx: &mut TestAppCon
         cx.update_window(handle, |_, window, cx| {
             window.render_frame(cx);
             window.click("query-name-input", cx);
-            window.press("cmd-a", cx);
+            window.press("secondary-a", cx);
             window.input(&name, cx);
             window.click("query-name-ok", cx);
         })

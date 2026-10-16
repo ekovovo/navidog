@@ -153,15 +153,8 @@ fn closing_a_tab_with_an_edit_asks_and_commits(cx: &mut TestAppContext) {
         );
         window.press("enter", cx);
         window.render_frame(cx);
-        // Select-all is cmd-a on macOS and ctrl-a elsewhere.
-        window.press(
-            if cfg!(target_os = "macos") {
-                "cmd-a"
-            } else {
-                "ctrl-a"
-            },
-            cx,
-        );
+        // `secondary` is cmd on macOS and ctrl elsewhere, matching the text field.
+        window.press("secondary-a", cx);
         window.input("z", cx);
         window.press("enter", cx);
         window.render_frame(cx);

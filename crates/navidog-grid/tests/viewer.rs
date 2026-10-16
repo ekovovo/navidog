@@ -170,7 +170,7 @@ fn paging_commits_first_and_auto_transaction_still_loads(cx: &mut TestAppContext
         );
         window.press("enter", cx);
         window.render_frame(cx);
-        window.press("cmd-a", cx);
+        window.press("secondary-a", cx);
         window.input("z", cx);
         window.press("enter", cx);
         window.render_frame(cx);
@@ -205,7 +205,7 @@ fn paging_commits_first_and_auto_transaction_still_loads(cx: &mut TestAppContext
         );
         window.press("enter", cx);
         window.render_frame(cx);
-        window.press("cmd-a", cx);
+        window.press("secondary-a", cx);
         window.input("y", cx);
         window.press("enter", cx);
         window.render_frame(cx);
