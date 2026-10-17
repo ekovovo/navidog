@@ -226,6 +226,7 @@ impl Driver for PostgresDriver {
                 notices,
                 tag,
                 origins: HashMap::new(),
+                setup: None,
             }) as Box<dyn Session>)
         }
         .boxed()
@@ -242,6 +243,8 @@ pub struct PgSession {
     tag: Tag,
     /// `(table oid, column number)` → where a result column comes from; `None` when unknown
     origins: HashMap<(u32, i16), Option<ColumnOrigin>>,
+    /// Last successful `SET search_path`; replayed after a transparent reconnect.
+    setup: Option<String>,
 }
 
 impl PgSession {
@@ -251,6 +254,19 @@ impl PgSession {
         self.tls = tls;
         self.cancel = self.client.cancel_token();
         self.tag.session = pid;
+        self.replay().await
+    }
+
+    fn remember(&mut self, sql: &str) {
+        if let Some(setup) = crate::sql::session_setup(sql) {
+            self.setup = Some(setup);
+        }
+    }
+
+    async fn replay(&mut self) -> DbResult<()> {
+        if let Some(sql) = self.setup.clone() {
+            self.attempt(&sql).await?;
+        }
         Ok(())
     }
 
@@ -467,14 +483,18 @@ impl Relational for PgSession {
 
     fn execute<'a>(&'a mut self, sql: &'a str) -> BoxFuture<'a, DbResult<Vec<ResultSet>>> {
         async move {
-            match self.attempt(sql).await {
+            let result = match self.attempt(sql).await {
                 Err(e) if self.lost(&e) => {
                     tracing::warn!("PostgreSQL connection lost ({e}); reconnecting");
                     self.reconnect().await?;
                     self.attempt(sql).await
                 }
                 other => other,
+            };
+            if result.is_ok() {
+                self.remember(sql);
             }
+            result
         }
         .boxed()
     }

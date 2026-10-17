@@ -518,6 +518,95 @@ fn postgres_cancel_over_tls() {
     });
 }
 
+/// `USE` / `SET search_path` survive a transparent reconnect. Unqualified names must not
+/// fall back to the connection's default database.
+#[test]
+fn reconnect_keeps_the_selected_database() {
+    if !live() {
+        return;
+    }
+    runtime::runtime().block_on(async {
+        let driver: Arc<dyn Driver> = Arc::new(MySqlDriver::mysql());
+        let mut session = connect(driver.clone(), mysql_params(13306)).await.unwrap();
+        session
+            .relational()
+            .unwrap()
+            .execute("CREATE DATABASE IF NOT EXISTS navidog_cr01")
+            .await
+            .unwrap();
+        session
+            .relational()
+            .unwrap()
+            .execute("USE navidog_cr01")
+            .await
+            .unwrap();
+        let id = session.session_id().unwrap();
+        let mut killer = connect(driver, mysql_params(13306)).await.unwrap();
+        killer
+            .relational()
+            .unwrap()
+            .execute(&format!("KILL {id}"))
+            .await
+            .unwrap();
+        killer.close().await.unwrap();
+        let sets = session
+            .relational()
+            .unwrap()
+            .execute("SELECT DATABASE()")
+            .await
+            .unwrap();
+        assert_eq!(sets[0].rows[0][0].as_deref(), Some("navidog_cr01"));
+        session
+            .relational()
+            .unwrap()
+            .execute("DROP DATABASE navidog_cr01")
+            .await
+            .unwrap();
+        session.close().await.unwrap();
+
+        let mut session = connect(Arc::new(PostgresDriver::default()), pg_params())
+            .await
+            .unwrap();
+        session
+            .relational()
+            .unwrap()
+            .execute("CREATE SCHEMA IF NOT EXISTS navidog_cr01")
+            .await
+            .unwrap();
+        session
+            .relational()
+            .unwrap()
+            .execute("SET search_path TO navidog_cr01, public")
+            .await
+            .unwrap();
+        let pid = session.session_id().unwrap();
+        let mut killer = connect(Arc::new(PostgresDriver::default()), pg_params())
+            .await
+            .unwrap();
+        killer
+            .relational()
+            .unwrap()
+            .execute(&format!("SELECT pg_terminate_backend({pid})"))
+            .await
+            .unwrap();
+        killer.close().await.unwrap();
+        let sets = session
+            .relational()
+            .unwrap()
+            .execute("SELECT current_schema()")
+            .await
+            .unwrap();
+        assert_eq!(sets[0].rows[0][0].as_deref(), Some("navidog_cr01"));
+        session
+            .relational()
+            .unwrap()
+            .execute("DROP SCHEMA navidog_cr01")
+            .await
+            .unwrap();
+        session.close().await.unwrap();
+    });
+}
+
 /// The server drops an idle session (wait timeout, sleep). The next statement reconnects
 /// instead of surfacing "connection is closed".
 #[test]

@@ -16,6 +16,51 @@ pub struct Statement {
     pub range: Range<usize>,
 }
 
+/// `USE db` or `SET search_path`, the statements a reconnect has to replay so unqualified
+/// names keep resolving where the user left them. A script of more than one statement is
+/// not replayed: running it again would repeat the rest.
+pub fn session_setup(sql: &str) -> Option<String> {
+    let body = sql.trim().trim_end_matches(';').trim();
+    if body.is_empty() || body.contains(';') {
+        return None;
+    }
+    if use_statement(body) || search_path_statement(body) {
+        Some(body.to_string())
+    } else {
+        None
+    }
+}
+
+fn keyword<'a>(sql: &'a str, kw: &str) -> Option<&'a str> {
+    let (head, rest) = sql.split_at_checked(kw.len())?;
+    if head.eq_ignore_ascii_case(kw) && rest.starts_with(|c: char| c.is_whitespace()) {
+        Some(rest.trim_start())
+    } else {
+        None
+    }
+}
+
+fn use_statement(sql: &str) -> bool {
+    keyword(sql, "use").is_some_and(|rest| !rest.is_empty())
+}
+
+fn search_path_statement(sql: &str) -> bool {
+    let Some(mut rest) = keyword(sql, "set") else {
+        return false;
+    };
+    if let Some(after) = keyword(rest, "session") {
+        rest = after;
+    }
+    let Some(head) = rest.get(.."search_path".len()) else {
+        return false;
+    };
+    if !head.eq_ignore_ascii_case("search_path") {
+        return false;
+    }
+    let after = &rest["search_path".len()..];
+    after.is_empty() || after.starts_with(|c: char| c.is_whitespace()) || after.starts_with('=')
+}
+
 /// The statements' text only; see [`split_script`].
 pub fn split_statements(sql: &str, dialect: Dialect) -> Vec<String> {
     split_script(sql, dialect)
@@ -316,6 +361,23 @@ mod tests {
             texts("DELIMITER //\nSELECT 1//", Dialect::Postgres).len(),
             1
         );
+    }
+
+    #[test]
+    fn session_setup_is_only_use_or_search_path() {
+        assert_eq!(session_setup("USE `shop`"), Some("USE `shop`".to_string()));
+        assert_eq!(
+            session_setup("  set search_path TO \"app\", \"public\"; "),
+            Some("set search_path TO \"app\", \"public\"".to_string())
+        );
+        assert_eq!(
+            session_setup("SET SESSION search_path=app"),
+            Some("SET SESSION search_path=app".to_string())
+        );
+        assert_eq!(session_setup("SET NAMES utf8"), None);
+        assert_eq!(session_setup("SELECT 1"), None);
+        assert_eq!(session_setup("USE shop; SELECT 1"), None);
+        assert_eq!(session_setup("UPDATE t SET search_path = 1"), None);
     }
 
     #[test]

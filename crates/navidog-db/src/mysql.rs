@@ -130,6 +130,7 @@ impl Driver for MySqlDriver {
                 read_timeout: params.read_timeout,
                 connect_timeout: params.timeout(),
                 tag,
+                setup: None,
             }) as Box<dyn Session>)
         }
         .boxed()
@@ -143,6 +144,8 @@ pub struct MySqlSession {
     read_timeout: Option<Duration>,
     connect_timeout: Duration,
     tag: Tag,
+    /// Last successful `USE`; replayed after a transparent reconnect.
+    setup: Option<String>,
 }
 
 impl MySqlSession {
@@ -154,6 +157,19 @@ impl MySqlSession {
             .map_err(err)?;
         drop(std::mem::replace(&mut self.conn, conn));
         self.tag.session = self.conn.id() as u64;
+        self.replay().await
+    }
+
+    fn remember(&mut self, sql: &str) {
+        if let Some(setup) = crate::sql::session_setup(sql) {
+            self.setup = Some(setup);
+        }
+    }
+
+    async fn replay(&mut self) -> DbResult<()> {
+        if let Some(sql) = self.setup.clone() {
+            self.attempt(&sql).await?;
+        }
         Ok(())
     }
 
@@ -238,14 +254,18 @@ impl Relational for MySqlSession {
 
     fn execute<'a>(&'a mut self, sql: &'a str) -> BoxFuture<'a, DbResult<Vec<ResultSet>>> {
         async move {
-            match self.attempt(sql).await {
+            let result = match self.attempt(sql).await {
                 Err(e) if e.disconnected => {
                     tracing::warn!("MySQL connection lost ({e}); reconnecting");
                     self.reconnect().await?;
                     self.attempt(sql).await
                 }
                 other => other,
+            };
+            if result.is_ok() {
+                self.remember(sql);
             }
+            result
         }
         .boxed()
     }
