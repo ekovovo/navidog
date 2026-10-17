@@ -241,7 +241,7 @@ pub struct Settings {
     pub auto_update_check: bool,
     /// `None` follows the build: on for a nightly build, off for a stable one.
     pub update_prerelease: Option<bool>,
-    /// Unix seconds of the last update check, successful or not.
+    /// Unix seconds of the last successful update check. A failure leaves this unset.
     pub update_checked_unix: Option<i64>,
 
     #[serde(flatten)]
