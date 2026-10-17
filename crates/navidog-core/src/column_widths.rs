@@ -34,13 +34,25 @@ fn table_key(scope: &Scope, table: &str) -> String {
 }
 
 fn read_file(path: &Path) -> File {
-    std::fs::read(path)
-        .ok()
-        .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or(File {
-            version: 1,
-            tables: BTreeMap::new(),
-        })
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            return File {
+                version: 1,
+                tables: BTreeMap::new(),
+            };
+        }
+    };
+    match serde_json::from_slice(&bytes) {
+        Ok(file) => file,
+        Err(err) => {
+            tracing::error!("failed to read column widths at {}: {err}", path.display());
+            File {
+                version: 1,
+                tables: BTreeMap::new(),
+            }
+        }
+    }
 }
 
 fn write_file(path: &Path, file: &File) {

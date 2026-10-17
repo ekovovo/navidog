@@ -200,6 +200,8 @@ pub struct TableViewer {
     close_approved: bool,
     /// Close the tab once the commit chosen in the close prompt succeeds
     close_after_commit: bool,
+    /// Window this tab was last added to. A popped-out tab updates it in `on_added_to`.
+    home: Option<gpui_kit::AnyWindowHandle>,
     form: bool,
     /// Cell text is submitted as SQL (F-DATA-010)
     raw_data: bool,
@@ -252,6 +254,7 @@ impl BasePanel for TableViewer {
         let panel = PanelId::from(cx.entity_id());
         tabs::added(panel, group, cx);
         // Runs again when the tab moves to another window, so the prompt follows it
+        self.home = Some(window.window_handle());
         let (viewer, home) = (cx.entity().downgrade(), window.window_handle());
         let guard: tabs::CloseGuard = std::rc::Rc::new(move |cx| {
             let viewer = viewer.clone();
@@ -458,10 +461,10 @@ impl TableViewer {
     /// Sends a close-prompt commit that was skipped because a load still held `busy`.
     /// The commit completion path closes the tab itself and must not call this.
     fn resume_close(viewer: WeakEntity<Self>, cx: &mut App) {
-        let Some(handle) = cx.active_window() else {
+        let Ok(Some(home)) = viewer.update(cx, |this, _| this.home) else {
             return;
         };
-        let _ = handle.update(cx, |_, window, cx| {
+        let _ = home.update(cx, |_, window, cx| {
             let _ = viewer.update(cx, |this, cx| {
                 if this.close_after_commit && !this.busy {
                     this.apply_changes(true, window, cx);
@@ -680,6 +683,7 @@ impl TableViewer {
                 reload_after_commit: false,
                 close_approved: false,
                 close_after_commit: false,
+                home: None,
                 form: false,
                 raw_data: false,
                 show_rowid: false,

@@ -165,6 +165,13 @@ pub mod info {
     pub const SEARCH_FIELD_HEIGHT: Pt = Pt(22.);
 }
 
+/// Find bar shared by the table viewer and the query editor.
+pub mod find {
+    use super::Pt;
+    /// Mode chip. `Input::small` is `h_6` (1.5rem), which is 1.5 × `BASE_PT`.
+    pub const CONTROL_HEIGHT: Pt = Pt(super::BASE_PT * 1.5);
+}
+
 /// Query editor (30-query-editor.md §12).
 pub mod query {
     use super::Pt;
@@ -175,8 +182,6 @@ pub mod query {
     pub const EDITOR_FONT_MAX: f32 = 72.;
     /// Provisional: width of the connection, database and schema pickers
     pub const PICKER_WIDTH: Pt = Pt(120.);
-    /// Find/replace mode chip. `Input::small` is `h_6` (1.5rem), which is 1.5 × `BASE_PT`.
-    pub const FIND_CONTROL_HEIGHT: Pt = Pt(super::BASE_PT * 1.5);
     pub const BEAUTIFY_WIDTH: Pt = Pt(356.);
     pub const BEAUTIFY_HEIGHT: Pt = Pt(143.);
     pub const RECOVERY_WIDTH: Pt = Pt(870.);

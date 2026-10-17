@@ -27,6 +27,14 @@ pub use driver::*;
 pub use metadata::referenced_values_sql;
 pub use params::{ConnectParams, Secrets};
 
+/// Tests that set `NAVIDOG_HOME` share this lock. The variable is process-global,
+/// and a lock inside one module does not cover the other tests in this crate.
+#[cfg(test)]
+pub(crate) fn lock_config_home() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|p| p.into_inner())
+}
+
 /// Register the built-in drivers.
 pub fn init(cx: &mut App) {
     let mut registry = DriverRegistry::default();

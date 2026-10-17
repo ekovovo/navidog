@@ -47,16 +47,14 @@ pub fn apply_family(family: ThemeFamily, cx: &mut App) {
         ThemeFamily::Default => (DEFAULT_LIGHT, DEFAULT_DARK),
     };
     let registry = ThemeRegistry::global(cx);
-    let light = registry
-        .themes()
-        .get(light_name)
-        .cloned()
-        .unwrap_or_else(|| panic!("missing theme {light_name}"));
-    let dark = registry
-        .themes()
-        .get(dark_name)
-        .cloned()
-        .unwrap_or_else(|| panic!("missing theme {dark_name}"));
+    let Some(light) = registry.themes().get(light_name).cloned() else {
+        tracing::error!("missing theme {light_name}");
+        return;
+    };
+    let Some(dark) = registry.themes().get(dark_name).cloned() else {
+        tracing::error!("missing theme {dark_name}");
+        return;
+    };
     let theme = Theme::global_mut(cx);
     theme.light_theme = light;
     theme.dark_theme = dark;
@@ -172,6 +170,15 @@ mod tests {
         let c = parse_hex("#0433ff").unwrap();
         assert_eq!(to_hex(c), "#0433ff");
         assert!(parse_hex("blue").is_none());
+    }
+
+    #[gpui_kit::test]
+    fn a_missing_theme_leaves_the_current_one(cx: &mut gpui_kit::TestAppContext) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            // Navicat themes are not loaded. This used to panic at startup.
+            apply_family(ThemeFamily::Navidog, cx);
+        });
     }
 
     /// The user's colors replace the theme's editor colors.

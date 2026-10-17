@@ -268,21 +268,12 @@ viewer:
   find:
     en: Find
     zh-CN: 查找
-  close_find:
-    en: Close
-    zh-CN: 关闭
   find_done:
     en: Done
     zh-CN: 完成
-  find_data:
-    en: Find Data
-    zh-CN: 查找数据
   find_columns:
     en: Find Column
     zh-CN: 查找列
-  find_next:
-    en: Find Next
-    zh-CN: 查找下一个
   replace:
     en: Replace
     zh-CN: 替换

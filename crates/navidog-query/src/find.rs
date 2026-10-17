@@ -366,6 +366,7 @@ impl QueryEditor {
                 .child(Input::new(&self.find.query).small()),
             t!("query.find_done").to_string(),
         )
+        .id_prefix("query")
         .invalid(self.find.error)
         .nav_disabled(count == 0)
         .on_mode(cx.listener(|this, e: &ClickEvent, window, cx| {

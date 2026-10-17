@@ -382,9 +382,7 @@ mod tests {
     fn outline_on_disk_is_used_when_auto_update_is_off_and_clear_removes_it(
         cx: &mut gpui_kit::TestAppContext,
     ) {
-        use std::sync::Mutex;
-        static LOCK: Mutex<()> = Mutex::new(());
-        let _guard = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _guard = crate::lock_config_home();
         let dir = std::env::temp_dir().join(format!("navidog-outline-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();

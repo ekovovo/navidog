@@ -153,6 +153,7 @@ impl TableViewer {
             Input::new(&self.find_input).small().flex_1(),
             t!("viewer.find_done").to_string(),
         )
+        .id_prefix("viewer")
         .on_mode(cx.listener(|this, e: &ClickEvent, window, cx| {
             this.focus_for_menu(window, cx);
             this.find_menu().show(e.position(), window, cx);

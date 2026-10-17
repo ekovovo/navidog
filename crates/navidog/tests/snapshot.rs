@@ -247,7 +247,7 @@ mod macos {
         cx.update(|cx| Theme::change(ThemeMode::Light, None, cx));
         cx.update_window(handle, |_, window, cx| {
             window.render_frame(cx);
-            window.click("find-done", cx);
+            window.click("query-find-done", cx);
         })
         .unwrap();
         cx.update_window(handle, |_, window, cx| {

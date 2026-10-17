@@ -67,6 +67,8 @@ impl ReplaceRow {
 /// danger color (a regular expression that does not compile).
 #[derive(IntoElement)]
 pub struct FindBar {
+    /// Distinguishes two find bars in one window. Empty keeps the original ids.
+    id_prefix: SharedString,
     mode_label: SharedString,
     invalid: bool,
     on_mode: Option<ClickHandler>,
@@ -86,6 +88,7 @@ impl FindBar {
         done_label: impl Into<SharedString>,
     ) -> Self {
         Self {
+            id_prefix: SharedString::default(),
             mode_label: mode_label.into(),
             invalid: false,
             on_mode: None,
@@ -97,6 +100,11 @@ impl FindBar {
             on_done: None,
             replace: None,
         }
+    }
+
+    pub fn id_prefix(mut self, prefix: impl Into<SharedString>) -> Self {
+        self.id_prefix = prefix.into();
+        self
     }
 
     pub fn invalid(mut self, invalid: bool) -> Self {
@@ -145,9 +153,18 @@ fn click(
     })
 }
 
+fn bar_id(prefix: &str, name: &str) -> String {
+    if prefix.is_empty() {
+        format!("find-{name}")
+    } else {
+        format!("{prefix}-find-{name}")
+    }
+}
+
 impl RenderOnce for FindBar {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let p = palette(cx);
+        let prefix = self.id_prefix.clone();
         let mode_border = if self.invalid { p.danger } else { p.separator };
         let nav_disabled = self.nav_disabled;
         h_flex()
@@ -159,11 +176,11 @@ impl RenderOnce for FindBar {
             .border_color(p.separator)
             .child(
                 h_flex()
-                    .id("find-mode")
+                    .id(bar_id(&prefix, "mode"))
                     .flex_none()
                     .px_2()
                     .gap_1()
-                    .h(tokens::query::FIND_CONTROL_HEIGHT.rems())
+                    .h(tokens::find::CONTROL_HEIGHT.rems())
                     .items_center()
                     .rounded_md()
                     .border_1()
@@ -191,7 +208,7 @@ impl RenderOnce for FindBar {
                             .items_center()
                             .child(self.find)
                             .child(click(
-                                Button::new("find-prev")
+                                Button::new(bar_id(&prefix, "prev"))
                                     .small()
                                     .ghost()
                                     .icon(lucide("chevron-left"))
@@ -199,7 +216,7 @@ impl RenderOnce for FindBar {
                                 self.on_prev,
                             ))
                             .child(click(
-                                Button::new("find-next")
+                                Button::new(bar_id(&prefix, "next"))
                                     .small()
                                     .ghost()
                                     .icon(lucide("chevron-right"))
@@ -207,7 +224,9 @@ impl RenderOnce for FindBar {
                                 self.on_next,
                             ))
                             .child(click(
-                                Button::new("find-done").small().label(self.done_label),
+                                Button::new(bar_id(&prefix, "done"))
+                                    .small()
+                                    .label(self.done_label),
                                 self.on_done,
                             )),
                     )

@@ -321,12 +321,6 @@ query:
   find_whole_word:
     en: Whole Word
     zh-CN: 整个字
-  find_count:
-    en: "%{n} matches"
-    zh-CN: "%{n} 个符合"
-  find_bad_regex:
-    en: Invalid regular expression
-    zh-CN: 正则表达式无效
   query_name:
     en: Query Name
     zh-CN: 查询名称
