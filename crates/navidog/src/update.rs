@@ -3,9 +3,9 @@
 //! Stable builds read `latest.json` from the latest GitHub release. The
 //! pre-release channel (on by default for a nightly build) walks the release
 //! list and also offers the rolling `nightly` tag, compared by publish time.
-//! A download with a checksum is installed only when the SHA-256 matches.
-//! The nightly asset list has no checksum, so that download is installed
-//! without one.
+//! A download is installed only when its SHA-256 matches `latest.json`.
+//! Nightly reads that file from the `nightly` release, the same way a
+//! pre-release tag does. A missing file or an empty checksum is not installed.
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -19,9 +19,7 @@ use gpui_kit::{
 };
 use navidog_core::settings::Settings;
 use navidog_ui::tokens;
-use navidog_util::update::{
-    asset_identity, hex_encode, newer_version, nightly_is_newer, notes_preview,
-};
+use navidog_util::update::{hex_encode, newer_version, nightly_is_newer, notes_preview};
 use rust_i18n::t;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -118,6 +116,14 @@ pub enum Delivery {
     HandedToOs,
 }
 
+/// Why a download was not installed.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum InstallError {
+    /// The checksum was missing or did not match.
+    Checksum,
+    Other(String),
+}
+
 #[derive(Debug, Deserialize)]
 struct Manifest {
     version: String,
@@ -151,14 +157,6 @@ struct GithubRelease {
     draft: bool,
     #[serde(default)]
     published_at: String,
-    #[serde(default)]
-    assets: Vec<GithubAsset>,
-}
-
-#[derive(Debug, Deserialize)]
-struct GithubAsset {
-    name: String,
-    browser_download_url: String,
 }
 
 fn pick_asset_for(assets: &[ManifestAsset], os: &str, arch: &str) -> Option<UpdateAsset> {
@@ -180,21 +178,18 @@ fn pick_asset_for(assets: &[ManifestAsset], os: &str, arch: &str) -> Option<Upda
     })
 }
 
-fn assets_from_api(assets: &[GithubAsset]) -> Vec<ManifestAsset> {
-    assets
-        .iter()
-        .filter_map(|asset| {
-            let (os, arch, kind) = asset_identity(&asset.name)?;
-            Some(ManifestAsset {
-                os: os.to_string(),
-                arch,
-                kind: kind.to_string(),
-                name: asset.name.clone(),
-                url: asset.browser_download_url.clone(),
-                sha256: String::new(),
-            })
-        })
-        .collect()
+/// The asset for this machine from a release's `latest.json`. `None` when the
+/// file is missing or the asset has no checksum: those are not installed.
+fn release_manifest_asset(tag: &str) -> Option<UpdateAsset> {
+    let url = format!("https://github.com/xhofe/navidog/releases/download/{tag}/latest.json");
+    let text = http_get(&url, Duration::from_secs(15)).ok()?;
+    let manifest = serde_json::from_str::<Manifest>(&text).ok()?;
+    let asset = pick_asset_for(
+        &manifest.assets,
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+    )?;
+    (!asset.sha256.trim().is_empty()).then_some(asset)
 }
 
 fn current_label() -> String {
@@ -338,6 +333,7 @@ fn fetch_from_release_list() -> Result<Availability, String> {
     } else {
         release.html_url.clone()
     };
+    let asset = release_manifest_asset(&release.tag_name);
     if release.tag_name == NIGHTLY_TAG {
         let published = release.published_at.get(..10).unwrap_or(NIGHTLY_TAG);
         return Ok(Availability::Available(UpdateInfo {
@@ -345,37 +341,12 @@ fn fetch_from_release_list() -> Result<Availability, String> {
             current: current_label(),
             page_url,
             notes: release.body.trim().to_string(),
-            asset: pick_asset_for(
-                &assets_from_api(&release.assets),
-                std::env::consts::OS,
-                std::env::consts::ARCH,
-            ),
+            asset,
         }));
     }
     let Some(latest) = newer_version(&release.tag_name, env!("CARGO_PKG_VERSION")) else {
         return Ok(Availability::Current);
     };
-    let manifest_url = format!(
-        "https://github.com/xhofe/navidog/releases/download/{}/latest.json",
-        release.tag_name
-    );
-    let asset = http_get(&manifest_url, Duration::from_secs(15))
-        .ok()
-        .and_then(|text| serde_json::from_str::<Manifest>(&text).ok())
-        .and_then(|manifest| {
-            pick_asset_for(
-                &manifest.assets,
-                std::env::consts::OS,
-                std::env::consts::ARCH,
-            )
-        })
-        .or_else(|| {
-            pick_asset_for(
-                &assets_from_api(&release.assets),
-                std::env::consts::OS,
-                std::env::consts::ARCH,
-            )
-        });
     Ok(Availability::Available(UpdateInfo {
         version: latest,
         current: current_label(),
@@ -416,11 +387,27 @@ fn http_get(url: &str, timeout: Duration) -> Result<String, HttpFail> {
         })
 }
 
-/// Downloads `asset` and checks its SHA-256 when the manifest has one.
-pub fn download_verified(asset: &UpdateAsset) -> Result<PathBuf, String> {
+/// Last path segment of a download name. Rejects empty names and `..`.
+fn download_file_name(name: &str) -> Option<&str> {
+    let name = name.rsplit(['/', '\\']).next().unwrap_or(name);
+    if name.is_empty() || name == "." || name == ".." {
+        None
+    } else {
+        Some(name)
+    }
+}
+
+/// Downloads `asset` into the update directory and checks its SHA-256.
+pub fn download_verified(asset: &UpdateAsset) -> Result<PathBuf, InstallError> {
+    if asset.sha256.trim().is_empty() {
+        return Err(InstallError::Checksum);
+    }
+    let Some(name) = download_file_name(&asset.name) else {
+        return Err(InstallError::Other("download name is empty".into()));
+    };
     let dir = std::env::temp_dir().join("navidog-update");
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let path = dir.join(&asset.name);
+    std::fs::create_dir_all(&dir).map_err(|e| InstallError::Other(e.to_string()))?;
+    let path = dir.join(name);
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(300)))
         .build()
@@ -429,31 +416,43 @@ pub fn download_verified(asset: &UpdateAsset) -> Result<PathBuf, String> {
         .get(&asset.url)
         .header("User-Agent", USER_AGENT)
         .call()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| InstallError::Other(e.to_string()))?;
     let mut reader = response.body_mut().as_reader();
-    let mut file = std::fs::File::create(&path).map_err(|e| e.to_string())?;
+    let mut file = std::fs::File::create(&path).map_err(|e| InstallError::Other(e.to_string()))?;
     let mut hasher = Sha256::new();
     let mut buf = [0u8; 64 * 1024];
     let mut total = 0u64;
     loop {
-        let n = reader.read(&mut buf).map_err(|e| e.to_string())?;
+        let n = reader
+            .read(&mut buf)
+            .map_err(|e| InstallError::Other(e.to_string()))?;
         if n == 0 {
             break;
         }
         total += n as u64;
         if total > MAX_DOWNLOAD {
             let _ = std::fs::remove_file(&path);
-            return Err("download is larger than 512 MB".into());
+            return Err(InstallError::Other("download is larger than 512 MB".into()));
         }
         hasher.update(&buf[..n]);
-        file.write_all(&buf[..n]).map_err(|e| e.to_string())?;
+        file.write_all(&buf[..n])
+            .map_err(|e| InstallError::Other(e.to_string()))?;
     }
     let got = hex_encode(&hasher.finalize());
-    if !asset.sha256.is_empty() && !got.eq_ignore_ascii_case(asset.sha256.trim()) {
+    if !got.eq_ignore_ascii_case(asset.sha256.trim()) {
         let _ = std::fs::remove_file(&path);
-        return Err("checksum".into());
+        return Err(InstallError::Checksum);
     }
     Ok(path)
+}
+
+fn cleanup_download(path: &Path) {
+    let _ = std::fs::remove_file(path);
+    if let Some(dir) = path.parent()
+        && dir.file_name().is_some_and(|name| name == "navidog-update")
+    {
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
 
 #[cfg(any(test, target_os = "macos"))]
@@ -532,24 +531,75 @@ fn replace_bundle(app: &Path, dmg: &Path) -> Result<(), String> {
             .status();
         return Err("the disk image has no app".into());
     };
-    let aside = std::env::temp_dir().join(format!("navidog-old-{}.app", std::process::id()));
-    let _ = std::fs::remove_dir_all(&aside);
-    std::fs::rename(app, &aside).map_err(|e| e.to_string())?;
+    let staged = std::env::temp_dir().join(format!("navidog-new-{}.app", std::process::id()));
+    let _ = std::fs::remove_dir_all(&staged);
     let copied = std::process::Command::new("ditto")
         .arg(&src)
-        .arg(app)
+        .arg(&staged)
         .status();
     let _ = std::process::Command::new("hdiutil")
         .args(["detach"])
         .arg(&mount)
         .status();
     match copied {
-        Ok(status) if status.success() => Ok(()),
+        Ok(status) if status.success() => {}
         _ => {
-            let _ = std::fs::rename(&aside, app);
-            Err("could not copy the new app into place".into())
+            let _ = std::fs::remove_dir_all(&staged);
+            return Err("could not copy the new app into place".into());
         }
     }
+    let aside = std::env::temp_dir().join(format!("navidog-old-{}.app", std::process::id()));
+    let _ = std::fs::remove_dir_all(&aside);
+    swap_app(app, &staged, &aside)
+}
+
+/// Moves `staged` onto `app`, keeping `aside` until that succeeds. A partial `app`
+/// left by a failed copy is removed before the previous bundle is moved back.
+#[cfg(any(test, target_os = "macos"))]
+fn swap_app(app: &Path, staged: &Path, aside: &Path) -> Result<(), String> {
+    if let Err(e) = std::fs::rename(app, aside) {
+        let _ = std::fs::remove_dir_all(staged);
+        return Err(e.to_string());
+    }
+    if let Err(e) = std::fs::rename(staged, app) {
+        restore_previous_app(app, aside)?;
+        return Err(format!("could not copy the new app into place: {e}"));
+    }
+    if let Err(e) = std::fs::remove_dir_all(aside) {
+        tracing::error!("could not remove the previous app: {e}");
+    }
+    Ok(())
+}
+
+#[cfg(any(test, target_os = "macos"))]
+fn restore_previous_app(app: &Path, aside: &Path) -> Result<(), String> {
+    if app.exists() {
+        std::fs::remove_dir_all(app).map_err(|e| {
+            tracing::error!("could not remove the partial app: {e}");
+            e.to_string()
+        })?;
+    }
+    std::fs::rename(aside, app).map_err(|e| {
+        tracing::error!("could not restore the previous app: {e}");
+        format!("could not restore the previous app: {e}")
+    })
+}
+
+/// Shell command that starts the new bundle after this process has exited.
+/// `open` without waiting would only activate the process that is still running.
+#[cfg(any(test, target_os = "macos"))]
+fn relaunch_command(pid: u32, app: &Path) -> std::process::Command {
+    let mut cmd = std::process::Command::new("sh");
+    cmd.arg("-c")
+        .arg(
+            "nohup sh -c 'while kill -0 \"$PID\" 2>/dev/null; do sleep 0.2; done; exec open \"$APP\"' >/dev/null 2>&1 &",
+        )
+        .env("PID", pid.to_string())
+        .env("APP", app)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    cmd
 }
 
 #[cfg(target_os = "macos")]
@@ -557,7 +607,7 @@ pub fn relaunch() {
     if let Ok(exe) = std::env::current_exe()
         && let Some(app) = bundle_from_exe(&exe)
     {
-        let _ = std::process::Command::new("open").arg(app).spawn();
+        let _ = relaunch_command(std::process::id(), &app).spawn();
     }
 }
 
@@ -618,6 +668,12 @@ fn extract_appimage(archive: &Path) -> Result<PathBuf, String> {
     Ok(appimage)
 }
 
+/// When a check reached GitHub. A transport error leaves this `None`, so the
+/// next launch can try again instead of waiting two days.
+fn checked_at(found: &Result<Availability, String>, now: i64) -> Option<i64> {
+    found.is_ok().then_some(now)
+}
+
 fn unix_now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -640,7 +696,6 @@ pub fn manual_check(window: &mut Window, cx: &mut App) {
 
 fn begin_check(manual: bool, window: &mut Window, cx: &mut App) {
     let include = Settings::global(cx).include_prerelease(is_nightly_build());
-    Settings::update(cx, |s| s.update_checked_unix = Some(unix_now()));
     // Keep this window. The menu callback often runs while `NSApp.mainWindow` is nil,
     // so looking up the active window again after the request would drop the result.
     let home = window.window_handle();
@@ -661,6 +716,9 @@ fn show_check(
     window: &mut Window,
     cx: &mut App,
 ) {
+    if let Some(at) = checked_at(&found, unix_now()) {
+        Settings::update(cx, |s| s.update_checked_unix = Some(at));
+    }
     match found {
         Ok(Availability::Available(info)) => open_dialog(info, window, cx),
         Ok(Availability::Current) if manual => {
@@ -706,26 +764,39 @@ impl UpdateDialog {
         cx.spawn_in(window, async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
-                    download_verified(&asset).and_then(|path| install(&path).map(|d| (d, path)))
+                    let path = download_verified(&asset)?;
+                    match install(&path) {
+                        Ok(delivery) => {
+                            #[cfg(target_os = "macos")]
+                            if matches!(delivery, Delivery::Replaced) {
+                                cleanup_download(&path);
+                            }
+                            Ok(delivery)
+                        }
+                        Err(detail) => {
+                            cleanup_download(&path);
+                            Err(InstallError::Other(detail))
+                        }
+                    }
                 })
                 .await;
             let _ = this.update_in(cx, |this, window, cx| {
                 this.busy = false;
                 match result {
                     #[cfg(target_os = "macos")]
-                    Ok((Delivery::Replaced, _)) => {
+                    Ok(Delivery::Replaced) => {
                         window.close_dialog(cx);
                         open_restart(window, cx);
                     }
-                    Ok((Delivery::HandedToOs, _)) => {
+                    Ok(Delivery::HandedToOs) => {
                         window.push_notification(t!("update.handed_off").to_string(), cx);
                         window.close_dialog(cx);
                     }
-                    Err(detail) if detail == "checksum" => {
+                    Err(InstallError::Checksum) => {
                         window.push_notification(t!("update.bad_checksum").to_string(), cx);
                         cx.open_url(&page);
                     }
-                    Err(detail) => {
+                    Err(InstallError::Other(detail)) => {
                         window.push_notification(
                             t!("update.install_failed", detail = detail).to_string(),
                             cx,
@@ -869,5 +940,124 @@ mod tests {
             PathBuf::from("/Applications/Navidog.app")
         );
         assert!(bundle_from_exe(Path::new("/usr/local/bin/navidog")).is_none());
+    }
+
+    #[test]
+    fn a_failed_check_is_not_recorded() {
+        assert_eq!(checked_at(&Ok(Availability::Current), 10), Some(10));
+        assert_eq!(checked_at(&Err("offline".into()), 10), None);
+    }
+
+    #[test]
+    fn download_name_stays_inside_the_update_directory() {
+        assert_eq!(download_file_name("../../etc/passwd"), Some("passwd"));
+        assert_eq!(download_file_name("navidog.dmg"), Some("navidog.dmg"));
+        assert_eq!(download_file_name(".."), None);
+        assert_eq!(download_file_name(""), None);
+    }
+
+    fn serve(body: &'static [u8]) -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let (mut sock, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 2048];
+            let _ = std::io::Read::read(&mut sock, &mut buf);
+            let header = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            let _ = std::io::Write::write_all(&mut sock, header.as_bytes());
+            let _ = std::io::Write::write_all(&mut sock, body);
+        });
+        format!("http://{addr}/pkg.dmg")
+    }
+
+    #[test]
+    fn download_verified_checks_the_checksum_and_the_file_name() {
+        let empty = UpdateAsset {
+            url: "http://127.0.0.1/missing".into(),
+            sha256: "  ".into(),
+            name: "navidog.dmg".into(),
+        };
+        assert_eq!(download_verified(&empty), Err(InstallError::Checksum));
+
+        let body: &'static [u8] = b"navidog-update";
+        let good = hex_encode(&Sha256::digest(body));
+        let url = serve(body);
+        let wrong = UpdateAsset {
+            url: url.clone(),
+            sha256: "deadbeef".into(),
+            name: format!("../../navidog-bad-{}.dmg", std::process::id()),
+        };
+        assert_eq!(download_verified(&wrong), Err(InstallError::Checksum));
+        let bad_name = download_file_name(&wrong.name).unwrap();
+        assert!(
+            !std::env::temp_dir()
+                .join("navidog-update")
+                .join(bad_name)
+                .exists()
+        );
+
+        let url = serve(body);
+        let name = format!("../../navidog-ok-{}.dmg", std::process::id());
+        let right = UpdateAsset {
+            url,
+            sha256: good,
+            name: name.clone(),
+        };
+        let path = download_verified(&right).unwrap();
+        let file_name = download_file_name(&name).unwrap();
+        assert_eq!(
+            path,
+            std::env::temp_dir().join("navidog-update").join(file_name)
+        );
+        assert!(!path.components().any(|c| c.as_os_str() == ".."));
+        assert_eq!(std::fs::read(&path).unwrap(), body);
+        cleanup_download(&path);
+    }
+
+    #[test]
+    fn relaunch_waits_until_this_process_exits() {
+        let cmd = relaunch_command(42, Path::new("/Applications/Navidog.app"));
+        let script = cmd
+            .get_args()
+            .nth(1)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        assert!(script.contains("kill -0"));
+        assert!(script.contains("exec open"));
+        assert!(!script.contains("-n"));
+        let env: Vec<_> = cmd.get_envs().collect();
+        assert!(env.iter().any(|(k, v)| *k == "PID" && v.unwrap() == "42"));
+        assert!(
+            env.iter()
+                .any(|(k, v)| { *k == "APP" && v.unwrap() == "/Applications/Navidog.app" })
+        );
+    }
+
+    #[test]
+    fn a_failed_swap_restores_the_previous_app() {
+        let dir = std::env::temp_dir().join(format!("navidog-swap-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let app = dir.join("Navidog.app");
+        let staged = dir.join("Navidog.app.new");
+        let aside = dir.join("aside.app");
+        std::fs::create_dir(&app).unwrap();
+        std::fs::write(app.join("marker"), b"old").unwrap();
+        let err = swap_app(&app, &staged, &aside).unwrap_err();
+        assert!(err.contains("could not copy"), "{err}");
+        assert_eq!(std::fs::read(app.join("marker")).unwrap(), b"old");
+        assert!(!aside.exists());
+
+        std::fs::create_dir_all(&aside).unwrap();
+        std::fs::write(aside.join("marker"), b"old").unwrap();
+        std::fs::create_dir_all(&app).unwrap();
+        std::fs::write(app.join("marker"), b"partial").unwrap();
+        restore_previous_app(&app, &aside).unwrap();
+        assert_eq!(std::fs::read(app.join("marker")).unwrap(), b"old");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
