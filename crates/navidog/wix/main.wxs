@@ -10,7 +10,7 @@
     <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" />
     <MajorUpgrade DowngradeErrorMessage="A newer version of Navidog is already installed." />
     <MediaTemplate EmbedCab="yes" />
-    <Icon Id="ProductIcon" SourceFile="..\icons\navidog.ico" />
+    <Icon Id="ProductIcon" SourceFile="$(env.NAVIDOG_ICON)" />
     <Property Id="ARPPRODUCTICON" Value="ProductIcon" />
     <Feature Id="Main" Title="Navidog" Level="1">
       <ComponentRef Id="MainExecutable" />

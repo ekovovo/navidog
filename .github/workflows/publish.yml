@@ -261,6 +261,8 @@ jobs:
           cargo install --locked cargo-wix@0.3.9
           cargo build --release -p navidog --target ${{ matrix.target }} --features mimalloc
           Copy-Item "target/${{ matrix.target }}/release/navidog.exe" ./navidog.exe
+          # light.exe resolves Icon SourceFile from the process cwd, not the wxs directory.
+          $env:NAVIDOG_ICON = (Resolve-Path "crates/navidog/icons/navidog.ico").Path
           cargo wix --nocapture --no-build -p navidog --target ${{ matrix.target }}
           $msi = @(
             "target/wix",
@@ -381,7 +383,7 @@ jobs:
           cargo install --locked cargo-deb@3.7.0 cargo-generate-rpm@0.21.0
           cargo build --release -p navidog --features mimalloc
           cargo deb -p navidog --no-build -o "./navidog-linux-${{ matrix.arch }}.deb"
-          cargo generate-rpm --manifest-path crates/navidog/Cargo.toml -o "./navidog-linux-${{ matrix.arch }}.rpm"
+          cargo generate-rpm -p crates/navidog -o "./navidog-linux-${{ matrix.arch }}.rpm"
           mv target/release/navidog ./navidog
           chmod +x navidog
           objdump -p ./navidog | grep GLIBC
@@ -445,7 +447,7 @@ jobs:
 
   checksums:
     needs: [prepare_vars, macos, windows, linux]
-    if: always() && needs.prepare_vars.outputs.should_build == 'true' && (startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main')
+    if: needs.prepare_vars.outputs.should_build == 'true' && (startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
