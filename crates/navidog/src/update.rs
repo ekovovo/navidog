@@ -9,6 +9,8 @@
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -124,6 +126,8 @@ pub enum Delivery {
 pub(crate) enum InstallError {
     /// The checksum was missing or did not match.
     Checksum,
+    /// The user cancelled before the installer was applied.
+    Cancelled,
     Other(String),
 }
 
@@ -186,16 +190,41 @@ fn pick_asset_for(assets: &[ManifestAsset], os: &str, arch: &str) -> Option<Upda
 
 /// The asset for this machine from a release's `latest.json`. `None` when the
 /// file is missing or the asset has no checksum: those are not installed.
+/// A failure is logged; the dialog then offers the release page instead.
 fn release_manifest_asset(tag: &str) -> Option<UpdateAsset> {
     let url = format!("https://github.com/xhofe/navidog/releases/download/{tag}/latest.json");
-    let text = http_get(&url, Duration::from_secs(15)).ok()?;
-    let manifest = serde_json::from_str::<Manifest>(&text).ok()?;
-    let asset = pick_asset_for(
+    let text = match http_get(&url, Duration::from_secs(15), false) {
+        Ok(text) => text,
+        Err(err) => {
+            tracing::warn!(%tag, error = %err.detail, "update: could not read latest.json");
+            return None;
+        }
+    };
+    let manifest = match serde_json::from_str::<Manifest>(&text) {
+        Ok(manifest) => manifest,
+        Err(err) => {
+            tracing::warn!(%tag, error = %err, "update: latest.json is not a manifest");
+            return None;
+        }
+    };
+    let Some(asset) = pick_asset_for(
         &manifest.assets,
         std::env::consts::OS,
         std::env::consts::ARCH,
-    )?;
-    (!asset.sha256.trim().is_empty()).then_some(asset)
+    ) else {
+        tracing::warn!(
+            %tag,
+            os = std::env::consts::OS,
+            arch = std::env::consts::ARCH,
+            "update: latest.json has no installer for this computer"
+        );
+        return None;
+    };
+    if asset.sha256.trim().is_empty() {
+        tracing::warn!(%tag, "update: installer has no checksum");
+        return None;
+    }
+    Some(asset)
 }
 
 /// What About and the update dialog call this build.
@@ -268,7 +297,7 @@ pub fn fetch_latest_release(include_prerelease: bool) -> Result<Availability, St
 
 fn fetch_from_manifest() -> Result<Option<UpdateInfo>, String> {
     let manifest: Manifest = serde_json::from_str(
-        &http_get(MANIFEST_URL, Duration::from_secs(15)).map_err(|err| err.detail)?,
+        &http_get(MANIFEST_URL, Duration::from_secs(15), false).map_err(|err| err.detail)?,
     )
     .map_err(|e| e.to_string())?;
     let Some(latest) = newer_version(&manifest.version, env!("CARGO_PKG_VERSION")) else {
@@ -293,7 +322,7 @@ fn fetch_from_manifest() -> Result<Option<UpdateInfo>, String> {
 }
 
 fn release_notes_for(version: &str) -> String {
-    let Ok(text) = http_get(LATEST_API, Duration::from_secs(15)) else {
+    let Ok(text) = http_get(LATEST_API, Duration::from_secs(15), true) else {
         return String::new();
     };
     let Ok(release) = serde_json::from_str::<GithubRelease>(&text) else {
@@ -307,7 +336,7 @@ fn release_notes_for(version: &str) -> String {
 }
 
 fn fetch_from_api() -> Result<Availability, String> {
-    let text = match http_get(LATEST_API, Duration::from_secs(15)) {
+    let text = match http_get(LATEST_API, Duration::from_secs(15), true) {
         Ok(text) => text,
         Err(err) => return missing_latest(err.status, &err.detail),
     };
@@ -334,7 +363,7 @@ fn fetch_from_api() -> Result<Availability, String> {
 
 fn fetch_from_release_list() -> Result<Availability, String> {
     let releases: Vec<GithubRelease> = serde_json::from_str(
-        &http_get(RELEASE_LIST_API, Duration::from_secs(15)).map_err(|err| err.detail)?,
+        &http_get(RELEASE_LIST_API, Duration::from_secs(15), true).map_err(|err| err.detail)?,
     )
     .map_err(|e| e.to_string())?;
     let release = match pick_release(&releases) {
@@ -375,23 +404,26 @@ struct HttpFail {
     detail: String,
 }
 
-fn http_get(url: &str, timeout: Duration) -> Result<String, HttpFail> {
+fn http_get(url: &str, timeout: Duration, github_api: bool) -> Result<String, HttpFail> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(timeout))
         .build()
         .into();
-    let mut response = agent
-        .get(url)
-        .header("User-Agent", USER_AGENT)
-        .header("Accept", "application/vnd.github+json")
-        .call()
-        .map_err(|err| HttpFail {
-            status: match &err {
-                ureq::Error::StatusCode(code) => Some(*code),
-                _ => None,
-            },
-            detail: err.to_string(),
-        })?;
+    let request = agent.get(url).header("User-Agent", USER_AGENT);
+    // The asset host is a file download. The API Accept value makes GitHub
+    // answer with release metadata instead of the file.
+    let request = if github_api {
+        request.header("Accept", "application/vnd.github+json")
+    } else {
+        request
+    };
+    let mut response = request.call().map_err(|err| HttpFail {
+        status: match &err {
+            ureq::Error::StatusCode(code) => Some(*code),
+            _ => None,
+        },
+        detail: err.to_string(),
+    })?;
     response
         .body_mut()
         .read_to_string()
@@ -416,8 +448,12 @@ fn download_file_name(name: &str) -> Option<&str> {
 /// `on_progress(downloaded, total)` runs as bytes arrive. `total` is the
 /// response `Content-Length` when it is present, otherwise `asset.size`, and
 /// `0` when neither is known.
+///
+/// ponytail: `cancel` is noticed between chunks. The connect and each blocking
+/// read run to completion; aborting an in-flight read means replacing this ureq loop.
 pub fn download_verified(
     asset: &UpdateAsset,
+    cancel: &AtomicBool,
     mut on_progress: impl FnMut(u64, u64),
 ) -> Result<PathBuf, InstallError> {
     if asset.sha256.trim().is_empty() {
@@ -452,6 +488,11 @@ pub fn download_verified(
     let mut buf = [0u8; 64 * 1024];
     let mut downloaded = 0u64;
     loop {
+        if cancel.load(Ordering::Relaxed) {
+            drop(file);
+            let _ = std::fs::remove_file(&path);
+            return Err(InstallError::Cancelled);
+        }
         let n = reader
             .read(&mut buf)
             .map_err(|e| InstallError::Other(e.to_string()))?;
@@ -467,6 +508,11 @@ pub fn download_verified(
         file.write_all(&buf[..n])
             .map_err(|e| InstallError::Other(e.to_string()))?;
         on_progress(downloaded, total);
+    }
+    if cancel.load(Ordering::Relaxed) {
+        drop(file);
+        let _ = std::fs::remove_file(&path);
+        return Err(InstallError::Cancelled);
     }
     let got = hex_encode(&hasher.finalize());
     if !got.eq_ignore_ascii_case(asset.sha256.trim()) {
@@ -804,6 +850,8 @@ fn open_dialog(info: UpdateInfo, window: &mut Window, cx: &mut App) {
     let view = cx.new(|_| UpdateDialog {
         info,
         progress: None,
+        installing: false,
+        cancel: Arc::new(AtomicBool::new(false)),
     });
     let version = view.read(cx).info.version.clone();
     window.open_dialog(cx, move |dialog, window, _| {
@@ -819,6 +867,9 @@ struct UpdateDialog {
     /// `(downloaded, total)` while a download is in flight. `total` is 0 when
     /// the size is unknown. `None` shows the action buttons.
     progress: Option<(u64, u64)>,
+    /// The file is on disk and install has started. Cancel no longer applies.
+    installing: bool,
+    cancel: Arc<AtomicBool>,
 }
 
 /// Applies download ticks to the dialog. Percentage-sized steps only, so a
@@ -892,38 +943,62 @@ impl UpdateDialog {
             window.close_dialog(cx);
             return;
         };
+        self.cancel.store(false, Ordering::Relaxed);
+        self.installing = false;
         // Show the bar on the click itself. The first byte waits on DNS and
         // TLS, and a still-enabled button looks like the click did nothing.
         self.progress = Some((0, asset.size));
         cx.notify();
         let page = self.info.page_url.clone();
+        let cancel = Arc::clone(&self.cancel);
         let (tx, rx) = std::sync::mpsc::channel();
         cx.spawn_in(window, async move |this, cx| {
             let view = this.clone();
             let watch = cx.spawn(async move |cx| watch_download(view, rx, cx).await);
-            let result = cx
+            let downloaded = cx
                 .background_spawn(async move {
-                    let path = download_verified(&asset, |done, total| {
+                    download_verified(&asset, &cancel, |done, total| {
                         let _ = tx.send((done, total));
-                    })?;
-                    match install(&path) {
-                        Ok(delivery) => {
-                            #[cfg(target_os = "macos")]
-                            if matches!(delivery, Delivery::Replaced) {
-                                cleanup_download(&path);
-                            }
-                            Ok(delivery)
-                        }
-                        Err(detail) => {
-                            cleanup_download(&path);
-                            Err(InstallError::Other(detail))
-                        }
-                    }
+                    })
                 })
                 .await;
+            let result = match downloaded {
+                Err(err) => Err(err),
+                Ok(path) => {
+                    let cancelled = this
+                        .update_in(cx, |dialog, _, _| dialog.cancel.load(Ordering::Relaxed))
+                        .unwrap_or(false);
+                    if cancelled {
+                        cleanup_download(&path);
+                        Err(InstallError::Cancelled)
+                    } else {
+                        let _ = this.update_in(cx, |dialog, _, cx| {
+                            dialog.installing = true;
+                            cx.notify();
+                        });
+                        cx.background_spawn(async move {
+                            match install(&path) {
+                                Ok(delivery) => {
+                                    #[cfg(target_os = "macos")]
+                                    if matches!(delivery, Delivery::Replaced) {
+                                        cleanup_download(&path);
+                                    }
+                                    Ok(delivery)
+                                }
+                                Err(detail) => {
+                                    cleanup_download(&path);
+                                    Err(InstallError::Other(detail))
+                                }
+                            }
+                        })
+                        .await
+                    }
+                }
+            };
             watch.await;
             let _ = this.update_in(cx, |this, window, cx| {
                 this.progress = None;
+                this.installing = false;
                 match result {
                     #[cfg(target_os = "macos")]
                     Ok(Delivery::Replaced) => {
@@ -934,6 +1009,7 @@ impl UpdateDialog {
                         window.push_notification(t!("update.handed_off").to_string(), cx);
                         window.close_dialog(cx);
                     }
+                    Err(InstallError::Cancelled) => {}
                     Err(InstallError::Checksum) => {
                         window.push_notification(t!("update.bad_checksum").to_string(), cx);
                         cx.open_url(&page);
@@ -958,14 +1034,30 @@ impl Render for UpdateDialog {
         let page = self.info.page_url.clone();
         let weak = cx.entity().downgrade();
         let progress = self.progress;
+        let installing = self.installing;
+        let cancel = Arc::clone(&self.cancel);
         v_flex()
             .gap_2()
             .w_full()
             .min_w_0()
             .child(t!("update.current", version = self.info.current.clone()).to_string())
             .when(!notes.is_empty(), |col| col.child(notes))
+            .when(progress.is_none() && !has_asset, |col| {
+                col.child(t!("update.no_asset").to_string())
+            })
             .when_some(progress, |col, (done, total)| {
                 col.child(download_progress_bar(done, total))
+                    .when(!installing, |col| {
+                        col.child(
+                            h_flex().justify_end().w_full().child(
+                                Button::new("update-cancel")
+                                    .label(t!("dialog.cancel").to_string())
+                                    .on_click(move |_, _, _| {
+                                        cancel.store(true, Ordering::Relaxed);
+                                    }),
+                            ),
+                        )
+                    })
             })
             .when(progress.is_none(), |col| {
                 col.child(
@@ -1143,6 +1235,28 @@ mod tests {
     }
 
     #[test]
+    fn cancelling_a_download_removes_the_partial_file() {
+        let body: &'static [u8] = b"navidog-update-cancel";
+        let url = serve(body);
+        let name = format!("navidog-cancel-{}.dmg", std::process::id());
+        let asset = UpdateAsset {
+            url,
+            sha256: hex_encode(&Sha256::digest(body)),
+            name: name.clone(),
+            size: body.len() as u64,
+        };
+        let cancel = AtomicBool::new(false);
+        let err = download_verified(&asset, &cancel, |done, _| {
+            if done == 0 {
+                cancel.store(true, Ordering::Relaxed);
+            }
+        });
+        assert_eq!(err, Err(InstallError::Cancelled));
+        let path = std::env::temp_dir().join("navidog-update").join(&name);
+        assert!(!path.exists(), "{}", path.display());
+    }
+
+    #[test]
     fn download_verified_checks_the_checksum_and_the_file_name() {
         let empty = UpdateAsset {
             url: "http://127.0.0.1/missing".into(),
@@ -1151,7 +1265,7 @@ mod tests {
             size: 0,
         };
         assert_eq!(
-            download_verified(&empty, |_, _| {}),
+            download_verified(&empty, &AtomicBool::new(false), |_, _| {}),
             Err(InstallError::Checksum)
         );
 
@@ -1165,7 +1279,7 @@ mod tests {
             size: 0,
         };
         assert_eq!(
-            download_verified(&wrong, |_, _| {}),
+            download_verified(&wrong, &AtomicBool::new(false), |_, _| {}),
             Err(InstallError::Checksum)
         );
         let bad_name = download_file_name(&wrong.name).unwrap();
@@ -1185,7 +1299,10 @@ mod tests {
             size: 0,
         };
         let mut ticks = Vec::new();
-        let path = download_verified(&right, |done, total| ticks.push((done, total))).unwrap();
+        let path = download_verified(&right, &AtomicBool::new(false), |done, total| {
+            ticks.push((done, total));
+        })
+        .unwrap();
         assert!(
             ticks.windows(2).all(|pair| pair[0].0 <= pair[1].0),
             "{ticks:?}"

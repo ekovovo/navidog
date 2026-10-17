@@ -702,6 +702,9 @@ update:
   open_page:
     en: Open Release Page
     zh-CN: 打开发布页
+  no_asset:
+    en: No installer for this computer could be read. Open the release page to download it.
+    zh-CN: 没有读到适用于这台电脑的安装包。可以打开发布页下载。
   downloading:
     en: Downloading…
     zh-CN: 正在下载…
