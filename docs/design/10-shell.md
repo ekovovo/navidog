@@ -169,7 +169,7 @@ M1 实现以下菜单。各菜单的完整结构参考 `reference/tree/MainMenu.
 
 - ⌘, 打开独立窗口（单例，640 × 480），左侧是分类列表，右侧是设置页。主题是标签加下拉（Navidog、Default）。外观和语言各占一行（标签加横向选项，对应 Navicat 的弹出菜单）。主窗口等是小节标题，下面是左对齐的复选框，不再套用连接表单的标签列。记录页的“限制记录”和每页条数在同一行。
 - M1 包含两个分类：
-  - **常规**：主题（Navidog、Default；Default 是 gpui-kit 自带的 shadcn 主题，与外观独立；缺省和已有的 `settings.json` 都是 Navidog）、外观（跟随系统、浅色、深色）、语言（跟随系统、简体中文、English）、启动时自动打开“自动连接”的连接；
+  - **常规**：主题（Navidog、Default；Default 是 gpui-kit 自带的 shadcn 主题，与外观独立；缺省和已有的 `settings.json` 都是 Navidog）、外观（跟随系统、浅色、深色）、语言（跟随系统、简体中文、English）、启动时自动打开“自动连接”的连接。检查更新一节有两个复选框：自动检查更新（默认开，启动时最多每两天一次）；包含预发布版本（同时提供预发布版本和 `main` 上的 nightly，nightly 构建默认开，可手动关掉）；
   - **高级**：设置位置（只读显示配置目录，带“在 Finder 中显示”按钮）、主密码（设置、修改、清除）。
 - 修改立即生效：切换主题时换上对应的浅色/深色主题对，再调用 `Theme::change`；Default 把 `font_size` 钉在 13、等宽字号钉在 12。切换外观时调用 `Theme::change`；切换语言时调用 `set_locale` 和 `cx.refresh_windows()`。设置保存在 `settings.json`（`theme` 为 `navidog` 或 `default`）。
 

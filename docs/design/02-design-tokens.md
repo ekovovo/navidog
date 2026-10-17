@@ -116,7 +116,7 @@
 | `explain.node_gap` | 40 × 16 | 暂定。横向是层与层的间距，纵向是兄弟节点的间距 |
 | `explain.node_info.height` | 212 | nib:QueryExplainVisualModule/节点信息框（171 × 212） |
 | `query.picker_width` | 120 | 暂定：工具栏的连接、数据库、模式选择 |
-| `query.find_control.height` | 19.5 | 查找栏的模式按钮，等于 `Input::small`（`h_6` = 1.5rem）。标识符搜索框仍是 `info.search_field.height`（22） |
+| `find.control.height` | 19.5 | 表查看器和查询编辑器共用的查找栏模式按钮，等于 `Input::small`（`h_6` = 1.5rem）。标识符搜索框仍是 `info.search_field.height`（22） |
 | `editor.font_range` | 8 ~ 72 | 30-query-editor 第 9 节 |
 | `result.tab_height` | 26 | 暂定：结果区选项卡条 |
 

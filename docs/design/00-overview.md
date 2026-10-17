@@ -78,7 +78,7 @@ navidog 用 [gpui-kit](https://gpui-kit.com/zh-CN/docs/) 全家桶（GPUI、`gpu
 1. 仓库结构：Cargo workspace，具体见第 4 节。
 2. 测试数据库：`docker-compose.yml`（MySQL 8、MariaDB 11、PostgreSQL 16，带种子数据），SQLite 用仓库内的测试文件。
 3. CI：GitHub Actions。每次推送在 macOS（aarch64 与 Intel）、Linux、Windows 上跑 clippy 和测试，macOS 另跑 fmt 和裸值检查；`main` 上另做三平台的 release 冒烟。打 `v*` tag 时构建 macOS `.dmg`、Windows `.msi`、zip 与 `.msi.zip`、Linux `.deb`、`.rpm`、AppImage 和 tarball（x86_64 与 aarch64），并上传 `latest.json`。`main` 每天滚动发布 `nightly`。Apple 公证在有签名证书时执行，没有证书时上传未签名包。实库测试在 Ubuntu 上用 `docker compose` 跑。
-4. 分支流程：每个里程碑一个分支，通过 PR 合并到 `master`；规格 PR 和代码 PR 分开提。
+4. 分支流程：每个里程碑一个分支，通过 PR 合并到 `main`；规格 PR 和代码 PR 分开提。
 5. 模块细节：每份模块规格按 Navicat 现有行为写好默认值，提交评审。
 
 ## 4. 架构
@@ -191,4 +191,4 @@ gpui-kit 的[编码指南](https://gpui-kit.com/zh-CN/docs/coding-guides)和[设
 - 每段不简单的逻辑至少有一个可运行的检查。
 - 新增 token 都在 [02-design-tokens.md](02-design-tokens.md) 写明来源；与 Navicat 的偏差都写进模块规格。
 - [progress.md](../progress.md) 已同步更新。
-- 并排目测通过评审后，PR 合并到 `master`。
+- 并排目测通过评审后，PR 合并到 `main`。
