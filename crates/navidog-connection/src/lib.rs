@@ -278,7 +278,7 @@ pub fn store_error_message(e: &StoreError) -> String {
         StoreError::Crypto(CryptoError::Decrypt | CryptoError::Format) => {
             t!("conn.secret_unreadable").to_string()
         }
-        StoreError::Crypto(CryptoError::Keychain(detail)) => {
+        StoreError::Crypto(CryptoError::Keychain(detail) | CryptoError::Io(detail)) => {
             t!("conn.keychain_failed", detail = detail).to_string()
         }
         StoreError::Crypto(CryptoError::Kdf(detail)) => {

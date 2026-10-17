@@ -28,6 +28,8 @@ pub enum CryptoError {
     Format,
     #[error("cannot access the keychain: {0}")]
     Keychain(String),
+    #[error("cannot read or write the machine key: {0}")]
+    Io(String),
     #[error("master password derivation failed: {0}")]
     Kdf(String),
 }
@@ -220,29 +222,42 @@ pub(crate) fn read_or_create_key_file(path: &std::path::Path) -> Result<Key, Cry
         return decode_key(&encoded);
     }
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| CryptoError::Keychain(e.to_string()))?;
+        std::fs::create_dir_all(parent).map_err(|e| CryptoError::Io(e.to_string()))?;
     }
     let key = Key::random();
+    write_key_file(path, &B64.encode(key.0))?;
+    // Rename replaces a file another process created in the same window. Return
+    // whatever is on disk now, which is this key when nobody else wrote.
+    decode_key(&std::fs::read_to_string(path).map_err(|e| CryptoError::Io(e.to_string()))?)
+}
+
+/// Writes `encoded` as a new file with mode `0600`. The destination appears only
+/// after the bytes are on disk, so a crash cannot leave a 0-byte key.
+#[cfg(any(test, not(any(target_os = "macos", target_os = "windows"))))]
+fn write_key_file(path: &std::path::Path, encoded: &str) -> Result<(), CryptoError> {
+    let tmp = path.with_extension("tmp");
     let mut opts = std::fs::OpenOptions::new();
-    opts.write(true).create_new(true);
+    opts.write(true).create(true).truncate(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
         opts.mode(0o600);
     }
-    match opts.open(path) {
-        Ok(mut file) => {
-            use std::io::Write;
-            file.write_all(B64.encode(key.0).as_bytes())
-                .map_err(|e| CryptoError::Keychain(e.to_string()))?;
-            Ok(key)
-        }
-        // Another process created it between the read and the create.
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => decode_key(
-            &std::fs::read_to_string(path).map_err(|e| CryptoError::Keychain(e.to_string()))?,
-        ),
-        Err(e) => Err(CryptoError::Keychain(e.to_string())),
+    let result = (|| {
+        use std::io::Write;
+        let mut file = opts
+            .open(&tmp)
+            .map_err(|e| CryptoError::Io(e.to_string()))?;
+        file.write_all(encoded.as_bytes())
+            .map_err(|e| CryptoError::Io(e.to_string()))?;
+        file.sync_all()
+            .map_err(|e| CryptoError::Io(e.to_string()))?;
+        std::fs::rename(&tmp, path).map_err(|e| CryptoError::Io(e.to_string()))
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
     }
+    result
 }
 
 #[cfg(test)]
@@ -279,12 +294,34 @@ mod tests {
         let first = read_or_create_key_file(&path).unwrap();
         let second = read_or_create_key_file(&path).unwrap();
         assert_eq!(first.0, second.0);
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(decode_key(&on_disk).unwrap().0, first.0);
+        assert!(!dir.join("machine-key.tmp").exists());
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             let mode = std::fs::metadata(&path).unwrap().permissions().mode();
             assert_eq!(mode & 0o777, 0o600);
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_truncated_key_file_is_not_replaced() {
+        let dir = std::env::temp_dir().join(format!(
+            "navidog-key-trunc-{}-{}",
+            std::process::id(),
+            Key::random().0[0]
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("machine-key");
+        std::fs::write(&path, b"").unwrap();
+        assert!(matches!(
+            read_or_create_key_file(&path),
+            Err(CryptoError::Format)
+        ));
+        assert_eq!(std::fs::read(&path).unwrap(), b"");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
