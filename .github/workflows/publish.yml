@@ -389,17 +389,23 @@ jobs:
         env:
           APPIMAGE_EXTRACT_AND_RUN: "1"
         run: |
-          cargo install --locked cargo-appimage@2.4.0
           cargo install --locked cargo-deb@3.7.0 cargo-generate-rpm@0.21.0
           cargo build --release -p navidog --features mimalloc
           cargo deb -p navidog --no-build -o "./navidog-linux-${{ matrix.arch }}.deb"
           cargo generate-rpm -p crates/navidog -o "./navidog-linux-${{ matrix.arch }}.rpm"
-          # cargo-appimage reads ./Cargo.toml itself. --manifest-path only
-          # reaches its inner `cargo build`, so a virtual workspace root
-          # (no [package]) fails with "Cannot load metadata from Cargo.toml".
-          # Run it before `mv` empties target/release; its own build does not
-          # put the binary back.
-          ( cd crates/navidog && cargo appimage --features mimalloc )
+          # cargo-appimage only accepts a Cargo.toml that is itself the
+          # workspace root. This package inherits version and deps, and the
+          # tool always opens ./Cargo.toml, which cargo_toml 0.22 cannot
+          # walk up from. appimagetool is already on PATH.
+          appdir="target/appimage/navidog.AppDir"
+          rm -rf "$appdir"
+          mkdir -p "$appdir/usr/bin" target/appimage
+          cp target/release/navidog "$appdir/usr/bin/navidog"
+          cp crates/navidog/assets/navidog.desktop "$appdir/navidog.desktop"
+          cp crates/navidog/icons/navidog.png "$appdir/navidog.png"
+          printf '%s\n' '#!/bin/sh' 'HERE="$(dirname "$(readlink -f "$0")")"' 'exec "$HERE/usr/bin/navidog" "$@"' > "$appdir/AppRun"
+          chmod +x "$appdir/AppRun" "$appdir/usr/bin/navidog"
+          ARCH=${{ matrix.arch }} appimagetool "$appdir" target/appimage/navidog.AppImage
           mv target/release/navidog ./navidog
           chmod +x navidog
           objdump -p ./navidog | grep GLIBC

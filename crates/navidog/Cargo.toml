@@ -53,11 +53,6 @@ category = "public.app-category.developer-tools"
 osx_minimum_system_version = "15.0"
 short_description = "A database client."
 
-[package.metadata.appimage]
-assets = ["assets/navidog.desktop", "icons/navidog.png"]
-icon = "icons/navidog.png"
-desktop_entry = "assets/navidog.desktop"
-
 # Paths are relative to this crate. The workspace target dir is two levels up.
 [package.metadata.deb]
 name = "navidog"
