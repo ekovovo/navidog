@@ -6,6 +6,8 @@
 # same name, so re-running a job does not fail with 422.
 #
 # Usage: upload_asset.sh <FILE> [TOKEN]
+# The release tag is GITHUB_REF_NAME, unless RELEASE_TAG is set. Nightly builds
+# run on main, so they set RELEASE_TAG=nightly.
 set -euo pipefail
 
 if [ $# -lt 1 ]; then
@@ -18,7 +20,7 @@ if [ -n "${2:-}" ]; then
     export GH_TOKEN="$2"
 fi
 
-tag="${GITHUB_REF_NAME:?}"
+tag="${RELEASE_TAG:-${GITHUB_REF_NAME:?}}"
 repo="${GITHUB_REPOSITORY:?}"
 echo "Uploading $file_path to $repo@$tag"
 

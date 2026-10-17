@@ -128,10 +128,21 @@ jobs:
           security create-keychain -p "" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "" "$KEYCHAIN_PATH"
-          echo "$p12_certificate" | base64 --decode > certificate.p12
-          security import certificate.p12 -k "$KEYCHAIN_PATH" -P "$p12_password" -T /usr/bin/codesign
+          cert="$RUNNER_TEMP/certificate.p12"
+          echo "$p12_certificate" | base64 --decode > "$cert"
+          security import "$cert" -k "$KEYCHAIN_PATH" -P "$p12_password" -T /usr/bin/codesign
+          rm -f "$cert"
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" "$KEYCHAIN_PATH"
-          security list-keychains -d user -s "$KEYCHAIN_PATH"
+          # Keep the login keychain. `-s` replaces the search list.
+          existing=()
+          while IFS= read -r line; do
+            line="${line#"${line%%[![:space:]]*}"}"
+            line="${line%"${line##*[![:space:]]}"}"
+            line="${line#\"}"
+            line="${line%\"}"
+            [ -n "$line" ] && existing+=("$line")
+          done < <(security list-keychains -d user)
+          security list-keychains -d user -s "$KEYCHAIN_PATH" "${existing[@]}"
       - name: release
         run: cargo bundle --release -p navidog --target ${{ matrix.target }} --features mimalloc
       - name: smoke test (first frame must paint)
@@ -188,7 +199,7 @@ jobs:
         if: steps.sign.outputs.apple == 'true'
         run: xcrun stapler staple "release/${{ env.APP_NAME }}-${{ matrix.arch }}.dmg"
       - name: checksum
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main'
         run: |
           mkdir -p meta
           DMG_NAME="release/${{ env.APP_NAME }}-${{ matrix.arch }}.dmg"
@@ -202,7 +213,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: ./.github/workflows/upload_asset.sh "release/${{ env.APP_NAME }}-${{ matrix.arch }}.dmg"
       - name: upload checksum meta
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v7
         with:
           name: meta-macos-${{ matrix.arch }}
@@ -282,7 +293,7 @@ jobs:
           Compress-Archive -Path navidog.msi -DestinationPath $msiZipName
           echo "MSI_ZIP_NAME=$msiZipName" >> $env:GITHUB_ENV
       - name: checksum
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path meta | Out-Null
@@ -307,7 +318,7 @@ jobs:
           ./.github/workflows/upload_asset.sh "./${{ env.MSI_NAME }}"
           ./.github/workflows/upload_asset.sh "./${{ env.MSI_ZIP_NAME }}"
       - name: upload checksum meta
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v7
         with:
           name: meta-windows-${{ matrix.arch }}
@@ -388,7 +399,7 @@ jobs:
           sudo apt-get install -y xvfb mesa-vulkan-drivers libvulkan1
           xvfb-run -a ./navidog
       - name: checksum
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main'
         run: |
           mkdir -p meta
           : > "meta/linux-${{ matrix.arch }}.txt"
@@ -413,7 +424,7 @@ jobs:
           ./.github/workflows/upload_asset.sh "navidog-linux-${{ matrix.arch }}.tar.gz"
           ./.github/workflows/upload_asset.sh "navidog-${{ matrix.arch }}.AppImage.tar.gz"
       - name: upload checksum meta
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v7
         with:
           name: meta-linux-${{ matrix.arch }}
@@ -433,8 +444,8 @@ jobs:
             navidog-${{ matrix.arch }}.AppImage.tar.gz
 
   checksums:
-    needs: [macos, windows, linux]
-    if: startsWith(github.ref, 'refs/tags/')
+    needs: [prepare_vars, macos, windows, linux]
+    if: always() && needs.prepare_vars.outputs.should_build == 'true' && (startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -446,13 +457,21 @@ jobs:
       - name: build SHA256SUMS and latest.json
         env:
           GH_TOKEN: ${{ github.token }}
+          # main builds attach assets to the nightly release, not a release named main.
+          RELEASE_TAG: ${{ github.ref == 'refs/heads/main' && 'nightly' || github.ref_name }}
         run: |
           set -euo pipefail
-          TAG="${GITHUB_REF_NAME}"
-          VERSION="${TAG#v}"
+          TAG="$RELEASE_TAG"
+          if [ "$TAG" = "nightly" ]; then VERSION="nightly"; else VERSION="${TAG#v}"; fi
           REPO="${GITHUB_REPOSITORY}"
           BASE="https://github.com/$REPO/releases/download/$TAG"
-          cat meta/*.txt > all-meta.txt
+          shopt -s nullglob
+          meta_files=(meta/*.txt)
+          if [ ${#meta_files[@]} -eq 0 ]; then
+            echo "no checksum metadata; not publishing"
+            exit 1
+          fi
+          cat "${meta_files[@]}" > all-meta.txt
           awk '{print $5"  "$4}' all-meta.txt | sort -k2 > SHA256SUMS
           items=""
           while read -r os arch kind name sha size; do
@@ -465,3 +484,6 @@ jobs:
             "$VERSION" "$TAG" "$REPO" "$TAG" "$items" | jq . > latest.json
           ./.github/workflows/upload_asset.sh ./SHA256SUMS
           ./.github/workflows/upload_asset.sh ./latest.json
+          if [ "$TAG" != "nightly" ]; then
+            gh release edit "$TAG" --draft=false
+          fi

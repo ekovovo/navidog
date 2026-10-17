@@ -6,12 +6,12 @@
 
 ```bash
 git branch --show-current
-git merge-base HEAD master && git log --oneline master..HEAD && git diff --stat master...HEAD
+git merge-base HEAD main && git log --oneline main..HEAD && git diff --stat main...HEAD
 ```
 
-分支不是从 `master` 拉出来的（例如从里程碑分支），就对几个候选分支各算 `git merge-base` 和 `git rev-list --count <base>..HEAD`，取最近的那个。
+分支不是从 `main` 拉出来的（例如从里程碑分支），就对几个候选分支各算 `git merge-base` 和 `git rev-list --count <base>..HEAD`，取最近的那个。
 
-读 progress.md 第 2~4 节（分支声称完成了什么、已登记的偏差）、diff 涉及的模块规格，以及 `git diff master...HEAD -- docs/ AGENTS.md`，弄清分支自己声称做了什么。已登记的偏差不算问题，除非实现和登记的不符。
+读 progress.md 第 2~4 节（分支声称完成了什么、已登记的偏差）、diff 涉及的模块规格，以及 `git diff main...HEAD -- docs/ AGENTS.md`，弄清分支自己声称做了什么。已登记的偏差不算问题，除非实现和登记的不符。
 
 ## 2. 后台跑检查
 
@@ -27,8 +27,8 @@ git merge-base HEAD master && git log --oneline master..HEAD && git diff --stat 
 你是资深 Rust / GPUI 代码审查者。只读审查，不要修改任何文件，不要运行 cargo（主代理在跑，会抢 target 锁）。可以用 git、rg、读文件。
 
 ## 背景
-仓库 /Users/xhofe/code/i/navidog：用 gpui-kit 复刻 Navicat Premium 17 的 Rust workspace。分支 <分支>，相对 master 有 <N> 个提交。
-审查命令：git diff master...HEAD -- <路径>；行号以 HEAD 下的文件为准。
+仓库 /Users/xhofe/code/i/navidog：用 gpui-kit 复刻 Navicat Premium 17 的 Rust workspace。分支 <分支>，相对 main 有 <N> 个提交。
+审查命令：git diff main...HEAD -- <路径>；行号以 HEAD 下的文件为准。
 gpui-kit 源码在 ~/.cargo/git/checkouts/gpui-kit-*/<rev>/crates，gpui 在 ~/.cargo/registry/src/*/gpui-pre-<版本>/src，确认组件行为时去读。
 
 ## 你负责的范围
@@ -59,7 +59,7 @@ Mysterious Name、Duplicated Code、Feature Envy、Data Clumps、Primitive Obses
 
 子代理的结论可能有错。每个严重、重要结论都打开引用的代码核实；涉及 gpui、gpui-kit 行为的，去读上面路径下的源码。不成立的删掉或降级；只读代码、没有运行复现的写“读码确认”。
 
-对每个确认的问题跑 `git blame -L <行>`：问题代码来自 `master` 上的提交，严重度记 `存量`，在报告里和本分支引入的问题分开列。
+对每个确认的问题跑 `git blame -L <行>`：问题代码来自 `main` 上的提交，严重度记 `存量`，在报告里和本分支引入的问题分开列。
 
 ## 5. 测试失败时二分
 
