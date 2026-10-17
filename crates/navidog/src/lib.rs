@@ -222,7 +222,7 @@ pub fn register_app_actions(cx: &mut App) {
                     .title("Navidog")
                     .description(format!(
                         "{}\n{}",
-                        t!("about.version", version = env!("CARGO_PKG_VERSION")),
+                        t!("about.version", version = update::current_label()),
                         t!("about.description")
                     ))
                     .ok_text(t!("prefs.ok").to_string())

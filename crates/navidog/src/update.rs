@@ -12,7 +12,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::{Disableable as _, WindowExt as _, h_flex, v_flex};
+use gpui_kit::component::progress::Progress;
+use gpui_kit::component::{WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, AppContext as _, IntoElement, ParentElement as _, Render, Styled as _, Window,
@@ -84,6 +85,8 @@ pub struct UpdateAsset {
     pub url: String,
     pub sha256: String,
     pub name: String,
+    /// Advertised size from `latest.json`. `0` when the manifest omitted it.
+    pub size: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -142,6 +145,8 @@ struct ManifestAsset {
     url: String,
     #[serde(default)]
     sha256: String,
+    #[serde(default)]
+    size: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -175,6 +180,7 @@ fn pick_asset_for(assets: &[ManifestAsset], os: &str, arch: &str) -> Option<Upda
         url: chosen.url.clone(),
         sha256: chosen.sha256.clone(),
         name: chosen.name.clone(),
+        size: chosen.size,
     })
 }
 
@@ -192,13 +198,21 @@ fn release_manifest_asset(tag: &str) -> Option<UpdateAsset> {
     (!asset.sha256.trim().is_empty()).then_some(asset)
 }
 
-fn current_label() -> String {
-    let version = env!("CARGO_PKG_VERSION");
-    if is_nightly_build() {
-        format!(
-            "{version} (nightly {})",
-            BUILD_TIMESTAMP.get(..10).unwrap_or("")
-        )
+/// What About and the update dialog call this build.
+///
+/// A nightly shows the channel and the UTC build time baked by CI, which is the
+/// same clock as the GitHub nightly notes. It does not show the Cargo.toml
+/// version. A stable build shows the version compiled in, which a tag build
+/// stamps from the tag before compiling.
+pub(crate) fn current_label() -> String {
+    version_label(env!("CARGO_PKG_VERSION"), BUILD_CHANNEL, BUILD_TIMESTAMP)
+}
+
+pub(crate) fn version_label(version: &str, channel: &str, built_at: &str) -> String {
+    if channel == "nightly" {
+        let date = built_at.get(..10).unwrap_or("");
+        let time = built_at.get(11..16).unwrap_or("");
+        format!("nightly ({date} {time} UTC)")
     } else {
         version.to_string()
     }
@@ -398,7 +412,14 @@ fn download_file_name(name: &str) -> Option<&str> {
 }
 
 /// Downloads `asset` into the update directory and checks its SHA-256.
-pub fn download_verified(asset: &UpdateAsset) -> Result<PathBuf, InstallError> {
+///
+/// `on_progress(downloaded, total)` runs as bytes arrive. `total` is the
+/// response `Content-Length` when it is present, otherwise `asset.size`, and
+/// `0` when neither is known.
+pub fn download_verified(
+    asset: &UpdateAsset,
+    mut on_progress: impl FnMut(u64, u64),
+) -> Result<PathBuf, InstallError> {
     if asset.sha256.trim().is_empty() {
         return Err(InstallError::Checksum);
     }
@@ -417,11 +438,19 @@ pub fn download_verified(asset: &UpdateAsset) -> Result<PathBuf, InstallError> {
         .header("User-Agent", USER_AGENT)
         .call()
         .map_err(|e| InstallError::Other(e.to_string()))?;
+    let total = response
+        .headers()
+        .get("content-length")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(asset.size);
+    on_progress(0, total);
     let mut reader = response.body_mut().as_reader();
     let mut file = std::fs::File::create(&path).map_err(|e| InstallError::Other(e.to_string()))?;
     let mut hasher = Sha256::new();
     let mut buf = [0u8; 64 * 1024];
-    let mut total = 0u64;
+    let mut downloaded = 0u64;
     loop {
         let n = reader
             .read(&mut buf)
@@ -429,14 +458,15 @@ pub fn download_verified(asset: &UpdateAsset) -> Result<PathBuf, InstallError> {
         if n == 0 {
             break;
         }
-        total += n as u64;
-        if total > MAX_DOWNLOAD {
+        downloaded += n as u64;
+        if downloaded > MAX_DOWNLOAD {
             let _ = std::fs::remove_file(&path);
             return Err(InstallError::Other("download is larger than 512 MB".into()));
         }
         hasher.update(&buf[..n]);
         file.write_all(&buf[..n])
             .map_err(|e| InstallError::Other(e.to_string()))?;
+        on_progress(downloaded, total);
     }
     let got = hex_encode(&hasher.finalize());
     if !got.eq_ignore_ascii_case(asset.sha256.trim()) {
@@ -444,6 +474,42 @@ pub fn download_verified(asset: &UpdateAsset) -> Result<PathBuf, InstallError> {
         return Err(InstallError::Checksum);
     }
     Ok(path)
+}
+
+/// `0` when the total is unknown. Otherwise a percentage in `0..=100`.
+fn download_percent(done: u64, total: u64) -> u64 {
+    done.saturating_mul(100)
+        .checked_div(total)
+        .unwrap_or(0)
+        .min(100)
+}
+
+/// Repaint when the percentage changes. An unknown total has no percentage, so
+/// any new byte count repaints the indeterminate bar's caption.
+fn progress_changed(shown: Option<(u64, u64)>, done: u64, total: u64) -> bool {
+    let Some((prev_done, prev_total)) = shown else {
+        return true;
+    };
+    if total == 0 {
+        done != prev_done
+    } else {
+        download_percent(done, total) != download_percent(prev_done, prev_total)
+    }
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const KIB: f64 = 1024.0;
+    let n = bytes as f64;
+    let (value, unit) = if n < KIB {
+        return format!("{bytes} B");
+    } else if n < KIB * KIB {
+        (n / KIB, "KB")
+    } else if n < KIB * KIB * KIB {
+        (n / (KIB * KIB), "MB")
+    } else {
+        (n / (KIB * KIB * KIB), "GB")
+    };
+    format!("{value:.1} {unit}")
 }
 
 fn cleanup_download(path: &Path) {
@@ -735,7 +801,10 @@ fn show_check(
 }
 
 fn open_dialog(info: UpdateInfo, window: &mut Window, cx: &mut App) {
-    let view = cx.new(|_| UpdateDialog { info, busy: false });
+    let view = cx.new(|_| UpdateDialog {
+        info,
+        progress: None,
+    });
     let version = view.read(cx).info.version.clone();
     window.open_dialog(cx, move |dialog, window, _| {
         dialog
@@ -747,24 +816,96 @@ fn open_dialog(info: UpdateInfo, window: &mut Window, cx: &mut App) {
 
 struct UpdateDialog {
     info: UpdateInfo,
-    busy: bool,
+    /// `(downloaded, total)` while a download is in flight. `total` is 0 when
+    /// the size is unknown. `None` shows the action buttons.
+    progress: Option<(u64, u64)>,
+}
+
+/// Applies download ticks to the dialog. Percentage-sized steps only, so a
+/// 64 KiB chunk does not repaint on its own.
+async fn watch_download(
+    view: gpui_kit::WeakEntity<UpdateDialog>,
+    rx: std::sync::mpsc::Receiver<(u64, u64)>,
+    cx: &mut gpui_kit::AsyncWindowContext,
+) {
+    let mut shown: Option<(u64, u64)> = None;
+    loop {
+        let mut latest = None;
+        let mut closed = false;
+        loop {
+            match rx.try_recv() {
+                Ok(tick) => latest = Some(tick),
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    closed = true;
+                    break;
+                }
+            }
+        }
+        if let Some((done, total)) = latest
+            && progress_changed(shown, done, total)
+        {
+            shown = Some((done, total));
+            let _ = view.update_in(cx, |dialog, _, cx| {
+                dialog.progress = Some((done, total));
+                cx.notify();
+            });
+        }
+        if closed {
+            break;
+        }
+        cx.background_executor()
+            .timer(Duration::from_millis(100))
+            .await;
+    }
+}
+
+fn download_progress_bar(done: u64, total: u64) -> impl IntoElement {
+    let bar = if total == 0 {
+        Progress::new("update-progress").w_full().loading(true)
+    } else {
+        Progress::new("update-progress")
+            .w_full()
+            .value(download_percent(done, total) as f32)
+    };
+    let caption = if total == 0 {
+        t!("update.downloading").to_string()
+    } else {
+        t!(
+            "update.downloading_progress",
+            percent = download_percent(done, total),
+            done = format_bytes(done),
+            total = format_bytes(total)
+        )
+        .to_string()
+    };
+    v_flex().w_full().gap_2().child(bar).child(caption)
 }
 
 impl UpdateDialog {
     fn download(&mut self, window: &mut Window, cx: &mut gpui_kit::Context<Self>) {
+        if self.progress.is_some() {
+            return;
+        }
         let Some(asset) = self.info.asset.clone() else {
             cx.open_url(&self.info.page_url);
             window.close_dialog(cx);
             return;
         };
-        self.busy = true;
+        // Show the bar on the click itself. The first byte waits on DNS and
+        // TLS, and a still-enabled button looks like the click did nothing.
+        self.progress = Some((0, asset.size));
         cx.notify();
-        window.push_notification(t!("update.downloading").to_string(), cx);
         let page = self.info.page_url.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
         cx.spawn_in(window, async move |this, cx| {
+            let view = this.clone();
+            let watch = cx.spawn(async move |cx| watch_download(view, rx, cx).await);
             let result = cx
                 .background_spawn(async move {
-                    let path = download_verified(&asset)?;
+                    let path = download_verified(&asset, |done, total| {
+                        let _ = tx.send((done, total));
+                    })?;
                     match install(&path) {
                         Ok(delivery) => {
                             #[cfg(target_os = "macos")]
@@ -780,8 +921,9 @@ impl UpdateDialog {
                     }
                 })
                 .await;
+            watch.await;
             let _ = this.update_in(cx, |this, window, cx| {
-                this.busy = false;
+                this.progress = None;
                 match result {
                     #[cfg(target_os = "macos")]
                     Ok(Delivery::Replaced) => {
@@ -815,45 +957,50 @@ impl Render for UpdateDialog {
         let has_asset = self.info.asset.is_some();
         let page = self.info.page_url.clone();
         let weak = cx.entity().downgrade();
+        let progress = self.progress;
         v_flex()
             .gap_2()
             .w_full()
             .min_w_0()
             .child(t!("update.current", version = self.info.current.clone()).to_string())
             .when(!notes.is_empty(), |col| col.child(notes))
-            .child(
-                h_flex()
-                    .justify_end()
-                    .gap_2()
-                    .w_full()
-                    .child(
-                        Button::new("update-later")
-                            .label(t!("update.later").to_string())
-                            .disabled(self.busy)
-                            .on_click(|_, window, cx| window.close_dialog(cx)),
-                    )
-                    .child(
-                        Button::new("update-go")
-                            .primary()
-                            .disabled(self.busy)
-                            .label(
-                                if has_asset {
-                                    t!("update.download")
-                                } else {
-                                    t!("update.open_page")
-                                }
-                                .to_string(),
-                            )
-                            .on_click(move |_, window, cx| {
-                                if has_asset {
-                                    let _ = weak.update(cx, |this, cx| this.download(window, cx));
-                                } else {
-                                    cx.open_url(&page);
-                                    window.close_dialog(cx);
-                                }
-                            }),
-                    ),
-            )
+            .when_some(progress, |col, (done, total)| {
+                col.child(download_progress_bar(done, total))
+            })
+            .when(progress.is_none(), |col| {
+                col.child(
+                    h_flex()
+                        .justify_end()
+                        .gap_2()
+                        .w_full()
+                        .child(
+                            Button::new("update-later")
+                                .label(t!("update.later").to_string())
+                                .on_click(|_, window, cx| window.close_dialog(cx)),
+                        )
+                        .child(
+                            Button::new("update-go")
+                                .primary()
+                                .label(
+                                    if has_asset {
+                                        t!("update.download")
+                                    } else {
+                                        t!("update.open_page")
+                                    }
+                                    .to_string(),
+                                )
+                                .on_click(move |_, window, cx| {
+                                    if has_asset {
+                                        let _ =
+                                            weak.update(cx, |this, cx| this.download(window, cx));
+                                    } else {
+                                        cx.open_url(&page);
+                                        window.close_dialog(cx);
+                                    }
+                                }),
+                        ),
+                )
+            })
     }
 }
 
@@ -898,6 +1045,7 @@ mod tests {
             name: name.into(),
             url: format!("https://example.test/{name}"),
             sha256: "abc".into(),
+            size: 0,
         }
     }
 
@@ -949,6 +1097,27 @@ mod tests {
     }
 
     #[test]
+    fn nightly_label_names_the_channel_and_the_build_time() {
+        let label = version_label("0.0.1", "nightly", "2026-10-17T18:05:00Z");
+        assert_eq!(label, "nightly (2026-10-17 18:05 UTC)");
+        assert!(!label.contains("0.0.1"));
+        assert_eq!(
+            version_label("0.2.0", "stable", "2026-10-17T18:05:00Z"),
+            "0.2.0"
+        );
+    }
+
+    #[test]
+    fn progress_repaints_when_the_percent_changes() {
+        assert!(progress_changed(None, 0, 100));
+        assert!(!progress_changed(Some((0, 100)), 0, 100));
+        assert!(!progress_changed(Some((1, 1000)), 9, 1000));
+        assert!(progress_changed(Some((9, 1000)), 10, 1000));
+        assert!(progress_changed(Some((0, 0)), 1, 0));
+        assert!(!progress_changed(Some((1, 0)), 1, 0));
+    }
+
+    #[test]
     fn download_name_stays_inside_the_update_directory() {
         assert_eq!(download_file_name("../../etc/passwd"), Some("passwd"));
         assert_eq!(download_file_name("navidog.dmg"), Some("navidog.dmg"));
@@ -979,8 +1148,12 @@ mod tests {
             url: "http://127.0.0.1/missing".into(),
             sha256: "  ".into(),
             name: "navidog.dmg".into(),
+            size: 0,
         };
-        assert_eq!(download_verified(&empty), Err(InstallError::Checksum));
+        assert_eq!(
+            download_verified(&empty, |_, _| {}),
+            Err(InstallError::Checksum)
+        );
 
         let body: &'static [u8] = b"navidog-update";
         let good = hex_encode(&Sha256::digest(body));
@@ -989,8 +1162,12 @@ mod tests {
             url: url.clone(),
             sha256: "deadbeef".into(),
             name: format!("../../navidog-bad-{}.dmg", std::process::id()),
+            size: 0,
         };
-        assert_eq!(download_verified(&wrong), Err(InstallError::Checksum));
+        assert_eq!(
+            download_verified(&wrong, |_, _| {}),
+            Err(InstallError::Checksum)
+        );
         let bad_name = download_file_name(&wrong.name).unwrap();
         assert!(
             !std::env::temp_dir()
@@ -1005,8 +1182,19 @@ mod tests {
             url,
             sha256: good,
             name: name.clone(),
+            size: 0,
         };
-        let path = download_verified(&right).unwrap();
+        let mut ticks = Vec::new();
+        let path = download_verified(&right, |done, total| ticks.push((done, total))).unwrap();
+        assert!(
+            ticks.windows(2).all(|pair| pair[0].0 <= pair[1].0),
+            "{ticks:?}"
+        );
+        assert_eq!(ticks.first().copied(), Some((0, body.len() as u64)));
+        assert_eq!(
+            ticks.last().copied(),
+            Some((body.len() as u64, body.len() as u64))
+        );
         let file_name = download_file_name(&name).unwrap();
         assert_eq!(
             path,

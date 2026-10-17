@@ -99,6 +99,9 @@ jobs:
       NAVIDOG_BUILD_TIMESTAMP: ${{ needs.prepare_vars.outputs.build_rfc3339 }}
     steps:
       - uses: actions/checkout@v7
+      - name: Stamp the tag version into Cargo.toml
+        if: startsWith(github.ref, 'refs/tags/')
+        run: ./scripts/stamp-release-version.sh
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
@@ -246,6 +249,10 @@ jobs:
       NAVIDOG_BUILD_TIMESTAMP: ${{ needs.prepare_vars.outputs.build_rfc3339 }}
     steps:
       - uses: actions/checkout@v7
+      - name: Stamp the tag version into Cargo.toml
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: ./scripts/stamp-release-version.sh
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
@@ -359,6 +366,9 @@ jobs:
       NAVIDOG_BUILD_TIMESTAMP: ${{ needs.prepare_vars.outputs.build_rfc3339 }}
     steps:
       - uses: actions/checkout@v7
+      - name: Stamp the tag version into Cargo.toml
+        if: startsWith(github.ref, 'refs/tags/')
+        run: ./scripts/stamp-release-version.sh
       - name: Install Linux dependencies
         run: |
           sudo apt-get update

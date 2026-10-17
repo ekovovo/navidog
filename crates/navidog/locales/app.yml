@@ -705,6 +705,9 @@ update:
   downloading:
     en: Downloading…
     zh-CN: 正在下载…
+  downloading_progress:
+    en: "Downloading %{percent}% · %{done} / %{total}"
+    zh-CN: "正在下载 %{percent}% · %{done} / %{total}"
   uptodate:
     en: Navidog is up to date.
     zh-CN: Navidog 已是最新版本。
