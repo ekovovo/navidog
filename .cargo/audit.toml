@@ -1,0 +1,7 @@
+# Read by `cargo audit`, which the `security-audit` workflow runs.
+# Keep the ignored advisories in sync with the `[advisories] ignore` list in
+# `deny.toml`, which the `cargo-deny` job uses for the same Cargo.lock.
+[advisories]
+# No patched release exists (`patched = []`). `rsa` comes in through russh and is
+# only used for local SSH keys, not for networked RSA signing.
+ignore = ["RUSTSEC-2023-0071"]

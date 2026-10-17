@@ -10,6 +10,10 @@ on:
 
 permissions:
   contents: read
+  # `rustsec/audit-check` publishes its result as a check run on push/PR and as an
+  # issue on the weekly schedule; without `checks: write` the check run never gets
+  # created and the step dies with "Resource not accessible by integration".
+  checks: write
   issues: write
 
 jobs:

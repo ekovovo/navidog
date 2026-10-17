@@ -242,6 +242,7 @@ M2 的任务都已完成，逐项记录见 git 历史；M2 的功能状态仍在
 | --- | --- | --- |
 | 格式与静态检查 | `cargo fmt --all --check`、`cargo clippy --workspace --all-targets -- -D warnings` | CI 执行 |
 | 裸值检查 | `scripts/check-raw-px.sh` | CI 执行 |
+| 依赖审计 | `cargo deny --all-features check`、`cargo audit` | CI 的 security-audit 工作流执行，配置在根目录 `deny.toml` 和 `.cargo/audit.toml`；只有直接依赖的 unmaintained 会失败，无补丁的 `RUSTSEC-2023-0071`（rsa）在两边都忽略 |
 | 单元测试与 headless UI 测试 | `cargo test --workspace` | CI 执行 |
 | 实库测试 | `docker compose up -d --wait && NAVIDOG_LIVE=1 cargo test -p navidog-db --test live` | CI 的 integration 工作流和本地都执行 |
 | 截图 | `cargo test -p navidog --test snapshot` | 本地执行，输出 `target/snapshots/` |

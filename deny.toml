@@ -1,9 +1,23 @@
 [advisories]
 yanked = "warn"
 
+# Only unmaintained advisories about crates we depend on directly fail the check.
+# The unmaintained crates in this tree (`instant`, `paste`, `proc-macro-error2`,
+# `rustls-pemfile`, `rustybuzz`, `ttf-parser`) are pulled in transitively by the
+# pinned gpui-kit 0.7.3, mysql_async and usvg; none of them can be bumped here.
+unmaintained = "workspace"
+
+ignore = [
+    # No patched release exists (`patched = []` in the advisory). The timing side
+    # channel needs a remote attacker observing RSA *signing*; navidog only uses
+    # `rsa` through russh for local SSH keys. Mirrored in `.cargo/audit.toml`.
+    { id = "RUSTSEC-2023-0071", reason = "rsa has no fixed release, not exploitable for local SSH keys" },
+]
+
 [licenses]
 version = 2
 allow = [
+    "0BSD",
     "Apache-2.0",
     "MIT",
     "BSD-2-Clause",

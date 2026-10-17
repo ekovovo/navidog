@@ -3,6 +3,7 @@ name = "xtask"
 version = "0.0.0"
 edition = "2024"
 publish = false
+license.workspace = true
 
 [dependencies]
 nibarchive = "0.1"
