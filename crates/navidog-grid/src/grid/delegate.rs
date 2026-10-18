@@ -419,9 +419,15 @@ impl TableDelegate for GridDelegate {
                         cx.notify();
                     }),
                 )
-                .on_mouse_down(
-                    MouseButton::Right,
-                    cx.listener(move |t, e: &MouseDownEvent, window, cx| {
+                // Capture, not bubble. The table wraps this header in a context menu whose
+                // right-click listener is registered after the header and therefore runs first
+                // on the bubble pass. Stopping there is too late: the empty popup takes focus
+                // in a defer, and the native menu item never reaches the grid.
+                .capture_any_mouse_down(cx.listener(
+                    move |t, e: &MouseDownEvent, window, cx| {
+                        if e.button != MouseButton::Right {
+                            return;
+                        }
                         cx.stop_propagation();
                         // Right-click does not focus the table, and the menu
                         // dispatches to whoever is focused.
@@ -446,8 +452,8 @@ impl TableDelegate for GridDelegate {
                             at_server,
                         )
                         .show(e.position, window, cx);
-                    }),
-                )
+                    },
+                ))
             })
     }
 

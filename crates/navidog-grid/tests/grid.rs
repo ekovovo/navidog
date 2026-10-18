@@ -476,6 +476,104 @@ fn right_click_focuses_the_grid_so_the_menu_item_runs(cx: &mut TestAppContext) {
     assert_eq!(copied.as_deref(), Some("1"));
 }
 
+/// A column-header right-click focuses the grid. The table's own context menu
+/// is empty for a header and used to take focus after this click, so a menu
+/// item dispatched once that defer ran never reached the grid.
+#[gpui_kit::test]
+fn header_right_click_keeps_focus_on_the_grid(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        navidog_ui::theme::init(cx);
+        navidog_grid::init(cx);
+    });
+    let (handle, grid, focus): (_, Entity<ResultGrid>, FocusHandle) = cx.update(|cx| {
+        // raw-px: test window size
+        let test_size = size(gpui_kit::px(800.), gpui_kit::px(400.));
+        let bounds = gpui_kit::Bounds {
+            origin: Default::default(),
+            size: test_size,
+        };
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
+            ..Default::default()
+        };
+        let (handle, host) = gpui_kit::open_window(options, cx, |window, cx| {
+            let grid = cx.new(|cx| ResultGrid::new(window, cx));
+            let focus = cx.focus_handle();
+            cx.new(|_| MenuHost { focus, grid })
+        })
+        .unwrap();
+        let grid = host.read(cx).grid.clone();
+        let focus = host.read(cx).focus.clone();
+        (handle, grid, focus)
+    });
+    cx.update(|cx| {
+        grid.update(cx, |g, cx| {
+            let cell = |s: &str| Some(s.to_string().into());
+            g.set_data(
+                vec![col("id", true), col("name", false)],
+                vec![vec![cell("1"), cell("a")]],
+                cx,
+            )
+        })
+    });
+
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.render_frame(cx);
+        window.focus(&focus, cx);
+        let header = window
+            .find(ElementId::NamedInteger("col-header".into(), 1))
+            .bounds();
+        // Left side of the header, on the name. The center can land on the sort icon.
+        let position = gpui_kit::point(header.origin.x + header.size.width / 4., header.center().y);
+        window.dispatch_event(
+            MouseMoveEvent {
+                position,
+                pressed_button: None,
+                modifiers: Modifiers::none(),
+            }
+            .to_platform_input(),
+            cx,
+        );
+        window.render_frame(cx);
+        window.dispatch_event(
+            MouseDownEvent {
+                button: MouseButton::Right,
+                position,
+                modifiers: Modifiers::none(),
+                click_count: 1,
+                first_mouse: false,
+            }
+            .to_platform_input(),
+            cx,
+        );
+        window.dispatch_event(
+            MouseUpEvent {
+                button: MouseButton::Right,
+                position,
+                modifiers: Modifiers::none(),
+                click_count: 1,
+            }
+            .to_platform_input(),
+            cx,
+        );
+    })
+    .unwrap();
+    // The empty popup focuses itself from a defer. Park so that runs before the item.
+    cx.run_until_parked();
+    cx.update_window(handle, |_, window, cx| {
+        window.dispatch_action(
+            Box::new(navidog_grid::grid::CopyFieldName { name: "id".into() }),
+            cx,
+        );
+    })
+    .unwrap();
+    cx.run_until_parked();
+    let copied = cx.update(|cx| cx.read_from_clipboard().and_then(|c| c.text()));
+    assert_eq!(copied.as_deref(), Some("id"));
+}
+
 /// The empty tail past the last field is not a cell. Clicking it selects the whole row.
 /// A data cell still selects one cell, and the blank row under the records selects nothing.
 #[gpui_kit::test]
