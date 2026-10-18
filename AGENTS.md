@@ -26,6 +26,7 @@ navidog 用 gpui-kit 0.7 复刻 Navicat Premium 17（macOS）。决策、架构�
 
 - 切换外观时，只有带 `highlight` 的主题才会替换编辑器配色，所以 `themes/navicat.json` 的两套主题都要写全 `highlight`（`editor.*` 和 `syntax`）。没开 tree-sitter 特性时，gpui-component 用的高亮器存根不认 `editor.*` 键，测试主题的 crate 要开 `tree-sitter-sql`。
 - `DataTable` 只在按下和抬起是同一格时发出 `SelectCell`；单元格不进测试元素注册表，UI 测试用 `click_at(("row", n), 偏移)` 点击。
+- `DataTable` 把表头和表体包在 `context_menu` 里。0.7.3 里这个菜单是空的、也不绘制，仍会在 `defer` 里把焦点交给 `PopupMenu`。右键监听注册在子元素之后，冒泡时先跑，子元素里的 `stop_propagation` 赶不上。自己的右键菜单写在接到点击的元素上：`capture_any_mouse_down` 里对右键 `stop_propagation`，先 `focus` 挂着 `on_action` 的元素，再 `NativeMenu::show`。表头在 `crates/navidog-grid/src/grid/delegate.rs`。单元格用 `emit(RightClickedCell)`，这个效果排在浮层抢焦点之后，处理时把焦点交回表格。排序图标是 DataTable 画在 `render_th` 旁边的，不在这份捕获里。样式树以前同样用空菜单抢焦点；导航器行用基础树，右键时先聚焦导航器再弹出菜单。
 - `Tree` 和 `DataTable` 的行由 `TreeState` / `TableState` 自己的视图渲染。只影响行外观的状态（重命名框、编辑中的单元格）改变后，要通知这个状态实体，只通知外层面板不会重绘行。
 - 测试元素注册表只登记按钮、列表项等元素，普通容器的 id 用 `find` 找不到。
 - headless 测试中 `dispatch_action` 之前要先 `render_frame` 并聚焦目标元素；`RadioGroup` 的子项 id 是 `ElementId::Integer(序号)`。

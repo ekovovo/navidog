@@ -459,6 +459,9 @@ fn right_click_focuses_the_grid_so_the_menu_item_runs(cx: &mut TestAppContext) {
         );
     })
     .unwrap();
+    // The table's context menu focuses itself from a defer. Park so that runs
+    // before the item, the same window the header menu failed in.
+    cx.run_until_parked();
     // RightClickedCell is emitted, so selection and focus land after that update.
     // A native menu leaves that focus in place, so Copy dispatched now hits the grid.
     // Linux draws the menu in the window and focuses it; the Copy item dispatches
