@@ -351,6 +351,10 @@ mod tests {
     /// Fields and the other table children share a `(scope, table)` key. Both loads must finish.
     #[gpui_kit::test]
     fn fields_and_children_of_one_table_both_finish(cx: &mut gpui_kit::TestAppContext) {
+        // The loads await `runtime::spawn` handles, so their completion wakes the
+        // foreground task from the db thread. That is real IO: allow it, or the
+        // scheduler records the cross-thread wake as non-determinism.
+        cx.executor().allow_parking();
         let catalog = cx.new(|_| Catalog::default());
         let scope = Scope::new("c", "db", None);
         let columns = runtime::spawn(async { Ok(vec![column("id")]) });

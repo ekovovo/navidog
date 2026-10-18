@@ -31,6 +31,7 @@ navidog 用 gpui-kit 0.7 复刻 Navicat Premium 17（macOS）。决策、架构�
 - 测试元素注册表只登记按钮、列表项等元素，普通容器的 id 用 `find` 找不到。
 - headless 测试中 `dispatch_action` 之前要先 `render_frame` 并聚焦目标元素；`RadioGroup` 的子项 id 是 `ElementId::Integer(序号)`。
 - headless 测试（`TestAppContext`、`HeadlessAppContext`）的调度器只在 `advance_clock` 时触发定时器。编辑器的文本超过 256 KB 或同步解析超过 2ms 时改在后台解析，前面有 150ms 防抖；不推进时钟就一直没有语法高亮，量出来的帧时间也偏低。防抖、自动保存这类定时逻辑同样要推进时钟。
+- 测试里等真实数据库结果（`Sessions::run_rel`、`navidog_db::runtime::spawn` 的 `JoinHandle`）时，测试开头要 `cx.executor().allow_parking()`，否则结果从 `navidog-db` 线程唤醒前台任务的一刻被调度器记成 nondeterminism，测试结束时报 “Detected activity on thread … Your test is not deterministic”；前台任务先被 poll 过、后台任务后完成时才触发，所以表现为偶发。
 - 同一个 `update_window` 闭包里的 `notify` 要到闭包结束才生效。会改变界面的命令放在单独的 `update_window` 里派发，接着 `run_until_parked()`，然后再输入文字或按键。
 - 编辑器自带的键（`Input` context 里的 ⌘.、⌘F、Tab、Esc、回车）在外层 key context 里绑不过它：改绑写成后代谓词，如 `"QueryEditor > Input"`；要在编辑器处理之前截获 Tab、回车、Esc、Copy，用外层元素的 `capture_action`。
 - `EditorState::set_scroll_offset` 不夹住范围，滚过末尾显示一片空白。滚到最后一行按行数、行高和视口高度自己算（`navidog_query::history::scroll_to_end`）。
