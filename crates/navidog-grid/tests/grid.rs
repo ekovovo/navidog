@@ -563,9 +563,16 @@ fn header_right_click_keeps_focus_on_the_grid(cx: &mut TestAppContext) {
         );
     })
     .unwrap();
-    // The empty popup focuses itself from a defer. Park so that runs before the item.
+    // Park so the menu built by the click above is rendered: the Linux item below
+    // resolves it through the element registry.
     cx.run_until_parked();
+    // A native menu leaves focus on the grid, so the item dispatched now hits it.
+    // Linux draws the menu in the window and focuses it; the item dispatches to the
+    // grid captured before the menu opened. Copy Field Name follows select-column.
     cx.update_window(handle, |_, window, cx| {
+        #[cfg(target_os = "linux")]
+        window.within("popup-menu").click(ElementId::Integer(1), cx);
+        #[cfg(not(target_os = "linux"))]
         window.dispatch_action(
             Box::new(navidog_grid::grid::CopyFieldName { name: "id".into() }),
             cx,
