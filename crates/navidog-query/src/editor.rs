@@ -413,6 +413,9 @@ impl QueryEditor {
             };
             editor.update(cx, |e, _| {
                 e.lsp_mut().completion_provider = Some(std::rc::Rc::new(provider));
+                e.lsp_mut().set_completion_highlighter(std::rc::Rc::new(
+                    crate::completion::highlight_label,
+                ));
                 // raw-px: room for "column · type" labels
                 e.lsp_mut().completion_menu.max_width = px(420.);
             });

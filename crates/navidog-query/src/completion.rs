@@ -11,7 +11,9 @@ use std::rc::Rc;
 use std::sync::{Arc, LazyLock};
 
 use anyhow::Result;
-use gpui_kit::component::input::{CompletionProvider, Rope, RopeExt as _};
+use gpui_kit::component::input::{
+    CompletionProvider, Rope, RopeExt as _, highlight_characters, highlight_contains,
+};
 use gpui_kit::{App, Context, Task, WeakEntity, Window};
 use lsp_types::{
     CompletionContext, CompletionItem, CompletionResponse, CompletionTextEdit, TextEdit,
@@ -228,6 +230,19 @@ fn subsequence_gaps(label: &str, needle: &str) -> Option<u32> {
     Some((span - needle.chars().count()) as u32)
 }
 
+/// Byte ranges the completion menu paints. A contiguous hit (prefix or
+/// contains) wins, so `info` in `in_info` paints that span rather than the
+/// looser characters around it. Otherwise each matched character is painted,
+/// and adjacent hits merge into one range.
+pub(crate) fn highlight_label(query: &str, item: &CompletionItem) -> Vec<Range<usize>> {
+    let contiguous = highlight_contains(query, item);
+    if contiguous.is_empty() {
+        highlight_characters(query, item)
+    } else {
+        contiguous
+    }
+}
+
 /// Feeds the editor's completion menu.
 pub(crate) struct Provider {
     pub editor: WeakEntity<QueryEditor>,
@@ -313,25 +328,17 @@ impl CompletionProvider for Provider {
             start: text.offset_to_position(range.start + from),
             end: text.offset_to_position(range.end + from),
         };
-        let typed = window_text[range.clone()].to_lowercase();
         let items = list
             .into_iter()
             .take(200)
-            .map(|c| {
-                // The menu only paints a prefix. An empty filter_text skips that
-                // paint, so a contains or subsequence hit is not highlighted on
-                // characters that did not match.
-                let prefix = c.label.to_lowercase().starts_with(&typed);
-                CompletionItem {
-                    label: c.label,
-                    detail: Some(c.detail),
-                    filter_text: (!prefix).then(String::new),
-                    text_edit: Some(CompletionTextEdit::Edit(TextEdit {
-                        range: lsp_range,
-                        new_text: c.insert,
-                    })),
-                    ..CompletionItem::default()
-                }
+            .map(|c| CompletionItem {
+                label: c.label,
+                detail: Some(c.detail),
+                text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                    range: lsp_range,
+                    new_text: c.insert,
+                })),
+                ..CompletionItem::default()
             })
             .collect();
         Task::ready(Ok(CompletionResponse::Array(items)))
@@ -554,5 +561,28 @@ mod tests {
         assert!(labels("MOCFG|").contains(&"mount_cfgs".to_string()));
         assert!(labels("munt|").contains(&"mount_cfgs".to_string()));
         assert!(!labels("moxnt|").iter().any(|l| l == "mount_cfgs"));
+    }
+
+    fn label(text: &str) -> CompletionItem {
+        CompletionItem {
+            label: text.into(),
+            ..CompletionItem::default()
+        }
+    }
+
+    #[test]
+    fn highlight_paints_the_matched_characters() {
+        assert_eq!(highlight_label("act", &label("actor")), vec![0..3]);
+        assert_eq!(highlight_label("info", &label("actor_info")), vec![6..10]);
+        assert_eq!(highlight_label("info", &label("in_info")), vec![3..7]);
+        assert_eq!(
+            highlight_label("mocfg", &label("mount_cfgs")),
+            vec![0..2, 6..9]
+        );
+        assert_eq!(
+            highlight_label("MOCFG", &label("mount_cfgs")),
+            vec![0..2, 6..9]
+        );
+        assert!(highlight_label("moxnt", &label("mount_cfgs")).is_empty());
     }
 }
