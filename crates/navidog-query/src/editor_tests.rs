@@ -234,6 +234,85 @@ fn runs_scripts_into_messages_summary_and_editable_results(cx: &mut TestAppConte
         );
     });
 
+    // Selected/current execution must not run the other statements in the document.
+    let script = "SELECT 11; SELECT 22; SELECT 33;";
+    set_text(cx, handle, &editor, script);
+    cx.update(|cx| {
+        editor.read(cx).editor.clone().update(cx, |s, cx| {
+            s.set_selected_range(11..20, cx);
+        });
+    });
+    run(cx, handle, &editor, RunKind::Selected);
+    idle(cx, &editor);
+    cx.update(|cx| {
+        let e = editor.read(cx);
+        assert_eq!(e.results.rows.len(), 1);
+        assert_eq!(e.results.tabs.len(), 1);
+        let Body::Grid(view) = &e.results.tabs[0].body else {
+            panic!("grid result")
+        };
+        assert_eq!(view.read(cx).rows, [vec![Some("22".into())]]);
+    });
+    cx.update(|cx| {
+        editor.read(cx).editor.clone().update(cx, |s, cx| {
+            s.set_selected_range(25..25, cx);
+        });
+    });
+    run(cx, handle, &editor, RunKind::Current);
+    idle(cx, &editor);
+    cx.update(|cx| {
+        let e = editor.read(cx);
+        assert_eq!(e.results.rows.len(), 1);
+        let Body::Grid(view) = &e.results.tabs[0].body else {
+            panic!("grid result")
+        };
+        assert_eq!(view.read(cx).rows, [vec![Some("33".into())]]);
+    });
+
+    // The result limit must not truncate execution or its summary.
+    set_text(cx, handle, &editor, &"SELECT 1;".repeat(21));
+    run(cx, handle, &editor, RunKind::All);
+    idle(cx, &editor);
+    cx.update(|cx| {
+        let e = editor.read(cx);
+        assert_eq!(e.results.tabs.len(), 20);
+        assert_eq!(e.results.rows.len(), 21);
+    });
+
+    // Cancel only after the SQLite session is executing, then skip the next statement.
+    set_text(
+        cx,
+        handle,
+        &editor,
+        "WITH RECURSIVE n(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM n WHERE x<1000000000) SELECT sum(x) FROM n; SELECT 99;",
+    );
+    run(cx, handle, &editor, RunKind::All);
+    wait(cx, "SQLite to hold the running session", |cx| {
+        cx.update(|cx| {
+            editor
+                .read(cx)
+                .live
+                .as_ref()
+                .is_some_and(|live| live.session.try_lock().is_err())
+        })
+    });
+    cx.update_window(handle, |_, window, cx| {
+        editor
+            .read(cx)
+            .editor
+            .clone()
+            .update(cx, |s, cx| s.focus(window, cx));
+        window.render_frame(cx);
+        window.press("cmd-.", cx);
+    })
+    .unwrap();
+    idle(cx, &editor);
+    cx.update(|cx| {
+        let e = editor.read(cx);
+        assert_eq!(e.results.rows.len(), 1);
+        assert!(e.results.rows[0].error);
+    });
+
     // Parameters: the dialog is prefilled with the last value; raw mode skips the quotes
     set_text(cx, handle, &editor, "SELECT [$v] AS v, [$w] AS w");
     cx.update(|cx| {
@@ -825,6 +904,49 @@ fn history_log_follows_the_log_and_the_console_runs_statements(cx: &mut TestAppC
     );
     assert!(out.contains("| x |"), "{out}");
 
+    // History navigation goes through the editor's real key handlers.
+    for (key, expected) in [("up", "SELECT v FROM c\nWHERE id = 1;"), ("down", "")] {
+        cx.update_window(handle, |_, window, cx| {
+            let input = console.read(cx).input_state();
+            input.update(cx, |s, cx| {
+                // Up only walks history at the first line; Down at the last.
+                let caret = if key == "up" { 0 } else { s.value().len() };
+                s.set_selected_range(caret..caret, cx);
+                s.focus(window, cx);
+            });
+            window.render_frame(cx);
+            window.press(key, cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        assert_eq!(
+            cx.update(|cx| console.read(cx).input_state().read(cx).value().to_string()),
+            expected
+        );
+    }
+
+    type_and_enter(
+        cx,
+        "WITH RECURSIVE n(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM n WHERE x<1000000000) SELECT sum(x) FROM n;",
+    );
+    wait(cx, "the console statement to execute", |cx| {
+        cx.update(|cx| console.read(cx).session_busy())
+    });
+    cx.update_window(handle, |_, window, cx| {
+        let input = console.read(cx).input_state();
+        input.update(cx, |s, cx| s.focus(window, cx));
+        window.render_frame(cx);
+        window.press("cmd-.", cx);
+    })
+    .unwrap();
+    wait(cx, "the console cancellation", |cx| {
+        cx.update(|cx| console.read(cx).output_text().contains("ERROR"))
+    });
+    type_and_enter(cx, "SELECT 42 AS resumed;");
+    wait(cx, "the console to run after cancellation", |cx| {
+        cx.update(|cx| console.read(cx).output_text().contains("| 42 "))
+    });
+
     // The history log picks the statement up on its next poll
     wait(cx, "the history log", |cx| {
         cx.executor().advance_clock(Duration::from_millis(300));
@@ -835,4 +957,189 @@ fn history_log_follows_the_log_and_the_console_runs_statements(cx: &mut TestAppC
                 .contains("SELECT v FROM c\nWHERE id = 1")
         })
     });
+}
+
+/// Exercises the query editor against the disposable Compose databases.
+#[gpui_kit::test]
+fn live_editor_runs_selection_current_errors_and_stop(cx: &mut TestAppContext) {
+    if std::env::var_os("NAVIDOG_LIVE").is_none() {
+        return;
+    }
+    let (_home, _) = isolate_home("live-editor");
+    cx.executor().allow_parking();
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        navidog_core::init(cx);
+        navidog_ui::theme::init(cx);
+        navidog_db::init(cx);
+        navidog_grid::init(cx);
+        crate::init(cx);
+        ConnectionStore::global(cx).update(cx, |s, _| s.set_key(Key::random()));
+    });
+    for (driver, port, database, slow) in [
+        ("mysql", 13306, "sakila", "SELECT SLEEP(30)"),
+        ("mariadb", 13307, "sakila", "SELECT SLEEP(30)"),
+        ("postgres", 15432, "pagila", "SELECT pg_sleep(30)"),
+    ] {
+        let id = cx.update(|cx| {
+            ConnectionStore::global(cx).update(cx, |s, cx| {
+                let mut c = Connection::new(driver);
+                c.name = format!("acceptance-{driver}");
+                c.general.host = "127.0.0.1".into();
+                c.general.port = Some(port);
+                c.general.database = Some(database.into());
+                let key = s.key().unwrap();
+                navidog_core::store::ConnectionsFile::set_secret(
+                    &mut c,
+                    navidog_core::connection::SecretField::Password,
+                    Some("navidog"),
+                    &key,
+                );
+                let id = c.id.clone();
+                s.upsert(c, &[], cx).unwrap();
+                id
+            })
+        });
+        cx.update(|cx| {
+            Sessions::global(cx).update(cx, |s, cx| {
+                s.open(
+                    id.clone(),
+                    Secrets {
+                        password: Some("navidog".into()),
+                        ..Default::default()
+                    },
+                    cx,
+                )
+            })
+        });
+        wait(cx, "the live connection", |cx| {
+            cx.update(|cx| Sessions::global(cx).read(cx).state(&id).is_open())
+        });
+        let (handle, editor) = cx.update(|cx| {
+            let mut editor = None;
+            let handle = gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+                let e = QueryEditor::new(
+                    QuerySource::Untitled(1),
+                    Target {
+                        connection: Some(id.clone()),
+                        database: Some(database.into()),
+                        schema: None,
+                    },
+                    String::new(),
+                    window,
+                    cx,
+                );
+                editor = Some(e.clone());
+                cx.new(|_| Host { editor: e })
+            })
+            .unwrap();
+            (handle.0, editor.unwrap())
+        });
+        for (kind, range, value) in [
+            (RunKind::Selected, 11..20, "22"),
+            (RunKind::Current, 25..25, "33"),
+        ] {
+            set_text(cx, handle, &editor, "SELECT 11; SELECT 22; SELECT 33;");
+            cx.update(|cx| {
+                editor
+                    .read(cx)
+                    .editor
+                    .clone()
+                    .update(cx, |s, cx| s.set_selected_range(range, cx))
+            });
+            run(cx, handle, &editor, kind);
+            idle(cx, &editor);
+            cx.update(|cx| {
+                let e = editor.read(cx);
+                assert_eq!(e.results.rows.len(), 1, "{driver}");
+                let Body::Grid(view) = &e.results.tabs[0].body else {
+                    panic!("grid")
+                };
+                assert_eq!(view.read(cx).rows, [vec![Some(value.into())]], "{driver}");
+            });
+        }
+        if driver != "postgres" {
+            set_text(
+                cx,
+                handle,
+                &editor,
+                "DROP PROCEDURE IF EXISTS navidog_acceptance_proc;\nDELIMITER $$\nCREATE PROCEDURE navidog_acceptance_proc() BEGIN SELECT 7 AS n; END$$\nDELIMITER ;\n-- NAME:routine\nCALL navidog_acceptance_proc();\nDROP PROCEDURE navidog_acceptance_proc;",
+            );
+            run(cx, handle, &editor, RunKind::All);
+            idle(cx, &editor);
+            cx.update(|cx| {
+                let e = editor.read(cx);
+                assert!(e.results.rows.iter().all(|row| !row.error), "{driver}");
+                assert_eq!(e.results.tabs[0].name, "routine");
+                let Body::Grid(view) = &e.results.tabs[0].body else {
+                    panic!("grid")
+                };
+                assert_eq!(view.read(cx).rows, [vec![Some("7".into())]]);
+            });
+        }
+        for (continue_on_error, count) in [(false, 2), (true, 3)] {
+            cx.update(|cx| Settings::update(cx, |s| s.continue_on_error = continue_on_error));
+            set_text(
+                cx,
+                handle,
+                &editor,
+                "SELECT 1; SELECT * FROM navidog_missing_acceptance_table; SELECT 2;",
+            );
+            run(cx, handle, &editor, RunKind::All);
+            idle(cx, &editor);
+            cx.update(|cx| {
+                let e = editor.read(cx);
+                assert_eq!(e.results.rows.len(), count, "{driver}");
+                assert!(e.results.rows[1].error);
+                assert_eq!(e.editor.read(cx).diagnostics().unwrap().len(), 1);
+            });
+        }
+        set_text(cx, handle, &editor, &format!("{slow}; SELECT 99;"));
+        run(cx, handle, &editor, RunKind::All);
+        wait(cx, "the cancellable live session", |cx| {
+            cx.update(|cx| editor.read(cx).live.is_some())
+        });
+        wait(cx, "the server to execute the slow statement", |_| {
+            runtime::runtime().block_on(async {
+                let driver: Arc<dyn navidog_db::Driver> = match driver {
+                    "postgres" => Arc::new(navidog_db::postgres::PostgresDriver::default()),
+                    "mariadb" => Arc::new(navidog_db::mysql::MySqlDriver::mariadb()),
+                    _ => Arc::new(navidog_db::mysql::MySqlDriver::mysql()),
+                };
+                let mut session = connect(driver, ConnectParams {
+                    host: "127.0.0.1".into(), port,
+                    user: if port == 15432 { "postgres" } else { "root" }.into(),
+                    password: Some("navidog".into()), database: Some(database.into()),
+                    ..Default::default()
+                }).await.unwrap();
+                let check = if port == 15432 {
+                    "SELECT COUNT(*) FROM pg_stat_activity WHERE state = 'active' AND query LIKE 'SELECT pg_sleep(30)%'"
+                } else {
+                    "SELECT COUNT(*) FROM information_schema.PROCESSLIST WHERE INFO LIKE 'SELECT SLEEP(30)%'"
+                };
+                let sets = session.relational().unwrap().execute(check).await.unwrap();
+                let active = sets[0].rows[0][0].as_deref() != Some("0");
+                session.close().await.unwrap();
+                active
+            })
+        });
+        cx.update_window(handle, |_, window, cx| {
+            editor
+                .read(cx)
+                .editor
+                .clone()
+                .update(cx, |s, cx| s.focus(window, cx));
+            window.render_frame(cx);
+            window.press("cmd-.", cx);
+        })
+        .unwrap();
+        idle(cx, &editor);
+        cx.update(|cx| {
+            assert_eq!(
+                editor.read(cx).results.rows.len(),
+                1,
+                "{driver}: stop skips following statements"
+            )
+        });
+    }
 }

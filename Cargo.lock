@@ -5110,6 +5110,7 @@ dependencies = [
  "semver",
  "serde_json",
  "sqlformat",
+ "unicode-width",
 ]
 
 [[package]]

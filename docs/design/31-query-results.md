@@ -209,7 +209,7 @@ SELECT * FROM nope
   (1 row)
   ```
 
-  不返回结果集的语句写 `Query OK, 1 row affected (0.01 sec)`，错误写 `ERROR 1146: Table 'sakila.nope' doesn't exist`（PostgreSQL 是 `ERROR:  relation "nope" does not exist`）。数字列右对齐，NULL 显示为 `NULL`。SQLite 不用 sqlite3 默认的竖线列表，因为不便阅读。表格格式化是纯函数，放在 `navidog-util`。
+  不返回结果集的语句写 `Query OK, 1 row affected (0.01 sec)`，错误写 `ERROR 1146: Table 'sakila.nope' doesn't exist`（PostgreSQL 是 `ERROR:  relation "nope" does not exist`）。数字列右对齐，NULL 显示为 `NULL`。列宽、补空格和表头居中统一按 Unicode 显示宽度计算，覆盖中日韩宽字符、全角字符和组合字符。SQLite 不用 sqlite3 默认的竖线列表，因为不便阅读。表格格式化是纯函数，放在 `navidog-util`。
 - 输出区最多保留最近 10,000 行。ponytail: 更早的输出丢弃；需要时再加“保存输出”。每条语句同样写进历史日志。
 
 ## 8. 菜单与快捷键
@@ -253,15 +253,15 @@ SELECT * FROM nope
 
 ## 11. 验收清单
 
-- [ ] 三种数据库：运行、运行已选择的、运行当前语句、停止都正确；多条语句各自写进消息和摘要；出错时停下并标出语句，勾选“遇到错误时继续”时执行完全部。
-- [ ] 用 `DELIMITER $$` 创建存储过程后能调用；`-- NAME:` 改了结果选项卡的名称；超过 20 个结果集时只显示 20 个。
+- [x] 三种数据库：运行、运行已选择的、运行当前语句、停止都正确；多条语句各自写进消息和摘要；出错时停下并标出语句，勾选“遇到错误时继续”时执行完全部。（SQLite：`runs_scripts_into_messages_summary_and_editable_results`；MySQL、MariaDB、PostgreSQL：`NAVIDOG_LIVE=1 cargo test -p navidog-query live_editor`。停止前先确认服务端正在执行慢查询。）
+- [x] 用 `DELIMITER $$` 创建存储过程后能调用；`-- NAME:` 改了结果选项卡的名称；超过 20 个结果集时只显示 20 个。（MySQL、MariaDB 的 `live_editor_runs_selection_current_errors_and_stop` 创建、调用、删除测试过程并验证结果名称；SQLite 编辑器测试验证 21 条均执行但只保留 20 个结果。）
 - [x] 查询参数：同名参数只问一次，原始模式不加引号，上次输入的值预先填好。
 - [x] 结果编辑：`SELECT * FROM actor` 可以编辑并提交；联接多表的结果、没有主键的表、`CALL` 返回的结果都显示“只读”。
 - [x] 固定的结果在再次运行后保留，悬停显示信息。（再次运行见查询编辑器测试；悬停文案是 `RunInfo::lines`，见 `pinned_hover_lists_when_and_where`）
 - [x] 勾选“保留之前的查询结果”后，再次运行留下上次的结果，当前页是这次新建的；消息和摘要只记这一次。标签上的关闭按钮能关掉一页。焦点在 SQL 编辑器时，右键的固定动作仍然生效。
 - [ ] 解释：MySQL 8、MariaDB、PostgreSQL、SQLite 的各个视图都正确；调低耗时阈值后节点数字变红；统计信息的耗时合计等于根节点的成本。
 - [x] 历史日志查看器实时显示所有语句；仅显示错误、暂停和恢复、表头开关都生效；QueryExec.log 的格式正确，重启后清空。
-- [ ] 命令列界面能执行多行语句、续行、翻历史、取消；输出的表格对齐。
+- [x] 命令列界面能执行多行语句、续行、翻历史、取消；输出的表格对齐。（`history_log_follows_the_log_and_the_console_runs_statements` 通过真实按键验证续行、历史、取消和取消后再次执行；`unicode_columns_align_by_display_width` 覆盖中日韩、全角和组合字符的列宽。）
 - [x] PostgreSQL 开 SSL（require）时，“停止”能取消正在执行的语句。
 - [x] MySQL 设置读取超时 2 秒后，`SELECT SLEEP(5)` 被取消并报告超时。
 - [ ] 消息页的措辞与 Navicat 并排核对。

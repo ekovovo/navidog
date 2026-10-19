@@ -12,3 +12,4 @@ chrono.workspace = true
 semver = "1"
 serde_json.workspace = true
 sqlformat = "0.5"
+unicode-width = "0.2.2"

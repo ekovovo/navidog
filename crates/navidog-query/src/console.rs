@@ -500,6 +500,13 @@ impl Console {
     }
 
     #[cfg(test)]
+    pub(crate) fn session_busy(&self) -> bool {
+        self.session
+            .as_ref()
+            .is_some_and(|session| session.try_lock().is_err())
+    }
+
+    #[cfg(test)]
     pub(crate) fn has_session(&self) -> bool {
         self.session.is_some()
     }

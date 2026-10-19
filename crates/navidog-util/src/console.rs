@@ -1,6 +1,6 @@
 //! Result tables as the mysql and psql clients print them (31-query-results.md §7).
-//! ponytail: widths count characters, so wide CJK text shifts the columns; a display-width table
-//! would fix that.
+
+use unicode_width::UnicodeWidthStr;
 
 fn cell(v: &Option<String>) -> &str {
     v.as_deref().unwrap_or("NULL")
@@ -12,8 +12,8 @@ fn widths(columns: &[String], rows: &[Vec<Option<String>>]) -> Vec<usize> {
         .enumerate()
         .map(|(i, c)| {
             rows.iter()
-                .map(|r| r.get(i).map_or(0, |v| cell(v).chars().count()))
-                .chain(std::iter::once(c.chars().count()))
+                .map(|r| r.get(i).map_or(0, |v| cell(v).width()))
+                .chain(std::iter::once(c.width()))
                 .max()
                 .unwrap_or(0)
         })
@@ -21,7 +21,7 @@ fn widths(columns: &[String], rows: &[Vec<Option<String>>]) -> Vec<usize> {
 }
 
 fn pad(text: &str, width: usize, right: bool) -> String {
-    let fill = " ".repeat(width.saturating_sub(text.chars().count()));
+    let fill = " ".repeat(width.saturating_sub(text.width()));
     if right {
         format!("{fill}{text}")
     } else {
@@ -68,7 +68,7 @@ pub fn mysql_table(columns: &[String], rows: &[Vec<Option<String>>], numeric: &[
 pub fn psql_table(columns: &[String], rows: &[Vec<Option<String>>], numeric: &[bool]) -> String {
     let w = widths(columns, rows);
     let centred = |c: &str, n: usize| {
-        let len = c.chars().count();
+        let len = c.width();
         let left = (n.saturating_sub(len)) / 2;
         format!("{}{c}{}", " ".repeat(left), " ".repeat(n - len - left))
     };
@@ -131,6 +131,30 @@ pub fn psql_rows_footer(rows: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unicode_columns_align_by_display_width() {
+        let columns = vec!["名称".into(), "数量".into()];
+        let rows = vec![
+            vec![Some("中文".into()), Some("１２".into())],
+            vec![Some("e\u{301}".into()), Some("1".into())],
+            vec![None, Some("42".into())],
+        ];
+        let mysql = mysql_table(&columns, &rows, &[false, true]);
+        assert!(mysql.lines().all(|line| line.width() == 15));
+        assert!(mysql.contains("| e\u{301}    |    1 |"));
+        let postgres = psql_table(&columns, &rows, &[false, true]);
+        let separators: Vec<_> = postgres
+            .lines()
+            .map(|line| {
+                let offset = line.find(['|', '+']).unwrap();
+                line[..offset].width()
+            })
+            .collect();
+        assert!(separators.iter().all(|width| *width == 6));
+        assert_eq!(pad("中文", 6, false), "中文  ");
+        assert_eq!(pad("e\u{301}", 4, true), "   e\u{301}");
+    }
 
     #[test]
     fn footers() {
