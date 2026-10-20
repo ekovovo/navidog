@@ -27,7 +27,7 @@
 | M12 同步（替代 Cloud） | 未开始 | | | |
 | M13 HTTP 隧道 | 未开始 | | | |
 | M14 其他数据库 | 未开始 | | db/ | |
-| M15 发布 | 部分 | | | 工作流、安装包、`updates.json`、应用内更新已在仓库里。公证要配证书才跑（第 4 节）。配置迁移（F-REL-004）未做 |
+| M15 发布 | 部分 | | | 工作流、安装包、`latest.json`、应用内更新已在仓库里。公证要配证书才跑（第 4 节）。配置迁移（F-REL-004）未做 |
 
 ## 2. 当前里程碑：M3
 
@@ -70,7 +70,7 @@ M2 的任务都已完成，逐项记录见 git 历史；M2 的功能状态仍在
 | F-APP-009 浅色与深色外观 | 完成 | snapshot、theme 单元测试 | |
 | F-APP-010 界面语言 | 完成 | settings 单元测试、目测 | |
 | F-APP-017 日志文件 | 部分 | | 应用日志已完成；SQL 日志在 M3 |
-| F-APP-018 关于与检查更新 | 完成 | update 单元测试、目测 | 两个渠道都读 nightly 上的 `updates.json`（没有则试最新稳定版），不含预发布时跳过预发布和 nightly。摘要为空则拒绝安装。下载校验 SHA-256，对话框显示下载进度，下载中可取消。没有本机安装包时按钮是打开发布页，清单读取失败记 warn。启动检查最多每两天一次，失败不记检查时间。手动检查：没有活动窗口时用最前面的窗口；还没有发布版本单独提示。就地替换先把新包放到旁边，失败时删掉半成品再移回旧包。重新启动等当前进程退出后再打开。关于页：nightly 显示渠道和构建时间；tag 构建在编译前把 workspace 版本改成 tag |
+| F-APP-018 关于与检查更新 | 完成 | update 单元测试、目测 | 两个渠道都读 nightly 上的 `latest.json`（没有则试最新稳定版；`releases` 是各版本列表），不含预发布时跳过预发布和 nightly。摘要为空则拒绝安装。下载校验 SHA-256，对话框显示下载进度，下载中可取消。没有本机安装包时按钮是打开发布页，清单读取失败记 warn。启动检查最多每两天一次，失败不记检查时间。手动检查：没有活动窗口时用最前面的窗口；还没有发布版本单独提示。就地替换先把新包放到旁边，失败时删掉半成品再移回旧包。重新启动等当前进程退出后再打开。关于页：nightly 显示渠道和构建时间；tag 构建在编译前把 workspace 版本改成 tag |
 | F-APP-019 欢迎界面 | 部分 | snapshot | 有空状态提示；首次启动引导窗口未做 |
 | F-PREF-001 偏好设置窗口 | 完成 | 目测 | |
 | F-PREF-002 常规 | 完成 | settings 单元测试、theme 单元测试、snapshot | 主题（Navidog、Default，默认 Navidog）、外观、语言、自动连接、自动检查更新、包含预发布版本、显示模式下的对象、显示表下的对象（默认开）。已经写进 settings.json 的 false 不会被改掉 |
@@ -178,9 +178,9 @@ M2 的任务都已完成，逐项记录见 git 历史；M2 的功能状态仍在
 
 | 功能 | 状态 | 验证 | 说明 |
 | --- | --- | --- | --- |
-| F-REL-001 打包 | 部分 | publish 工作流 | macOS DMG、Windows zip / MSI / `.msi.zip`、Linux deb / rpm / AppImage / tarball，附 `latest.json`、`updates.json` 和 `SHA256SUMS`。未在每台机器上安装验证 |
+| F-REL-001 打包 | 部分 | publish 工作流 | macOS DMG、Windows zip / MSI / `.msi.zip`、Linux deb / rpm / AppImage / tarball，附 `latest.json` 和 `SHA256SUMS`。未在每台机器上安装验证 |
 | F-REL-002 签名与公证 | 部分 | publish 工作流 | 没有证书时上传未签名包。配上证书后工作流里的公证步骤才会跑 |
-| F-REL-003 自动更新 | 完成 | update 单元测试 | 与 F-APP-018 同一条路径：读 `updates.json` 并校验 SHA-256。tag 的发布说明由 changelogithub 写入清单。tag 在清单上传成功后取消 draft。tag 构建在编译前把 workspace 版本改成 tag，不改仓库里的 Cargo.toml |
+| F-REL-003 自动更新 | 完成 | update 单元测试 | 与 F-APP-018 同一条路径：读 `latest.json` 的 `releases` 并校验 SHA-256。tag 的发布说明由 changelogithub 写入清单。tag 在清单上传成功后取消 draft。tag 构建在编译前把 workspace 版本改成 tag，不改仓库里的 Cargo.toml |
 | F-REL-004 迁移或升级 | 未开始 | | 配置目录还没有版本迁移 |
 
 ## 4. 临时偏差与遗留

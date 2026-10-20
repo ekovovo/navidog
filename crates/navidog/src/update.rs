@@ -1,9 +1,11 @@
 //! In-app update check and install.
 //!
-//! Both channels read one `updates.json` from [`RELEASE_MIRROR`]. The stable
-//! channel skips pre-releases and the rolling `nightly` tag. Nightly is
-//! compared by publish time. A download is installed only when its SHA-256
-//! matches the manifest. A missing file or an empty checksum is not installed.
+//! Both channels read `latest.json` from [`RELEASE_MIRROR`]. The file's
+//! `releases` list is every published release; the top-level fields stay this
+//! release's own version and assets. The stable channel skips pre-releases and
+//! the rolling `nightly` tag. Nightly is compared by publish time. A download
+//! is installed only when its SHA-256 matches the manifest. A missing file or
+//! an empty checksum is not installed.
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -29,14 +31,14 @@ use sha2::{Digest, Sha256};
 const RELEASE_MIRROR: &str = "https://gh.nn.ci";
 const REPO: &str = "xhofe/navidog";
 
-/// The index CI refreshes on every publish. One file for both channels.
-fn updates_url() -> String {
-    format!("{RELEASE_MIRROR}/{REPO}/releases/download/nightly/updates.json")
+/// Nightly's manifest. Its `releases` list covers both channels.
+fn manifest_url() -> String {
+    format!("{RELEASE_MIRROR}/{REPO}/releases/download/nightly/latest.json")
 }
 
 /// Used when the nightly release does not exist yet.
-fn updates_url_stable() -> String {
-    format!("{RELEASE_MIRROR}/{REPO}/releases/latest/download/updates.json")
+fn manifest_url_stable() -> String {
+    format!("{RELEASE_MIRROR}/{REPO}/releases/latest/download/latest.json")
 }
 
 const NIGHTLY_TAG: &str = "nightly";
@@ -140,13 +142,23 @@ pub(crate) enum InstallError {
     Other(String),
 }
 
+/// `latest.json`. `releases` is the index; the other fields are this release.
+/// An older file has no `releases` and is treated as that one release.
 #[derive(Debug, Deserialize)]
-struct Updates {
+struct Manifest {
+    #[serde(default)]
+    version: String,
+    #[serde(default)]
+    tag: String,
+    #[serde(default, deserialize_with = "empty_if_null")]
+    body: String,
+    #[serde(default)]
+    assets: Vec<ManifestAsset>,
     #[serde(default)]
     releases: Vec<UpdateRelease>,
 }
 
-/// One entry of `updates.json`. `body` is null when the release has no notes.
+/// One entry of `latest.json`'s `releases`. `body` is null when there are no notes.
 #[derive(Debug, Deserialize)]
 struct UpdateRelease {
     tag: String,
@@ -330,8 +342,9 @@ pub fn fetch_latest_release(include_prerelease: bool) -> Result<Availability, St
         Ok(text) => text,
         Err(err) => return missing_latest(err.status, &err.detail),
     };
-    let updates: Updates = serde_json::from_str(&text).map_err(|e| e.to_string())?;
-    let release = match pick_release(&updates.releases, include_prerelease) {
+    let manifest: Manifest = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    let releases = listed_releases(manifest);
+    let release = match pick_release(&releases, include_prerelease) {
         Listed::Unpublished => return Ok(Availability::Unpublished),
         Listed::Current => return Ok(Availability::Current),
         Listed::Chosen(release) => release,
@@ -346,13 +359,32 @@ pub fn fetch_latest_release(include_prerelease: bool) -> Result<Availability, St
 }
 
 fn read_updates() -> Result<String, HttpFail> {
-    match http_get(&updates_url(), Duration::from_secs(15)) {
+    match http_get(&manifest_url(), Duration::from_secs(15)) {
         Ok(text) => Ok(text),
         Err(err) if err.status == Some(404) => {
-            http_get(&updates_url_stable(), Duration::from_secs(15))
+            http_get(&manifest_url_stable(), Duration::from_secs(15))
         }
         Err(err) => Err(err),
     }
+}
+
+/// The index, or this file alone when it was published before `releases` existed.
+fn listed_releases(manifest: Manifest) -> Vec<UpdateRelease> {
+    if !manifest.releases.is_empty() {
+        return manifest.releases;
+    }
+    if manifest.tag.is_empty() && manifest.version.is_empty() {
+        return Vec::new();
+    }
+    vec![UpdateRelease {
+        tag: manifest.tag,
+        version: manifest.version,
+        prerelease: false,
+        draft: false,
+        published_at: String::new(),
+        body: manifest.body,
+        assets: manifest.assets,
+    }]
 }
 
 struct HttpFail {
@@ -1114,12 +1146,12 @@ mod tests {
     #[test]
     fn release_files_go_through_the_mirror() {
         assert_eq!(
-            updates_url(),
-            "https://gh.nn.ci/xhofe/navidog/releases/download/nightly/updates.json"
+            manifest_url(),
+            "https://gh.nn.ci/xhofe/navidog/releases/download/nightly/latest.json"
         );
         assert_eq!(
-            updates_url_stable(),
-            "https://gh.nn.ci/xhofe/navidog/releases/latest/download/updates.json"
+            manifest_url_stable(),
+            "https://gh.nn.ci/xhofe/navidog/releases/latest/download/latest.json"
         );
         let github =
             "https://github.com/xhofe/navidog/releases/download/v0.2.0/Navidog-aarch64.dmg";
@@ -1173,6 +1205,18 @@ mod tests {
             Ok(Availability::Unpublished)
         ));
         assert!(missing_latest(None, "connection failed").is_err());
+    }
+
+    #[test]
+    fn an_old_latest_json_is_one_release() {
+        let manifest: Manifest = serde_json::from_str(
+            r#"{"version":"9.0.0","tag":"v9.0.0","notes":"https://github.com/xhofe/navidog/releases/tag/v9.0.0","assets":[]}"#,
+        )
+        .unwrap();
+        let releases = listed_releases(manifest);
+        assert_eq!(releases.len(), 1);
+        assert_eq!(releases[0].tag, "v9.0.0");
+        assert!(matches!(pick_release(&releases, false), Listed::Chosen(_)));
     }
 
     #[test]

@@ -484,7 +484,7 @@ jobs:
           pattern: meta-*
           path: meta
           merge-multiple: true
-      - name: build SHA256SUMS, latest.json, and updates.json
+      - name: build SHA256SUMS and latest.json
         env:
           GH_TOKEN: ${{ github.token }}
           # main builds attach assets to the nightly release, not a release named main.
@@ -524,7 +524,6 @@ jobs:
             "$VERSION" "$TAG" "$REPO" "$TAG" "$items" \
             | jq --rawfile body notes.md '. + {body: $body}' > latest.json
           ./.github/workflows/upload_asset.sh ./SHA256SUMS
-          ./.github/workflows/upload_asset.sh ./latest.json
           # This tag is still a draft, so keep it in the index. Other drafts stay out.
           gh api "repos/${REPO}/releases?per_page=30" > releases.json
           jq -c --arg current "$TAG" --arg fallback "$BUILD_RFC3339" '
@@ -554,10 +553,16 @@ jobs:
             fi
             jq -c --argjson assets "$assets" '. + {assets: $assets}' <<<"$entry" >> entries-with-assets.jsonl
           done < entries.jsonl
-          jq -s '{releases: .}' entries-with-assets.jsonl > updates.json
-          ./.github/workflows/upload_asset.sh ./updates.json
-          if [ "$TAG" != "nightly" ] && gh release view nightly >/dev/null 2>&1; then
-            RELEASE_TAG=nightly ./.github/workflows/upload_asset.sh ./updates.json
+          jq -s '{releases: .}' entries-with-assets.jsonl > releases-index.json
+          jq --slurpfile index releases-index.json '. + {releases: $index[0].releases}' latest.json > latest.indexed.json
+          mv latest.indexed.json latest.json
+          ./.github/workflows/upload_asset.sh ./latest.json
+          # Keep nightly's own version and assets; only refresh its release list.
+          if [ "$TAG" != "nightly" ] && gh release view nightly >/dev/null 2>&1 \
+            && gh release download nightly --pattern latest.json --clobber --dir index-work >/dev/null 2>&1; then
+            jq --slurpfile index releases-index.json '. + {releases: $index[0].releases}' index-work/latest.json > index-work/patched.json
+            mv index-work/patched.json index-work/latest.json
+            RELEASE_TAG=nightly ./.github/workflows/upload_asset.sh index-work/latest.json
           fi
           if [ "$TAG" != "nightly" ]; then
             gh release edit "$TAG" --draft=false
