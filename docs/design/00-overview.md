@@ -58,7 +58,7 @@ navidog 用 [gpui-kit](https://gpui-kit.com/zh-CN/docs/) 全家桶（GPUI、`gpu
 11. 许可证 Apache-2.0，禁止引入 GPL 依赖。
 12. Bundle ID：`ci.nn.navidog`。
 13. 不做遥测和远程崩溃上报，日志用 `tracing` 写到 `~/Library/Logs/navidog/`；SQL 历史日志按 Navicat 的方式单独记录。
-14. 自动更新：应用内检查 GitHub Releases 上的 `latest.json`（稳定渠道），下载后用清单里的 SHA-256 校验再安装。偏好设置可打开预发布渠道，此时同时提供 tag 预发布和 `main` 上的滚动 nightly。启动时最多每两天检查一次，可关掉；下载只在用户点更新时发生。不做 Sparkle。
+14. 自动更新：应用内只下载 nightly release 上的 `updates.json`（还没有 nightly 时改读最新稳定版的同一文件）。不含预发布时跳过预发布和 nightly；打开预发布渠道时同时提供 tag 预发布和 `main` 上的滚动 nightly。下载后用清单里的 SHA-256 校验再安装。启动时最多每两天检查一次，可关掉；下载只在用户点更新时发生。不做 Sparkle。tag 的发布说明由 changelogithub 从 Conventional Commits 生成并写进这份清单；nightly 仍是带构建时间的一句说明。
 
 **技术**
 1. 依赖 `gpui-kit = "0.7"`，提交 `Cargo.lock`。gpui-kit 自己精确锁定 `gpui-pre`，不要单独覆盖任何 `gpui-pre-*`。
@@ -77,7 +77,7 @@ navidog 用 [gpui-kit](https://gpui-kit.com/zh-CN/docs/) 全家桶（GPUI、`gpu
 **工程**
 1. 仓库结构：Cargo workspace，具体见第 4 节。
 2. 测试数据库：`docker-compose.yml`（MySQL 8、MariaDB 11、PostgreSQL 16，带种子数据），SQLite 用仓库内的测试文件。
-3. CI：GitHub Actions。每次推送在 macOS（aarch64 与 Intel）、Linux、Windows 上跑 clippy 和测试，macOS 另跑 fmt 和裸值检查；`main` 上另做三平台的 release 冒烟。打 `v*` tag 时构建 macOS `.dmg`、Windows `.msi`、zip 与 `.msi.zip`、Linux `.deb`、`.rpm`、AppImage 和 tarball（x86_64 与 aarch64），并上传 `latest.json`。`main` 每天滚动发布 `nightly`。Apple 公证在有签名证书时执行，没有证书时上传未签名包。实库测试在 Ubuntu 上用 `docker compose` 跑。
+3. CI：GitHub Actions。每次推送在 macOS（aarch64 与 Intel）、Linux、Windows 上跑 clippy 和测试，macOS 另跑 fmt 和裸值检查；`main` 上另做三平台的 release 冒烟。打 `v*` tag 时构建 macOS `.dmg`、Windows `.msi`、zip 与 `.msi.zip`、Linux `.deb`、`.rpm`、AppImage 和 tarball（x86_64 与 aarch64），并上传 `latest.json` 和汇总的 `updates.json`。tag 的发布说明由 changelogithub 生成。`main` 每天滚动发布 `nightly`。Apple 公证在有签名证书时执行，没有证书时上传未签名包。实库测试在 Ubuntu 上用 `docker compose` 跑。
 4. 分支流程：每个里程碑一个分支，通过 PR 合并到 `main`；规格 PR 和代码 PR 分开提。
 5. 模块细节：每份模块规格按 Navicat 现有行为写好默认值，提交评审。
 

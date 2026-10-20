@@ -472,16 +472,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # changelogithub walks commits back to the previous tag.
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          node-version: 22
       - uses: actions/download-artifact@v8
         with:
           pattern: meta-*
           path: meta
           merge-multiple: true
-      - name: build SHA256SUMS and latest.json
+      - name: build SHA256SUMS, latest.json, and updates.json
         env:
           GH_TOKEN: ${{ github.token }}
           # main builds attach assets to the nightly release, not a release named main.
           RELEASE_TAG: ${{ github.ref == 'refs/heads/main' && 'nightly' || github.ref_name }}
+          BUILD_DATE: ${{ needs.prepare_vars.outputs.build_date }}
+          BUILD_RFC3339: ${{ needs.prepare_vars.outputs.build_rfc3339 }}
         run: |
           set -euo pipefail
           TAG="$RELEASE_TAG"
@@ -494,6 +503,14 @@ jobs:
             echo "no checksum metadata; not publishing"
             exit 1
           fi
+          # --output writes the changelog and does not publish the release.
+          # The tag stays a draft until the assets below are uploaded.
+          if [ "$TAG" = "nightly" ]; then
+            printf '%s\n' "Rolling build from the latest main branch. Build date: $BUILD_DATE" > notes.md
+          else
+            npx --yes changelogithub@15.0.5 --output notes.md
+          fi
+          gh release edit "$TAG" --notes-file notes.md
           cat "${meta_files[@]}" > all-meta.txt
           awk '{print $5"  "$4}' all-meta.txt | sort -k2 > SHA256SUMS
           items=""
@@ -504,9 +521,44 @@ jobs:
             if [ -z "$items" ]; then items="$item"; else items="$items,$item"; fi
           done < all-meta.txt
           printf '{"version":"%s","tag":"%s","notes":"https://github.com/%s/releases/tag/%s","assets":[%s]}' \
-            "$VERSION" "$TAG" "$REPO" "$TAG" "$items" | jq . > latest.json
+            "$VERSION" "$TAG" "$REPO" "$TAG" "$items" \
+            | jq --rawfile body notes.md '. + {body: $body}' > latest.json
           ./.github/workflows/upload_asset.sh ./SHA256SUMS
           ./.github/workflows/upload_asset.sh ./latest.json
+          # This tag is still a draft, so keep it in the index. Other drafts stay out.
+          gh api "repos/${REPO}/releases?per_page=30" > releases.json
+          jq -c --arg current "$TAG" --arg fallback "$BUILD_RFC3339" '
+            [ .[] | select(.draft != true or .tag_name == $current)
+              | {
+                  tag: .tag_name,
+                  version: (if .tag_name == "nightly" then "nightly" else (.tag_name | ltrimstr("v")) end),
+                  prerelease: (if .tag_name == "nightly" then true else (.prerelease // false) end),
+                  published_at: (if (.published_at // "") == "" and .tag_name == $current then $fallback else (.published_at // "") end),
+                  body: (.body // "")
+                }
+            ]
+            | sort_by(.published_at)
+            | reverse
+            | .[]
+          ' releases.json > entries.jsonl
+          mkdir -p index-work
+          : > entries-with-assets.jsonl
+          while IFS= read -r entry; do
+            tag=$(jq -r '.tag' <<<"$entry")
+            assets='[]'
+            if [ "$tag" = "$TAG" ]; then
+              assets=$(jq -c '.assets // []' latest.json)
+            elif gh release download "$tag" --pattern latest.json --clobber --dir index-work >/dev/null 2>&1; then
+              assets=$(jq -c '.assets // []' index-work/latest.json)
+              rm -f index-work/latest.json
+            fi
+            jq -c --argjson assets "$assets" '. + {assets: $assets}' <<<"$entry" >> entries-with-assets.jsonl
+          done < entries.jsonl
+          jq -s '{releases: .}' entries-with-assets.jsonl > updates.json
+          ./.github/workflows/upload_asset.sh ./updates.json
+          if [ "$TAG" != "nightly" ] && gh release view nightly >/dev/null 2>&1; then
+            RELEASE_TAG=nightly ./.github/workflows/upload_asset.sh ./updates.json
+          fi
           if [ "$TAG" != "nightly" ]; then
             gh release edit "$TAG" --draft=false
           fi
