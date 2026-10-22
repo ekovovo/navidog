@@ -109,6 +109,7 @@ pub fn split_script(sql: &str, dialect: Dialect) -> Vec<Statement>;
 
 - **网格**：`navidog-grid` 的 `ResultGrid`。选区、复制、复制为、列宽、冻结、隐藏列、查找（网格有焦点时按 ⌘F）都与表查看器相同。右键菜单不提供快速筛选：结果是一次取回的结果集，没有 WHERE 窗格。表头排序仍在已取回的行里重排。不分页，结果一次全部取回，与 Navicat 一致。ponytail: 结果全部放在内存里，几百万行时很占内存；需要时再改成流式读取。
 - **底部栏**：左侧四个按钮：单元格编辑器（显示或隐藏网格下方的单元格编辑器）、数据分析（M10 之前禁用）、导出结果（M6 之前禁用）、固定。中间是产生这个结果的 SQL，单行截断，悬停显示全文；只读的结果在后面加“只读”。右侧是 + − ✓ ✗（只读时禁用）和网格视图、表单视图的切换。
+- **底部状态文字**：产生结果的 SQL、批量提交的多条语句和错误信息使用同一套单行显示规则：换行在栏内折成空格，超出剩余宽度时省略，悬停保留完整原文和换行。底部栏固定 28pt 高，右侧操作按钮不被状态文字挤出。
 - **固定**：固定的选项卡显示图钉图标，移到最左侧，再次运行时保留。悬停在固定的选项卡上弹出信息：时间戳、查询时间、获取时间、连接、数据库（PostgreSQL 加模式）和 SQL。再点固定按钮取消固定。
 - **可编辑**：同时满足以下条件时结果可以编辑，否则只读：
   - 语句以 `SELECT` 开头（跳过开头的注释），因为刷新时要重新执行它；
@@ -253,6 +254,7 @@ SELECT * FROM nope
 
 ## 11. 验收清单
 
+- [x] 多行 SQL、批量提交状态和长文本在浅色及深色的底部栏中保持单行，操作按钮不被挤出，悬停保留原文。（复用 `skin::truncated`，`batch_sql_stays_on_one_line_beside_footer_controls` 验证几何约束；查询结果截图及共用组件的悬停截图见 [验收记录](../acceptance-status-overflow.md)。）
 - [x] 三种数据库：运行、运行已选择的、运行当前语句、停止都正确；多条语句各自写进消息和摘要；出错时停下并标出语句，勾选“遇到错误时继续”时执行完全部。（SQLite：`runs_scripts_into_messages_summary_and_editable_results`；MySQL、MariaDB、PostgreSQL：`NAVIDOG_LIVE=1 cargo test -p navidog-query live_editor`。停止前先确认服务端正在执行慢查询。）
 - [x] 用 `DELIMITER $$` 创建存储过程后能调用；`-- NAME:` 改了结果选项卡的名称；超过 20 个结果集时只显示 20 个。（MySQL、MariaDB 的 `live_editor_runs_selection_current_errors_and_stop` 创建、调用、删除测试过程并验证结果名称；SQLite 编辑器测试验证 21 条均执行但只保留 20 个结果。）
 - [x] 查询参数：同名参数只问一次，原始模式不加引号，上次输入的值预先填好。

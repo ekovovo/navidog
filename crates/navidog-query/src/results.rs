@@ -981,18 +981,15 @@ impl ResultView {
                 .w(tokens::result::BOTTOM_BUTTON.rems())
                 .h(tokens::result::BOTTOM_BUTTON.rems())
         };
-        // One line: the bar shows the statement flattened, hover shows it as typed
         let sql: SharedString = if self.status.is_empty() {
-            self.sql
-                .split_whitespace()
-                .collect::<Vec<_>>()
-                .join(" ")
-                .into()
+            self.sql.clone().into()
         } else {
             self.status.clone()
         };
         h_flex()
             .h(tokens::result::BOTTOM_BAR_HEIGHT.rems())
+            .min_w_0()
+            .flex_none()
             .px_2()
             .gap_1()
             .border_t_1()

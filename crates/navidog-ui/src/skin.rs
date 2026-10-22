@@ -21,14 +21,21 @@ pub fn truncated(
 ) -> gpui_kit::Stateful<gpui_kit::Div> {
     let text = text.into();
     let tip = text.clone();
+    // GPUI's nowrap still lays out explicit line breaks as separate lines.
+    let display = if text.contains(['\r', '\n']) {
+        text.replace(['\r', '\n'], " ").into()
+    } else {
+        text
+    };
     div()
         .id(id)
         .min_w_0()
         .truncate()
+        .line_clamp(1)
         .tooltip(move |window, cx| {
             gpui_kit::component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
         })
-        .child(text)
+        .child(display)
 }
 
 /// Makes the dialog's Confirm (Enter in a single-line field, or on the dialog itself) call `ok` on

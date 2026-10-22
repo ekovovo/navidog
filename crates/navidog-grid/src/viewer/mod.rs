@@ -1568,6 +1568,8 @@ impl TableViewer {
         }
         h_flex()
             .h(tokens::viewer::BOTTOM_BAR_HEIGHT.rems())
+            .min_w_0()
+            .flex_none()
             .px_2()
             .gap_1()
             .border_t_1()

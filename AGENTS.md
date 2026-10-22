@@ -44,7 +44,7 @@ navidog 用 gpui-kit 0.7 复刻 Navicat Premium 17（macOS）。决策、架构�
 1. 运行 progress.md 第 5 节列出的全部检查。
    - 实库测试先执行 `docker compose up -d --wait`，测完执行 `docker compose down`。
    - 在 Cursor 沙箱中，`scripts/check-raw-px.sh`、`clippy` 和截图测试需要在沙箱外运行；沙箱会设置 `CARGO_TARGET_DIR`，沙箱外运行时加 `env -u CARGO_TARGET_DIR`，否则构建产物会写到沙箱缓存。
-2. 改动界面时运行截图测试，逐张查看 `target/snapshots/` 下的浅色和深色截图。
+2. 改动界面时运行截图测试，逐张查看 `target/snapshots/` 下的浅色和深色截图。要给人看的图放进 PR 描述；测试截图留在本地，不提交进 git。
 3. 每段不简单的逻辑至少留下一个可运行的检查（单元测试、headless UI 测试或实库测试）。
 
 ## 收尾
