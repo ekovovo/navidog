@@ -19,9 +19,11 @@ use crate::params::ConnectParams;
 pub struct DbError {
     pub code: Option<String>,
     pub message: String,
-    /// The transport is dead (server closed it, or the socket failed). Callers retry once on a
-    /// new connection. A SQL error leaves this false.
+    /// The physical session is dead. Ordinary SQL must never be replayed automatically;
+    /// only an explicitly stateless read can opt in to recovery on a fresh session.
     pub disconnected: bool,
+    /// The statement may have reached the server; the client did not see how it ended.
+    pub outcome_unknown: bool,
 }
 
 impl std::fmt::Display for DbError {
@@ -39,6 +41,7 @@ impl DbError {
             code: None,
             message: message.into(),
             disconnected: false,
+            outcome_unknown: false,
         }
     }
 
@@ -47,6 +50,7 @@ impl DbError {
             code: Some(code.to_string()),
             message: message.into(),
             disconnected: false,
+            outcome_unknown: false,
         }
     }
 }
@@ -170,8 +174,14 @@ pub struct ForeignKey {
 
 pub trait Relational: Send {
     fn dialect(&self) -> Dialect;
-    /// Execute one or more statements over the text protocol; each returns one result set.
+    /// Execute once on the current physical session. Transport failures never replay the SQL.
     fn execute<'a>(&'a mut self, sql: &'a str) -> BoxFuture<'a, DbResult<Vec<ResultSet>>>;
+    /// Application-owned, side-effect-free metadata/probe SQL that does not require session
+    /// state. Network drivers may reconnect and retry once, only before arbitrary SQL has
+    /// pinned the physical session. Never use this to classify user SQL by its first keyword.
+    fn execute_read<'a>(&'a mut self, sql: &'a str) -> BoxFuture<'a, DbResult<Vec<ResultSet>>> {
+        self.execute(sql)
+    }
     /// Execute one statement typed by the user (query editor), filling column types and origins
     /// where the plain `execute` cannot (PostgreSQL's simple protocol reports neither).
     fn execute_statement<'a>(

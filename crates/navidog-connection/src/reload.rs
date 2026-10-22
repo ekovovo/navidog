@@ -53,7 +53,7 @@ impl Reload {
             return;
         }
         window.close_dialog(cx);
-        let job = Sessions::global(cx).read(cx).run_rel(&self.id, None, |r| {
+        let job = Sessions::global(cx).read(cx).run_once(&self.id, None, |r| {
             Box::pin(async move {
                 for sql in &stmts {
                     r.execute(sql).await?;
@@ -67,7 +67,7 @@ impl Reload {
                 let result = job
                     .await
                     .map_err(|e| e.to_string())
-                    .and_then(|r| r.map_err(|e| e.to_string()));
+                    .and_then(|r| r.map_err(|e| crate::db_text(&e)));
                 cx.update(|window, cx| match result {
                     Ok(()) => window.push_notification(t!("conn.reload_done").to_string(), cx),
                     Err(e) => {

@@ -20,6 +20,7 @@ use crate::driver::{
     CancelHandle, Column, ColumnOrigin, DbError, DbResult, Driver, DriverInfo, Family, Relational,
     ResultSet, Session,
 };
+use crate::execution::{Cancellation, RecoveryState, interrupted};
 use crate::log::{Tag, logged};
 use crate::params::{ConnectParams, SslParams};
 
@@ -217,9 +218,13 @@ impl Driver for PostgresDriver {
             let (client, tls, version, pid) = establish(&params, notices.clone()).await?;
             tag.session = pid;
             let cancel = client.cancel_token();
+            let cancellation = Cancellation::default();
+            cancellation.replace(cancel_target(cancel.clone(), tls.clone()));
             Ok(Box::new(PgSession {
                 client,
                 cancel,
+                recovery: RecoveryState::new(&params.initial_queries, Dialect::Postgres),
+                cancellation,
                 params,
                 tls,
                 version,
@@ -245,16 +250,23 @@ pub struct PgSession {
     origins: HashMap<(u32, i16), Option<ColumnOrigin>>,
     /// Last successful `SET search_path`; replayed after a transparent reconnect.
     setup: Option<String>,
+    recovery: RecoveryState,
+    cancellation: Cancellation,
 }
 
 impl PgSession {
     async fn reconnect(&mut self) -> DbResult<()> {
+        self.cancellation.clear();
         let (client, tls, _version, pid) = establish(&self.params, self.notices.clone()).await?;
         self.client = client;
         self.tls = tls;
         self.cancel = self.client.cancel_token();
         self.tag.session = pid;
-        self.replay().await
+        self.origins.clear();
+        self.replay().await?;
+        self.cancellation
+            .replace(cancel_target(self.cancel.clone(), self.tls.clone()));
+        Ok(())
     }
 
     fn remember(&mut self, sql: &str) {
@@ -324,6 +336,20 @@ impl PgSession {
     }
 }
 
+fn cancel_target(token: CancelToken, tls: Option<MakeTlsConnector>) -> CancelHandle {
+    Arc::new(move || {
+        let (token, tls) = (token.clone(), tls.clone());
+        async move {
+            match tls {
+                Some(tls) => token.cancel_query(tls).await,
+                None => token.cancel_query(NoTls).await,
+            }
+            .map_err(err)
+        }
+        .boxed()
+    })
+}
+
 impl Session for PgSession {
     fn server_version(&self) -> &str {
         &self.version
@@ -331,15 +357,15 @@ impl Session for PgSession {
 
     fn ping(&mut self) -> BoxFuture<'_, DbResult<()>> {
         async move {
-            match self
+            let result = match self
                 .client
                 .simple_query("SELECT 1")
                 .await
                 .map(|_| ())
                 .map_err(err)
             {
-                Err(e) if self.lost(&e) => {
-                    tracing::warn!("PostgreSQL connection lost ({e}); reconnecting");
+                Err(e) if self.lost(&e) && self.recovery.can_reconnect() => {
+                    tracing::warn!("PostgreSQL metadata session lost ({e}); reconnecting");
                     self.reconnect().await?;
                     self.client
                         .simple_query("SELECT 1")
@@ -348,24 +374,21 @@ impl Session for PgSession {
                         .map_err(err)
                 }
                 other => other,
-            }
+            };
+            result.map_err(|e| {
+                if self.lost(&e) {
+                    self.cancellation.clear();
+                    interrupted(e, false)
+                } else {
+                    e
+                }
+            })
         }
         .boxed()
     }
 
     fn cancel_handle(&self) -> Option<CancelHandle> {
-        let (token, tls) = (self.cancel.clone(), self.tls.clone());
-        Some(Arc::new(move || {
-            let (token, tls) = (token.clone(), tls.clone());
-            async move {
-                match tls {
-                    Some(tls) => token.cancel_query(tls).await,
-                    None => token.cancel_query(NoTls).await,
-                }
-                .map_err(err)
-            }
-            .boxed()
-        }))
+        Some(self.cancellation.handle())
     }
 
     fn session_id(&self) -> Option<u64> {
@@ -373,6 +396,7 @@ impl Session for PgSession {
     }
 
     fn close(self: Box<Self>) -> BoxFuture<'static, DbResult<()>> {
+        self.cancellation.clear();
         async move {
             drop(self.client);
             Ok(())
@@ -404,17 +428,7 @@ impl PgSession {
     /// Column types and origins of a SELECT, from its prepared form. `None` when it cannot be
     /// prepared; the result is then shown without types and stays read-only.
     async fn describe(&mut self, sql: &str) -> Option<Vec<Column>> {
-        let stmt = match self.client.prepare(sql).await {
-            Ok(stmt) => stmt,
-            Err(e) => {
-                let mapped = err(e);
-                if !self.lost(&mapped) {
-                    return None;
-                }
-                self.reconnect().await.ok()?;
-                self.client.prepare(sql).await.ok()?
-            }
-        };
+        let stmt = self.client.prepare(sql).await.ok()?;
         let wanted: Vec<(u32, i16)> = stmt
             .columns()
             .iter()
@@ -483,18 +497,40 @@ impl Relational for PgSession {
 
     fn execute<'a>(&'a mut self, sql: &'a str) -> BoxFuture<'a, DbResult<Vec<ResultSet>>> {
         async move {
+            self.recovery.observe(sql);
+            let result = self.attempt(sql).await.map_err(|e| {
+                if self.lost(&e) {
+                    self.cancellation.clear();
+                    interrupted(e, true)
+                } else {
+                    e
+                }
+            });
+            if result.is_ok() {
+                self.remember(sql);
+            }
+            result
+        }
+        .boxed()
+    }
+
+    fn execute_read<'a>(&'a mut self, sql: &'a str) -> BoxFuture<'a, DbResult<Vec<ResultSet>>> {
+        async move {
             let result = match self.attempt(sql).await {
-                Err(e) if self.lost(&e) => {
-                    tracing::warn!("PostgreSQL connection lost ({e}); reconnecting");
+                Err(e) if self.lost(&e) && self.recovery.can_reconnect() => {
                     self.reconnect().await?;
                     self.attempt(sql).await
                 }
                 other => other,
             };
-            if result.is_ok() {
-                self.remember(sql);
-            }
-            result
+            result.map_err(|e| {
+                if self.lost(&e) {
+                    self.cancellation.clear();
+                    interrupted(e, false)
+                } else {
+                    e
+                }
+            })
         }
         .boxed()
     }

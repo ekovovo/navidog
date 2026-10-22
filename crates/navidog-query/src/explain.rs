@@ -1,8 +1,6 @@
 //! Explain tabs (31-query-results.md §5): plans fetched without running the statement, shown as a
 //! grid, text and JSON.
 
-use std::time::Duration;
-
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Editor, EditorState};
 use gpui_kit::component::{Selectable as _, Sizable as _, h_flex, v_flex};
@@ -373,20 +371,12 @@ impl QueryEditor {
         &mut self,
         planned: Planned,
         result: DbResult<Plan>,
-        started: chrono::DateTime<chrono::Local>,
-        elapsed: Duration,
+        info: RunInfo,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let info = RunInfo {
-            at: started,
-            query_time: elapsed,
-            connection: self.connection_name(cx),
-            connection_id: self.target.connection.clone().unwrap_or_default(),
-            database: self.target.database.clone(),
-            schema: self.target.schema.clone(),
-            dialect: self.dialect(cx),
-        };
+        let started = info.at;
+        let elapsed = info.query_time;
         match result {
             Ok(plan) => {
                 let name = self.results.next_explain_name();
@@ -402,7 +392,7 @@ impl QueryEditor {
                 self.results.note(outcome, window, cx);
             }
             Err(e) => {
-                self.mark_error(planned.range.clone(), &e.to_string(), cx);
+                self.mark_error(planned.range.clone(), &crate::results::db_text(&e), cx);
                 let outcome = Outcome {
                     planned,
                     result: Err(e),

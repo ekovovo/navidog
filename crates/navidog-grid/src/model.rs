@@ -55,6 +55,76 @@ pub struct GridModel {
 }
 
 impl GridModel {
+    /// All columns in this result, including the columns currently hidden from the grid.
+    pub fn all_columns(&self) -> impl Iterator<Item = &GridColumn> {
+        self.columns.iter().chain(&self.hidden_columns)
+    }
+
+    /// Repartitions the accepted data without retaining another copy of its rows.
+    /// Returns false if pending writes need to be committed or discarded first. Completely
+    /// unfilled insert drafts contain no values to move, so they keep their default state.
+    pub fn set_hidden(&mut self, hidden: &HashSet<String>) -> bool {
+        if !self.edits.is_empty()
+            || !self.deleted.is_empty()
+            || self
+                .new_rows
+                .iter()
+                .any(|row| row.iter().any(Option::is_some))
+        {
+            return false;
+        }
+        let head_name = self.columns.get(self.head.1).map(|c| c.name.clone());
+        let mut columns = std::mem::take(&mut self.columns);
+        columns.append(&mut self.hidden_columns);
+        let mut rows = std::mem::take(&mut self.rows);
+        for (ix, row) in rows.iter_mut().enumerate() {
+            if let Some(values) = self.hidden_rows.get_mut(ix) {
+                row.append(values);
+            }
+        }
+        self.hidden_rows.clear();
+        (self.columns, self.rows) = Self::project(&columns, &rows, hidden);
+        self.set_hidden_columns(&columns, &rows, hidden);
+        for row in &mut self.new_rows {
+            *row = vec![None; self.columns.len()];
+        }
+        self.head.1 = head_name
+            .and_then(|name| self.columns.iter().position(|c| c.name == name))
+            .unwrap_or_else(|| self.head.1.min(self.columns.len().saturating_sub(1)));
+        self.anchor = self.head;
+        true
+    }
+
+    /// Sorts the accepted rows and their hidden key values together. Pending edits stay put.
+    pub fn sort_rows(&mut self, col: usize, asc: bool) {
+        if self.has_changes() || col >= self.columns.len() {
+            return;
+        }
+        let mut order: Vec<_> = (0..self.rows.len()).collect();
+        order.sort_by(|&a, &b| {
+            let value = |ix: usize| self.rows[ix].get(col).and_then(Option::as_deref);
+            let ord = match (value(a), value(b)) {
+                (None, None) => std::cmp::Ordering::Equal,
+                (None, Some(_)) => std::cmp::Ordering::Less,
+                (Some(_), None) => std::cmp::Ordering::Greater,
+                (Some(a), Some(b)) => match (a.parse::<f64>(), b.parse::<f64>()) {
+                    (Ok(a), Ok(b)) => a.partial_cmp(&b).unwrap_or(std::cmp::Ordering::Equal),
+                    _ => a.cmp(b),
+                },
+            };
+            if asc { ord } else { ord.reverse() }
+        });
+        let reorder = |rows: &mut Vec<Vec<Cell>>| {
+            let mut previous: Vec<_> = std::mem::take(rows).into_iter().map(Some).collect();
+            *rows = order
+                .iter()
+                .filter_map(|&ix| previous.get_mut(ix).and_then(Option::take))
+                .collect();
+        };
+        reorder(&mut self.rows);
+        reorder(&mut self.hidden_rows);
+    }
+
     pub fn set_data(&mut self, columns: Vec<GridColumn>, rows: Vec<Vec<Cell>>) {
         self.columns = columns;
         self.rows = rows;
@@ -317,7 +387,13 @@ impl GridModel {
                 (0..self.columns.len())
                     .any(|c| !self.columns[c].read_only && row.get(c).is_none_or(Option::is_none))
             });
-        unfilled || !self.raw.is_empty()
+        unfilled
+            || (!self.hidden_columns.is_empty()
+                && self
+                    .new_rows
+                    .iter()
+                    .any(|row| row.iter().any(Option::is_some)))
+            || !self.raw.is_empty()
     }
 
     pub fn has_primary_key(&self) -> bool {
@@ -958,6 +1034,83 @@ mod tests {
         assert_eq!(text(&m, 0, 0), Some("2".into()));
         assert_eq!(text(&m, 0, 1), Some("b".into()));
         assert_eq!(text(&m, 1, 1), Some("c".into()));
+    }
+
+    #[test]
+    fn visibility_preserves_blank_insert_drafts_without_projecting_pending_writes() {
+        let mut m = model(true);
+        let row = m.insert_row();
+        m.set_hidden(&["id".into()].into());
+        assert_eq!(m.columns.len(), 1);
+        assert_eq!(m.columns[0].name, "name");
+        assert_eq!(m.row_state(row), RowState::Inserted);
+        assert_eq!(m.value(row, 0), None);
+        assert!(m.change_set().inserts.is_empty());
+        m.set_hidden(&HashSet::new());
+        assert_eq!(m.columns.len(), 2);
+        assert_eq!(m.row_count(), 3);
+        assert!(m.new_rows[row - m.rows.len()].iter().all(Option::is_none));
+        m.set_value(row, 0, Some("draft".into()));
+        m.set_hidden(&["name".into()].into());
+        assert_eq!(m.columns.len(), 2);
+        assert_eq!(m.value(row, 0), Some(&Some("draft".into())));
+    }
+
+    #[test]
+    fn committed_rows_survive_sorting_and_visibility_changes() {
+        let mut m = model(true);
+        m.set_hidden(&["id".into()].into());
+        m.set_value(0, 0, Some("z".into()));
+        m.select((1, 0), false);
+        m.delete_selected_rows();
+        m.accept_committed();
+        m.set_hidden(&HashSet::new());
+        assert_eq!(m.row_count(), 1);
+        let name = m.columns.iter().position(|c| c.name == "name").unwrap();
+        let id = m.columns.iter().position(|c| c.name == "id").unwrap();
+        let row = m.insert_row();
+        m.set_value(row, id, Some("3".into()));
+        m.set_value(row, name, Some("c".into()));
+        m.accept_committed();
+        m.set_hidden(&["id".into()].into());
+        m.sort_rows(0, true);
+        assert_eq!(m.value(0, 0), Some(&Some("c".into())));
+        assert_eq!(m.value(1, 0), Some(&Some("z".into())));
+        m.select((0, 0), false);
+        m.delete_selected_rows();
+        assert_eq!(
+            m.change_set().deletes,
+            [RowKey(vec![("id".into(), Some("3".into()))])]
+        );
+        m.discard();
+        m.set_hidden(&HashSet::new());
+        let name = m.columns.iter().position(|c| c.name == "name").unwrap();
+        assert_eq!(m.row_count(), 2);
+        assert_eq!(m.value(1, name), Some(&Some("z".into())));
+    }
+
+    #[test]
+    fn local_sort_puts_null_first_and_numbers_by_value() {
+        let mut m = model(false);
+        m.set_data(
+            vec![m.columns[0].clone()],
+            vec![vec![Some("10".into())], vec![None], vec![Some("9".into())]],
+        );
+        m.sort_rows(0, true);
+        assert_eq!(
+            m.rows,
+            vec![vec![None], vec![Some("9".into())], vec![Some("10".into())]]
+        );
+        m.sort_rows(0, false);
+        assert_eq!(m.value(0, 0), Some(&Some("10".into())));
+        m.set_value(0, 0, Some("11".into()));
+        m.sort_rows(0, true);
+        m.set_hidden(&["id".into()].into());
+        assert!(
+            m.has_changes(),
+            "projection and sorting cannot discard pending edits"
+        );
+        assert_eq!(m.value(0, 0), Some(&Some("11".into())));
     }
 
     #[test]

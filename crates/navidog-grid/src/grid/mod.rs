@@ -1,7 +1,7 @@
 //! Result grid: wraps `DataTable` with rectangular selection, in-place editing, change markers, and
 //! copy/paste (21-table-viewer.md §1, §7).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Escape, Input, InputEvent, InputState};
@@ -191,6 +191,7 @@ impl ResultGrid {
             model: GridModel::default(),
             editing: None,
             sort: None,
+            applied_sort: None,
             sort_changed: false,
             rem: window.rem_size(),
             show_type: true,
@@ -252,6 +253,35 @@ impl ResultGrid {
     /// Turns the context menu's quick-filter items on or off.
     pub fn set_quick_filter(&mut self, on: bool) {
         self.quick_filter = on;
+    }
+
+    /// Column name and ascending flag of the header arrow.
+    pub fn header_sort(&self, cx: &App) -> Option<(SharedString, bool)> {
+        let table = self.table.read(cx);
+        let d = table.delegate();
+        d.sort
+            .and_then(|(ix, asc)| d.model.columns.get(ix).map(|c| (c.name.clone(), asc)))
+    }
+
+    /// Records the current header sort as the one the rows follow.
+    pub fn accept_header_sort(&mut self, cx: &mut Context<Self>) {
+        self.table.update(cx, |t, cx| {
+            let d = t.delegate_mut();
+            d.applied_sort = d.sort;
+            cx.notify();
+        });
+    }
+
+    /// Puts the header arrow back on the last sort the rows actually follow.
+    pub fn revert_header_sort(&mut self, cx: &mut Context<Self>) {
+        self.table.update(cx, |t, cx| {
+            let d = t.delegate_mut();
+            d.sort = d.applied_sort;
+            // DataTable writes the new arrow onto its column groups before the delegate runs.
+            // Rebuilding them from `column()` is what puts the old arrow back.
+            t.refresh(cx);
+            cx.notify();
+        });
     }
 
     /// Same path as a header click: `None` clears the sort.
@@ -347,6 +377,7 @@ impl ResultGrid {
                     .position(|c| c.name == name)
                     .map(|i| (i, asc))
             });
+            d.applied_sort = d.sort;
             d.settled = Some(d.model.head().0);
             d.dragged = false;
             d.commit_requested = false;
@@ -358,6 +389,49 @@ impl ResultGrid {
 
     pub fn model<'a>(&self, cx: &'a App) -> &'a GridModel {
         &self.table.read(cx).delegate().model
+    }
+
+    /// Changes which columns are shown using the model's current accepted rows.
+    /// Returns false when pending writes must be committed or discarded first; nothing changes then.
+    pub fn set_hidden_columns(&mut self, hidden: &HashSet<String>, cx: &mut Context<Self>) -> bool {
+        let mut applied = false;
+        self.table.update(cx, |t, cx| {
+            let d = t.delegate_mut();
+            // Resolving an editable target can clear the layout after data was loaded.
+            // Remember the current order before hiding moves columns into the hidden partition.
+            d.layout.sync(&d.names());
+            let sort = d
+                .sort
+                .and_then(|(ix, asc)| d.model.columns.get(ix).map(|c| (c.name.clone(), asc)));
+            if !d.model.set_hidden(hidden) {
+                return;
+            }
+            applied = true;
+            let names = d.names();
+            let order: Vec<_> = d
+                .layout
+                .display_names(&names)
+                .iter()
+                .filter_map(|name| names.iter().position(|n| n == name))
+                .collect();
+            d.model.reorder(&order);
+            d.sort = sort.and_then(|(name, asc)| {
+                d.model
+                    .columns
+                    .iter()
+                    .position(|c| c.name == name)
+                    .map(|ix| (ix, asc))
+            });
+            d.applied_sort = d.sort;
+            d.editing = None;
+            d.settled = Some(d.model.head().0);
+            refit_auto(d, cx);
+            t.refresh(cx);
+        });
+        if applied {
+            cx.notify();
+        }
+        applied
     }
 
     pub fn update_model(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut GridModel)) {

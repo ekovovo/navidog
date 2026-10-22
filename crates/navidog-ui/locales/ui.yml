@@ -24,3 +24,10 @@ tabs:
   add_startup:
     en: Add to Startup Screen
     zh-CN: 添加到启动画面
+ui:
+  outcome_unknown:
+    en: The execution outcome may be unknown. Reopen the connection before continuing.
+    zh-CN: 执行结果可能未知。继续之前请重新打开连接。
+  session_lost:
+    en: Reopen the connection before continuing; its previous session state cannot be restored.
+    zh-CN: 继续之前请重新打开连接；原先的会话状态无法恢复。

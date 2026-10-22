@@ -114,7 +114,7 @@ impl FkPicker {
                             SharedString::default()
                         };
                     }
-                    Ok(Err(e)) => this.note = e.to_string().into(),
+                    Ok(Err(e)) => this.note = crate::db_text(&e).into(),
                     Err(e) => this.note = e.to_string().into(),
                 }
                 cx.notify();

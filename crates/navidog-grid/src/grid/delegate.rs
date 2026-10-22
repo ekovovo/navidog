@@ -9,6 +9,8 @@ pub struct GridDelegate {
     pub model: GridModel,
     pub(super) editing: Option<(Pos, Entity<InputState>)>,
     pub(super) sort: Option<(usize, bool)>,
+    /// The sort the rows were last reordered by. A refused header click restores `sort` to this.
+    pub(super) applied_sort: Option<(usize, bool)>,
     pub(super) sort_changed: bool,
     pub(super) rem: Pixels,
     /// Show the field type or comment in the column header (F-DATA-013)

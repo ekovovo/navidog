@@ -283,6 +283,26 @@ impl Sessions {
         }))
     }
 
+    /// Runs on a new session and closes it before returning. The shared metadata session
+    /// is not used, so an application write cannot pin it against idle recovery.
+    pub fn run_once<T: Send + 'static>(
+        &self,
+        id: &str,
+        database: Option<&str>,
+        f: impl for<'a> FnOnce(&'a mut dyn Relational) -> BoxFuture<'a, DbResult<T>> + Send + 'static,
+    ) -> Option<JoinHandle<DbResult<T>>> {
+        let open = self.new_session(id, database)?;
+        Some(runtime::spawn(async move {
+            let session = open.await.map_err(|e| DbError::msg(e.to_string()))??;
+            let shared = Arc::new(Mutex::new(Some(session)));
+            let result = with_rel(&shared, f).await;
+            if let Some(session) = shared.lock().await.take() {
+                let _ = session.close().await;
+            }
+            result
+        }))
+    }
+
     /// Opens a separate session (table viewer, query editor); the caller holds and closes it.
     pub fn new_session(
         &self,
@@ -299,6 +319,20 @@ impl Sessions {
         let driver = live.driver.clone();
         Some(runtime::spawn(crate::connect(driver, params)))
     }
+}
+
+/// MySQL sessions start in the server's default database. Point one at `database` before an
+/// application write. PostgreSQL already connected to that database via `new_session`.
+pub async fn prepare_database(
+    rel: &mut dyn Relational,
+    dialect: Dialect,
+    database: &str,
+) -> DbResult<()> {
+    if dialect == Dialect::MySql && !database.is_empty() {
+        rel.execute(&format!("USE {}", dialect.quote_ident(database)))
+            .await?;
+    }
+    Ok(())
 }
 
 /// Runs on a session the caller holds (table viewer, query editor).

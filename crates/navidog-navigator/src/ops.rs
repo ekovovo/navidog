@@ -15,7 +15,7 @@ use navidog_core::queries;
 use navidog_core::workspace::{Selection, Workspace};
 use navidog_db::DbError;
 use navidog_db::dialect::Dialect;
-use navidog_db::sessions::Sessions;
+use navidog_db::sessions::{Sessions, prepare_database};
 use navidog_ui::assets::lucide;
 use rust_i18n::t;
 
@@ -197,8 +197,9 @@ fn confirm(message: String, stmts: Vec<(ObjectRef, String)>, window: &mut Window
     });
 }
 
-/// Runs the statements in order on each object's metadata session, then reloads the affected
-/// object lists and selects `then` on success. The first error is shown as the database reported it.
+/// Runs the statements in order, each on a session opened for that statement, then reloads the
+/// affected object lists and selects `then` on success. The first error is shown as the database
+/// reported it. The shared metadata session is left untouched.
 pub(crate) fn run(
     stmts: Vec<(ObjectRef, String)>,
     then: Option<Selection>,
@@ -210,12 +211,24 @@ pub(crate) fn run(
             let mut error = None;
             for (obj, sql) in &stmts {
                 let sql = sql.clone();
+                let database = obj.scope.database.clone();
+                let dialect = cx
+                    .update(|_, cx| Sessions::global(cx).read(cx).dialect(&obj.scope.connection))
+                    .ok()
+                    .flatten();
                 let job = cx
                     .update(|_, cx| {
-                        Sessions::global(cx).read(cx).run_rel(
+                        Sessions::global(cx).read(cx).run_once(
                             &obj.scope.connection,
                             Some(&obj.scope.database),
-                            |r| Box::pin(async move { r.execute(&sql).await.map(|_| ()) }),
+                            move |r| {
+                                Box::pin(async move {
+                                    if let Some(dialect) = dialect {
+                                        prepare_database(r, dialect, &database).await?;
+                                    }
+                                    r.execute(&sql).await.map(|_| ())
+                                })
+                            },
                         )
                     })
                     .ok()
@@ -224,7 +237,7 @@ pub(crate) fn run(
                 if let Err(e) = job
                     .await
                     .map_err(|e| e.to_string())
-                    .and_then(|r| r.map_err(|e| e.to_string()))
+                    .and_then(|r| r.map_err(|e| crate::db_text(&e)))
                 {
                     error = Some(e);
                     break;
@@ -288,11 +301,12 @@ fn duplicate(with_data: bool, window: &mut Window, cx: &mut App) {
         ..o.clone()
     };
     let (src, target) = (o.clone(), new);
-    let Some(job) = Sessions::global(cx).read(cx).run_rel(
+    let Some(job) = Sessions::global(cx).read(cx).run_once(
         &o.scope.connection,
         Some(&o.scope.database),
         move |r| {
             Box::pin(async move {
+                prepare_database(r, d, &src.scope.database).await?;
                 let ddl = match d {
                     Dialect::Sqlite => Some(r.object_ddl(&src.scope, src.kind, &src.name).await?),
                     _ => None,
@@ -314,7 +328,7 @@ fn duplicate(with_data: bool, window: &mut Window, cx: &mut App) {
             let result = job
                 .await
                 .map_err(|e| e.to_string())
-                .and_then(|r| r.map_err(|e| e.to_string()));
+                .and_then(|r| r.map_err(|e| crate::db_text(&e)));
             let _ = cx.update(|window, cx| {
                 refresh(std::iter::once(&copy), cx);
                 match result {

@@ -45,6 +45,7 @@ mod macos {
         );
         cx.update(|cx| {
             navidog::init(cx);
+            cx.set_reduce_motion(true);
             seed(cx);
         });
         let (handle, view) = cx
@@ -103,6 +104,60 @@ mod macos {
             cx.update_window(handle, |_, window, cx| window.close_all_dialogs(cx))
                 .unwrap();
         }
+
+        // Failed persistence keeps the editable connection form open with its entered values.
+        let original_connections =
+            cx.update(|cx| ConnectionStore::global(cx).read(cx).file().clone());
+        let original_bytes = std::fs::read(home.join("connections.json")).unwrap();
+        std::fs::create_dir(home.join("connections.tmp")).unwrap();
+        dispatch(
+            &mut cx,
+            Box::new(NewConnectionOf {
+                driver: "mysql".into(),
+            }),
+        );
+        cx.run_until_parked();
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            window.click("conn-name", cx);
+            window.press("secondary-a", cx);
+            window.input("保存失败示例", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            window.click("ok", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            assert!(
+                window.try_find("conn-name").is_some(),
+                "failed save retains the form"
+            );
+            assert!(
+                ConnectionStore::global(cx).read(cx).file() == &original_connections,
+                "failed save retains the existing connections"
+            );
+        })
+        .unwrap();
+        assert!(
+            std::fs::read(home.join("connections.json")).unwrap() == original_bytes,
+            "failed save leaves the original configuration on disk"
+        );
+        for (mode, name) in [
+            (ThemeMode::Light, "connection-save-failed-light.png"),
+            (ThemeMode::Dark, "connection-save-failed-dark.png"),
+        ] {
+            cx.update(|cx| Theme::change(mode, None, cx));
+            shot(&mut cx, name);
+        }
+        std::fs::remove_dir(home.join("connections.tmp")).unwrap();
+        cx.update_window(handle, |_, window, cx| window.close_all_dialogs(cx))
+            .unwrap();
+        cx.update(|cx| Theme::change(ThemeMode::Light, None, cx));
 
         // M2: open the sample SQLite database, expand to objects, show the object list and editor tabs
         let lite = cx.update(|cx| {
@@ -497,7 +552,7 @@ mod macos {
         let store = ConnectionStore::global(cx);
         store.update(cx, |s, cx| {
             s.set_key(Key::random());
-            let group = s.add_group("生产环境".into(), None, cx);
+            let group = s.add_group("生产环境".into(), None, cx).unwrap();
             let mut my = Connection::new("mysql");
             my.name = "本地 MySQL".into();
             my.color = Some("blue".into());

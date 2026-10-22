@@ -1,8 +1,11 @@
 //! Domain model, config directory, encrypted storage, registries and cross-feature actions.
-//! Depends on no UI components.
+//! Depends on no UI components. Localized store errors live here so every feature crate
+//! can show them without depending on one another.
 
 // The Action derive macro emits `gpui::` paths
 extern crate gpui_kit as gpui;
+
+rust_i18n::i18n!("locales", fallback = "en");
 
 pub mod actions;
 pub mod column_widths;

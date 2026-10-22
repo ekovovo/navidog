@@ -3,6 +3,7 @@
 
 pub mod dialect;
 pub mod driver;
+mod execution;
 mod keywords;
 pub mod log;
 mod metadata;

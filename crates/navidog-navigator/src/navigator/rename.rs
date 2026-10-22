@@ -2,17 +2,27 @@
 
 use super::*;
 
+use navidog_core::store::error_message;
+
 impl NavigatorPanel {
     pub(crate) fn new_group(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let parent = match Workspace::global(cx).read(cx).selection() {
             Selection::Group(g) => Some(g.clone()),
             _ => None,
         };
+        let name = t!("nav.new_group_default").to_string();
+        let result =
+            ConnectionStore::global(cx).update(cx, |s, cx| s.add_group(name, parent.clone(), cx));
+        let id = match result {
+            Ok(id) => id,
+            Err(error) => {
+                window.push_notification(error_message(&error), cx);
+                return;
+            }
+        };
         if let Some(p) = &parent {
             self.expanded.insert(Node::Group(p.clone()).id());
         }
-        let name = t!("nav.new_group_default").to_string();
-        let id = ConnectionStore::global(cx).update(cx, |s, cx| s.add_group(name, parent, cx));
         Workspace::global(cx).update(cx, |w, cx| w.select(Selection::Group(id.clone()), cx));
         self.start_rename(id, window, cx);
     }
@@ -137,9 +147,16 @@ impl NavigatorPanel {
         if !commit || name.is_empty() {
             return;
         }
-        match r.target {
+        match r.target.clone() {
             RenameTarget::Group(g) => {
-                ConnectionStore::global(cx).update(cx, |s, cx| s.rename_group(&g, name, cx))
+                let result =
+                    ConnectionStore::global(cx).update(cx, |s, cx| s.rename_group(&g, name, cx));
+                if let Err(error) = result {
+                    window.push_notification(error_message(&error), cx);
+                    r.input.update(cx, |input, cx| input.focus(window, cx));
+                    self.renaming = Some(r);
+                    self.refresh_rows(cx);
+                }
             }
             RenameTarget::VGroup(g) => {
                 VirtualGroups::global(cx).update(cx, |s, cx| s.rename_group(&g, name, cx))

@@ -670,3 +670,74 @@ fn click_past_the_last_column_selects_the_row(cx: &mut TestAppContext) {
     .unwrap();
     assert_eq!(selection(cx), (1..=1, 0..=0));
 }
+
+#[gpui_kit::test]
+fn hiding_a_column_keeps_a_pending_write(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        navidog_ui::theme::init(cx);
+        navidog_grid::init(cx);
+    });
+    let (_handle, grid): (_, Entity<ResultGrid>) = cx.update(|cx| {
+        // raw-px: test window size
+        let test_size = size(gpui_kit::px(800.), gpui_kit::px(400.));
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(gpui_kit::Bounds {
+                origin: Default::default(),
+                size: test_size,
+            })),
+            ..Default::default()
+        };
+        gpui_kit::open_window(options, cx, |window, cx| {
+            cx.new(|cx| ResultGrid::new(window, cx))
+        })
+        .unwrap()
+    });
+    let cell = |s: &str| Some(s.to_string().into());
+    cx.update(|cx| {
+        grid.update(cx, |g, cx| {
+            g.set_data(
+                vec![col("id", true), col("name", false)],
+                vec![vec![cell("1"), cell("a")], vec![cell("2"), cell("b")]],
+                cx,
+            );
+            g.update_model(cx, |m| m.set_value(0, 1, Some("z".into())));
+            assert!(!g.set_hidden_columns(&["id".into()].into(), cx));
+            let model = g.model(cx);
+            assert_eq!(
+                model
+                    .columns
+                    .iter()
+                    .map(|c| c.name.as_ref())
+                    .collect::<Vec<_>>(),
+                ["id", "name"]
+            );
+            assert!(model.has_changes());
+            assert_eq!(model.value(0, 1).and_then(|v| v.as_deref()), Some("z"));
+            g.update_model(cx, |m| {
+                m.discard();
+                m.insert_row();
+            });
+            assert!(g.set_hidden_columns(&["id".into()].into(), cx));
+            let model = g.model(cx);
+            assert_eq!(
+                model
+                    .columns
+                    .iter()
+                    .map(|c| c.name.as_ref())
+                    .collect::<Vec<_>>(),
+                ["name"]
+            );
+            assert_eq!(
+                model
+                    .all_columns()
+                    .map(|c| c.name.as_ref())
+                    .collect::<Vec<_>>(),
+                ["name", "id"]
+            );
+            let blank = model.row_count() - 1;
+            assert!(model.value(blank, 0).is_none());
+            assert_eq!(model.value(0, 0).and_then(|v| v.as_deref()), Some("a"));
+        })
+    });
+}

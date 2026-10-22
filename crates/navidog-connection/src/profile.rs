@@ -31,12 +31,16 @@ fn change(
     window: &mut Window,
     cx: &mut App,
     f: impl FnOnce(&mut navidog_core::connection::Connection),
-) {
+) -> bool {
     let open = Sessions::global(cx).read(cx).state(id).is_open();
-    ConnectionStore::global(cx).update(cx, |s, cx| s.update(id, f, cx));
+    if let Err(error) = ConnectionStore::global(cx).update(cx, |s, cx| s.update(id, f, cx)) {
+        window.push_notification(crate::store_error_message(&error), cx);
+        return false;
+    }
     if open {
         crate::reopen_connection(id.to_string(), window, cx);
     }
+    true
 }
 
 pub fn switch(id: &str, name: &str, window: &mut Window, cx: &mut App) {
@@ -68,8 +72,7 @@ pub fn delete(id: String, window: &mut Window, cx: &mut App) {
             .on_ok(move |_, window, cx| {
                 change(&id, window, cx, |c| {
                     c.remove_active_profile();
-                });
-                true
+                })
             })
     });
 }
@@ -107,10 +110,11 @@ impl NewProfile {
         if name.is_empty() || taken {
             return;
         }
-        window.close_dialog(cx);
         let id = self.id.clone();
-        change(&id, window, cx, |c| c.add_profile(name));
-        crate::form::open_edit(id, window, cx);
+        if change(&id, window, cx, |c| c.add_profile(name)) {
+            window.close_dialog(cx);
+            crate::form::open_edit(id, window, cx);
+        }
     }
 }
 

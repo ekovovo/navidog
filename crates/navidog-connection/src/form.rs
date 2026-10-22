@@ -524,7 +524,7 @@ impl ConnectionForm {
             let result = job
                 .await
                 .map_err(|e| e.to_string())
-                .and_then(|r| r.map_err(|e| e.to_string()));
+                .and_then(|r| r.map_err(|e| crate::db_text(&e)));
             let _ = this.update_in(cx, |this, window, cx| {
                 this.testing = None;
                 cx.notify();
@@ -572,7 +572,7 @@ impl ConnectionForm {
         let was_open = Sessions::global(cx).read(cx).state(&id).is_open();
         let store = ConnectionStore::global(cx);
         if let Err(e) = store.update(cx, |s, cx| s.upsert(conn, &secrets, cx)) {
-            self.error = Some(e.to_string().into());
+            self.error = Some(crate::store_error_message(&e).into());
             cx.notify();
             return;
         }

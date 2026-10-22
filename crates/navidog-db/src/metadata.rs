@@ -1,5 +1,5 @@
 //! Metadata queries (20-objects.md §3). Every dialect's SQL lives here and runs through
-//! `Relational::execute`; drivers only declare their dialect.
+//! `Relational::execute_read`; drivers only declare their dialect.
 
 use navidog_core::object::{ObjectKind, Scope};
 
@@ -9,7 +9,7 @@ use crate::driver::{
 };
 
 async fn query<R: Relational + ?Sized>(r: &mut R, sql: &str) -> DbResult<ResultSet> {
-    let mut sets = r.execute(sql).await?;
+    let mut sets = r.execute_read(sql).await?;
     sets.drain(..)
         .find(|s| !s.columns.is_empty())
         .ok_or_else(|| DbError::msg("查询没有返回结果集"))

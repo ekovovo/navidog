@@ -78,7 +78,7 @@ pub async fn fetch(rel: &mut dyn Relational, scope: &Scope, system: bool) -> DbR
         Dialect::MySql => {
             let db = lit(&scope.database);
             out.tables = rows(
-                rel.execute(&format!(
+                rel.execute_read(&format!(
                     "SELECT TABLE_NAME, TABLE_TYPE FROM information_schema.TABLES \
                      WHERE TABLE_SCHEMA = {db} ORDER BY TABLE_NAME"
                 ))
@@ -92,7 +92,7 @@ pub async fn fetch(rel: &mut dyn Relational, scope: &Scope, system: bool) -> DbR
             })
             .collect();
             let columns = rows(
-                rel.execute(&format!(
+                rel.execute_read(&format!(
                     "SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE FROM information_schema.COLUMNS \
                      WHERE TABLE_SCHEMA = {db} ORDER BY TABLE_NAME, ORDINAL_POSITION"
                 ))
@@ -100,7 +100,7 @@ pub async fn fetch(rel: &mut dyn Relational, scope: &Scope, system: bool) -> DbR
             );
             group_columns(&mut out.tables, columns);
             out.functions = rows(
-                rel.execute(&format!(
+                rel.execute_read(&format!(
                     "SELECT ROUTINE_NAME FROM information_schema.ROUTINES \
                      WHERE ROUTINE_SCHEMA = {db} ORDER BY ROUTINE_NAME"
                 ))
@@ -122,7 +122,7 @@ pub async fn fetch(rel: &mut dyn Relational, scope: &Scope, system: bool) -> DbR
             }
             let list = wanted.join(", ");
             out.tables = rows(
-                rel.execute(&format!(
+                rel.execute_read(&format!(
                     "SELECT c.relname, c.relkind FROM pg_class c \
                      JOIN pg_namespace n ON n.oid = c.relnamespace \
                      WHERE n.nspname IN ({list}) AND c.relkind IN ('r', 'p', 'v', 'm', 'f') \
@@ -138,7 +138,7 @@ pub async fn fetch(rel: &mut dyn Relational, scope: &Scope, system: bool) -> DbR
             })
             .collect();
             let columns = rows(
-                rel.execute(&format!(
+                rel.execute_read(&format!(
                     "SELECT c.relname, a.attname, format_type(a.atttypid, a.atttypmod) \
                      FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid \
                      JOIN pg_namespace n ON n.oid = c.relnamespace \
@@ -149,7 +149,7 @@ pub async fn fetch(rel: &mut dyn Relational, scope: &Scope, system: bool) -> DbR
             );
             group_columns(&mut out.tables, columns);
             out.functions = rows(
-                rel.execute(&format!(
+                rel.execute_read(&format!(
                     "SELECT DISTINCT p.proname FROM pg_proc p \
                      JOIN pg_namespace n ON n.oid = p.pronamespace \
                      WHERE n.nspname IN ({list}) ORDER BY p.proname"
@@ -168,7 +168,7 @@ pub async fn fetch(rel: &mut dyn Relational, scope: &Scope, system: bool) -> DbR
             let db = d.quote_ident(&scope.database);
             let dbl = lit(&scope.database);
             out.tables = rows(
-                rel.execute(&format!(
+                rel.execute_read(&format!(
                     "SELECT name, type FROM {db}.sqlite_schema \
                      WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' \
                      ORDER BY name"
@@ -183,7 +183,7 @@ pub async fn fetch(rel: &mut dyn Relational, scope: &Scope, system: bool) -> DbR
             })
             .collect();
             let columns = rows(
-                rel.execute(&format!(
+                rel.execute_read(&format!(
                     "SELECT m.name, p.name, p.type FROM {db}.sqlite_schema m \
                      JOIN pragma_table_xinfo(m.name, {dbl}) p \
                      WHERE m.type IN ('table', 'view') AND m.name NOT LIKE 'sqlite\\_%' ESCAPE '\\' \

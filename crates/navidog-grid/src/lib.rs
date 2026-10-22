@@ -25,3 +25,12 @@ pub fn init(cx: &mut gpui_kit::App) {
     grid::init(cx);
     viewer::init(cx);
 }
+
+pub(crate) fn db_text(e: &navidog_db::DbError) -> String {
+    navidog_ui::db_error_text(
+        e.code.as_deref(),
+        &e.message,
+        e.disconnected,
+        e.outcome_unknown,
+    )
+}

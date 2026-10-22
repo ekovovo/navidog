@@ -199,3 +199,12 @@ pub fn status_text(cx: &App) -> SharedString {
         None => SharedString::default(),
     }
 }
+
+pub(crate) fn db_text(e: &navidog_db::DbError) -> String {
+    navidog_ui::db_error_text(
+        e.code.as_deref(),
+        &e.message,
+        e.disconnected,
+        e.outcome_unknown,
+    )
+}

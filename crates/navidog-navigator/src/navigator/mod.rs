@@ -12,7 +12,9 @@ use gpui_kit::component::input::{Escape, Input, InputEvent, InputState};
 use gpui_kit::component::list::ListItem;
 use gpui_kit::component::native_menu::NativeMenu;
 use gpui_kit::component::scroll::ScrollableElement as _;
-use gpui_kit::component::{Icon, IconName, Selectable as _, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{
+    Icon, IconName, Selectable as _, Sizable as _, WindowExt, h_flex, v_flex,
+};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, AppContext as _, ClickEvent, Context, ElementId, Entity, EventEmitter,
@@ -24,7 +26,7 @@ use navidog_core::actions::*;
 use navidog_core::connection::Connection;
 use navidog_core::object::{ObjectKind, ObjectRef, Scope};
 use navidog_core::settings::Settings;
-use navidog_core::store::ConnectionStore;
+use navidog_core::store::{ConnectionStore, error_message};
 use navidog_core::vgroups::VirtualGroups;
 use navidog_core::workspace::{Selection, Workspace, WorkspaceEvent};
 use navidog_db::dialect::Dialect;
@@ -323,12 +325,13 @@ impl Render for DraggedConnections {
     }
 }
 
-fn move_connections(ids: &[String], group: Option<String>, cx: &mut App) {
-    ConnectionStore::global(cx).update(cx, |s, cx| {
-        for id in ids {
-            s.move_to_group(id, group.clone(), cx);
-        }
+fn move_connections(ids: &[String], group: Option<String>, window: &mut Window, cx: &mut App) {
+    let result = ConnectionStore::global(cx).update(cx, |s, cx| {
+        s.update_many(ids, |c| c.group = group.clone(), cx)
     });
+    if let Err(error) = result {
+        window.push_notification(error_message(&error), cx);
+    }
 }
 
 /// A group or object being renamed in place.
@@ -839,8 +842,8 @@ impl Render for NavigatorPanel {
                     Self::context_menu(None, cx).show(e.position, window, cx);
                 }),
             )
-            .on_drop(cx.listener(|_, d: &DraggedConnections, _, cx| {
-                move_connections(&d.ids(cx), None, cx)
+            .on_drop(cx.listener(|_, d: &DraggedConnections, window, cx| {
+                move_connections(&d.ids(cx), None, window, cx)
             }))
             .child(
                 div()

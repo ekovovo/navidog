@@ -1,0 +1,20 @@
+_version: 2
+core:
+  store_locked:
+    en: Navidog is locked. Open a connection with a saved password and enter the master password first.
+    zh-CN: 需要先解锁：打开一个保存了密码的连接，输入主密码。
+  not_found:
+    en: The connection or group could not be found.
+    zh-CN: 找不到这个连接或组。
+  save_failed:
+    en: "Connection settings could not be saved: %{detail}"
+    zh-CN: "无法保存连接设置：%{detail}"
+  secret_unreadable:
+    en: A saved password cannot be decrypted with the current key.
+    zh-CN: 有保存的密码无法用当前的密钥解开。
+  keychain_failed:
+    en: "The machine key cannot be read: %{detail}"
+    zh-CN: "无法读取本机密钥：%{detail}"
+  kdf_failed:
+    en: "The master password key could not be derived: %{detail}"
+    zh-CN: "主密码派生失败：%{detail}"

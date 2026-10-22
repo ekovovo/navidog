@@ -161,12 +161,12 @@ impl Render for Manage {
             .child(
                 button("manage-star", "star", t!("conn.manage_star").to_string())
                     .disabled(none)
-                    .on_click(|_, _, cx| crate::toggle_star(cx)),
+                    .on_click(|_, window, cx| crate::toggle_star(window, cx)),
             )
             .child(
                 button("manage-hide", "eye-off", t!("conn.manage_hide").to_string())
                     .disabled(none)
-                    .on_click(|_, _, cx| crate::toggle_hidden(cx)),
+                    .on_click(|_, window, cx| crate::toggle_hidden(window, cx)),
             )
             .child(
                 button("manage-delete", "trash", t!("conn.delete").to_string())

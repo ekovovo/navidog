@@ -7,14 +7,12 @@ impl TableViewer {
         self.dialect.unwrap_or(Dialect::Sqlite)
     }
 
-    pub(super) fn field_names(&self) -> Vec<String> {
-        if self.raw_columns.is_empty() {
+    pub(super) fn field_names(&self, cx: &App) -> Vec<String> {
+        let model = self.grid.read(cx).model(cx);
+        if model.all_columns().next().is_none() {
             self.columns.iter().map(|c| c.name.clone()).collect()
         } else {
-            self.raw_columns
-                .iter()
-                .map(|c| c.name.to_string())
-                .collect()
+            model.all_columns().map(|c| c.name.to_string()).collect()
         }
     }
 
@@ -154,7 +152,7 @@ impl TableViewer {
     }
 
     pub(super) fn add_rule(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let field = self.field_names().into_iter().next().unwrap_or_default();
+        let field = self.field_names(cx).into_iter().next().unwrap_or_default();
         self.rules.push(Self::make_draft(
             Rule {
                 field,
@@ -323,7 +321,8 @@ impl TableViewer {
                     .label(field)
                     .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                         this.focus_for_menu(window, cx);
-                        this.field_menu(index).show(event.position(), window, cx);
+                        this.field_menu(index, cx)
+                            .show(event.position(), window, cx);
                     })),
             )
             .child(
@@ -383,7 +382,7 @@ impl TableViewer {
                     .label(field)
                     .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                         this.focus_for_menu(window, cx);
-                        this.sort_menu(index).show(event.position(), window, cx);
+                        this.sort_menu(index, cx).show(event.position(), window, cx);
                     })),
             )
             .child(
@@ -449,15 +448,15 @@ impl TableViewer {
                 .icon(lucide("plus"))
                 .label(t!("viewer.add_sort").to_string())
                 .on_click(cx.listener(|this, _, _, cx| {
-                    let field = this.field_names().into_iter().next().unwrap_or_default();
+                    let field = this.field_names(cx).into_iter().next().unwrap_or_default();
                     this.sorts.push(Sort { field, asc: true });
                     cx.notify();
                 })),
         )
     }
 
-    pub(super) fn field_menu(&self, index: usize) -> NativeMenu {
-        self.field_names()
+    pub(super) fn field_menu(&self, index: usize, cx: &App) -> NativeMenu {
+        self.field_names(cx)
             .into_iter()
             .fold(NativeMenu::new(), |menu, name| {
                 menu.menu(
@@ -484,8 +483,8 @@ impl TableViewer {
             })
     }
 
-    pub(super) fn sort_menu(&self, index: usize) -> NativeMenu {
-        self.field_names()
+    pub(super) fn sort_menu(&self, index: usize, cx: &App) -> NativeMenu {
+        self.field_names(cx)
             .into_iter()
             .fold(NativeMenu::new(), |menu, name| {
                 menu.menu(

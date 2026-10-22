@@ -129,6 +129,7 @@ struct AskPassword {
     inputs: Vec<(SecretField, Entity<InputState>)>,
     secrets: Secrets,
     save: bool,
+    error: Option<SharedString>,
     then: Then,
 }
 
@@ -150,6 +151,7 @@ impl AskPassword {
             inputs,
             secrets,
             save: false,
+            error: None,
             then,
         }
     }
@@ -172,8 +174,11 @@ impl AskPassword {
                 }
             }
             let store = ConnectionStore::global(cx);
-            if let Err(e) = store.update(cx, |s, cx| s.upsert(conn, &to_save, cx)) {
-                tracing::warn!("保存密码失败: {e}");
+            if store
+                .update(cx, |s, cx| s.upsert(conn, &to_save, cx))
+                .is_err()
+            {
+                window.push_notification(t!("conn.password_not_saved").to_string(), cx);
             }
         }
         window.close_dialog(cx);
@@ -208,6 +213,11 @@ impl Render for AskPassword {
                 )
                 .hug_label(),
             )
+            .when_some(self.error.clone(), |view, error| {
+                view.child(
+                    FormRow::bare(div().text_color(palette(cx).danger).child(error)).hug_label(),
+                )
+            })
             .child(footer(
                 t!("conn.ok").to_string(),
                 cx.listener(|this, _, window, cx| this.confirm(window, cx)),

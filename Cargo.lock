@@ -5068,6 +5068,7 @@ dependencies = [
  "chacha20poly1305",
  "gpui-kit",
  "keyring",
+ "rust-i18n",
  "serde",
  "serde_json",
  "thiserror 2.0.21",

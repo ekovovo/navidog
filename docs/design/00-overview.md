@@ -12,6 +12,7 @@ navidog 用 [gpui-kit](https://gpui-kit.com/zh-CN/docs/) 全家桶（GPUI、`gpu
 | 本文 | 决策记录、架构、工程规则、里程碑 |
 | [01-feature-inventory.md](01-feature-inventory.md) | 全量功能清单（编号、摘要、验收要点、Navicat 帮助页、里程碑） |
 | [02-design-tokens.md](02-design-tokens.md) | 设计 token 表（每项附来源） |
+| [05-architecture-foundations.md](05-architecture-foundations.md) | 会话执行安全、配置保存事务与结果数据归属 |
 | [03-plugin-api.md](03-plugin-api.md) | 注册表、插件 manifest、HostModule `navidog`、JS 驱动协议 |
 | [10-shell.md](10-shell.md) | M1：主窗口、工具栏、Dock、菜单栏、状态栏 |
 | [11-connection.md](11-connection.md) | M1：连接管理与连接对话框 |

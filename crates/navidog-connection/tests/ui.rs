@@ -45,6 +45,7 @@ fn wait_open(cx: &mut TestAppContext, id: &str) {
 
 #[gpui_kit::test]
 fn creates_and_opens_sqlite_connection(cx: &mut TestAppContext) {
+    cx.executor().allow_parking();
     let home = std::env::temp_dir().join(format!("navidog-ui-test-{}", std::process::id()));
     let db_file = home.join("app.db");
     // SAFETY: this test binary has a single test; nothing else reads the environment concurrently
@@ -166,6 +167,66 @@ fn creates_and_opens_sqlite_connection(cx: &mut TestAppContext) {
     dispatch(cx, Box::new(SwitchProfile { name: "".into() }));
     wait_open(cx, &id);
     assert_eq!(profile(cx), ("".into(), 1));
+
+    // A failed profile save leaves the form and current live session available for retry.
+    let original = std::fs::read(home.join("connections.json")).unwrap();
+    std::fs::create_dir(home.join("connections.tmp")).unwrap();
+    let reconnects = std::rc::Rc::new(std::cell::Cell::new(0));
+    let seen = reconnects.clone();
+    let _subscription = cx.update(|cx| {
+        cx.subscribe(
+            &Sessions::global(cx),
+            move |_, event: &navidog_db::sessions::SessionsEvent, _| {
+                if matches!(event, navidog_db::sessions::SessionsEvent::Reopening(_)) {
+                    seen.set(seen.get() + 1);
+                }
+            },
+        )
+    });
+    dispatch(
+        cx,
+        Box::new(SwitchProfile {
+            name: "只读".into(),
+        }),
+    );
+    assert_eq!(profile(cx), ("".into(), 1));
+    assert_eq!(reconnects.get(), 0);
+    dispatch(cx, Box::new(NewProfile));
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("profile-name", cx);
+        window.input("retry", cx);
+        window.click("ok", cx);
+        window.render_frame(cx);
+        assert!(
+            window.try_find("profile-name").is_some(),
+            "failed save keeps the profile form"
+        );
+    })
+    .unwrap();
+    assert_eq!(profile(cx), ("".into(), 1));
+    assert_eq!(
+        reconnects.get(),
+        0,
+        "no reconnect before persistence succeeds"
+    );
+    assert!(cx.update(|cx| Sessions::global(cx).read(cx).state(&id).is_open()));
+    assert!(std::fs::read(home.join("connections.json")).unwrap() == original);
+    std::fs::remove_dir(home.join("connections.tmp")).unwrap();
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("ok", cx);
+        window.render_frame(cx);
+        assert!(
+            window.try_find("conn-name").is_some(),
+            "successful retry opens the profile editor"
+        );
+        window.click("cancel", cx);
+    })
+    .unwrap();
+    wait_open(cx, &id);
+    assert_eq!(profile(cx), ("retry".into(), 2));
+    assert_eq!(reconnects.get(), 1);
 
     // Manage Connections: the search filters rows, the star button stars the selected connection
     dispatch(cx, Box::new(ManageConnections));

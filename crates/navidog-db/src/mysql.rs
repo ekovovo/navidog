@@ -14,6 +14,7 @@ use crate::driver::{
     CancelHandle, Column, ColumnOrigin, DbError, DbResult, Driver, DriverInfo, Family, Relational,
     ResultSet, Session,
 };
+use crate::execution::{Cancellation, RecoveryState, interrupted};
 use crate::log::{Tag, logged};
 use crate::params::ConnectParams;
 
@@ -123,6 +124,12 @@ impl Driver for MySqlDriver {
             let version: Option<String> =
                 conn.query_first("SELECT VERSION()").await.map_err(err)?;
             tag.session = conn.id() as u64;
+            let cancellation = Cancellation::default();
+            let cancel_opts = opts.clone();
+            let id = conn.id();
+            cancellation.replace(Arc::new(move || {
+                kill_query(cancel_opts.clone(), id).boxed()
+            }));
             Ok(Box::new(MySqlSession {
                 conn,
                 opts,
@@ -131,6 +138,8 @@ impl Driver for MySqlDriver {
                 connect_timeout: params.timeout(),
                 tag,
                 setup: None,
+                recovery: RecoveryState::new(&params.initial_queries, Dialect::MySql),
+                cancellation,
             }) as Box<dyn Session>)
         }
         .boxed()
@@ -146,18 +155,26 @@ pub struct MySqlSession {
     tag: Tag,
     /// Last successful `USE`; replayed after a transparent reconnect.
     setup: Option<String>,
+    recovery: RecoveryState,
+    cancellation: Cancellation,
 }
 
 impl MySqlSession {
     /// Opens a new connection with the options from the original connect and drops the dead one.
     async fn reconnect(&mut self) -> DbResult<()> {
+        self.cancellation.clear();
         let conn = tokio::time::timeout(self.connect_timeout, Conn::new(self.opts.clone()))
             .await
             .map_err(|_| DbError::msg("连接超时"))?
             .map_err(err)?;
         drop(std::mem::replace(&mut self.conn, conn));
         self.tag.session = self.conn.id() as u64;
-        self.replay().await
+        self.replay().await?;
+        let opts = self.opts.clone();
+        let id = self.conn.id();
+        self.cancellation
+            .replace(Arc::new(move || kill_query(opts.clone(), id).boxed()));
+        Ok(())
     }
 
     fn remember(&mut self, sql: &str) {
@@ -216,22 +233,28 @@ impl Session for MySqlSession {
 
     fn ping(&mut self) -> BoxFuture<'_, DbResult<()>> {
         async move {
-            match self.conn.ping().await.map_err(err) {
-                Err(e) if e.disconnected => {
-                    tracing::warn!("MySQL connection lost ({e}); reconnecting");
+            let result = match self.conn.ping().await.map_err(err) {
+                Err(e) if e.disconnected && self.recovery.can_reconnect() => {
+                    tracing::warn!("MySQL metadata session lost ({e}); reconnecting");
                     self.reconnect().await?;
                     self.conn.ping().await.map_err(err)
                 }
                 other => other,
-            }
+            };
+            result.map_err(|e| {
+                if e.disconnected {
+                    self.cancellation.clear();
+                    interrupted(e, false)
+                } else {
+                    e
+                }
+            })
         }
         .boxed()
     }
 
     fn cancel_handle(&self) -> Option<CancelHandle> {
-        let opts = self.opts.clone();
-        let id = self.conn.id();
-        Some(Arc::new(move || kill_query(opts.clone(), id).boxed()))
+        Some(self.cancellation.handle())
     }
 
     fn session_id(&self) -> Option<u64> {
@@ -239,6 +262,7 @@ impl Session for MySqlSession {
     }
 
     fn close(self: Box<Self>) -> BoxFuture<'static, DbResult<()>> {
+        self.cancellation.clear();
         async move { self.conn.disconnect().await.map_err(err) }.boxed()
     }
 
@@ -254,18 +278,40 @@ impl Relational for MySqlSession {
 
     fn execute<'a>(&'a mut self, sql: &'a str) -> BoxFuture<'a, DbResult<Vec<ResultSet>>> {
         async move {
+            self.recovery.observe(sql);
+            let result = self.attempt(sql).await.map_err(|e| {
+                if e.disconnected {
+                    self.cancellation.clear();
+                    interrupted(e, true)
+                } else {
+                    e
+                }
+            });
+            if result.is_ok() {
+                self.remember(sql);
+            }
+            result
+        }
+        .boxed()
+    }
+
+    fn execute_read<'a>(&'a mut self, sql: &'a str) -> BoxFuture<'a, DbResult<Vec<ResultSet>>> {
+        async move {
             let result = match self.attempt(sql).await {
-                Err(e) if e.disconnected => {
-                    tracing::warn!("MySQL connection lost ({e}); reconnecting");
+                Err(e) if e.disconnected && self.recovery.can_reconnect() => {
                     self.reconnect().await?;
                     self.attempt(sql).await
                 }
                 other => other,
             };
-            if result.is_ok() {
-                self.remember(sql);
-            }
-            result
+            result.map_err(|e| {
+                if e.disconnected {
+                    self.cancellation.clear();
+                    interrupted(e, false)
+                } else {
+                    e
+                }
+            })
         }
         .boxed()
     }

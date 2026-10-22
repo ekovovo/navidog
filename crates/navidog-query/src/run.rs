@@ -3,7 +3,7 @@
 
 use std::ops::Range;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use gpui_kit::component::highlighter::{Diagnostic, DiagnosticSeverity};
@@ -13,8 +13,8 @@ use navidog_core::actions::OpenConnectionId;
 use navidog_core::settings::{ResultsPosition, Settings};
 use navidog_db::dialect::Dialect;
 use navidog_db::sessions::{Sessions, SharedSession, run_on};
-use navidog_db::sql::{Statement, split_script};
-use navidog_db::{CancelHandle, DbError, DbResult, ResultSet};
+use navidog_db::sql::{Statement, session_setup, split_script};
+use navidog_db::{CancelHandle, DbError, DbResult, Relational, ResultSet};
 use navidog_ui::assets::lucide;
 use navidog_util::sql_text;
 use rust_i18n::t;
@@ -31,12 +31,118 @@ pub(crate) struct Live {
     pub database: Option<String>,
     /// MySQL: the database chosen with `USE`; PostgreSQL: the schema put on the search path
     pub used: Option<String>,
+    /// SQL can change the physical context without changing the toolbar's last applied choice.
+    pub context: Option<SessionContext>,
 }
 
 impl Live {
     pub fn close(self) {
         navidog_grid::commit::close_session(self.session);
     }
+
+    pub fn matches_source(&self, info: &crate::results::RunInfo) -> bool {
+        if self.connection != info.connection_id {
+            return false;
+        }
+        if !info.context_known {
+            return self
+                .context
+                .as_ref()
+                .is_some_and(|context| Some(context.id) == info.context_id);
+        }
+        match &self.context {
+            Some(context) => {
+                context.known
+                    && context.database == info.database
+                    && context.schema == info.schema
+                    && context.search_path == info.search_path
+            }
+            None => match info.dialect {
+                Some(Dialect::MySql) => self.used == info.database,
+                Some(Dialect::Postgres) => {
+                    self.database == info.database
+                        && self.used == info.schema
+                        && info.search_path.is_none()
+                }
+                _ => self.database == info.database,
+            },
+        }
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct SessionContext {
+    id: u64,
+    known: bool,
+    database: Option<String>,
+    schema: Option<String>,
+    search_path: Option<String>,
+}
+
+impl SessionContext {
+    fn apply(&self, info: &mut crate::results::RunInfo) {
+        info.database = self.database.clone();
+        info.schema = self.schema.clone();
+        info.search_path = self.search_path.clone();
+        info.context_id = Some(self.id);
+        info.context_known = self.known;
+    }
+
+    fn unknown(dialect: Dialect, info: &crate::results::RunInfo) -> Self {
+        Self {
+            id: next_context_id(),
+            known: false,
+            database: (dialect == Dialect::Postgres)
+                .then(|| info.database.clone())
+                .flatten(),
+            schema: None,
+            search_path: None,
+        }
+    }
+
+    /// Read server state after a recognized context command; do not parse user expressions.
+    async fn read(rel: &mut dyn Relational) -> DbResult<Self> {
+        let dialect = rel.dialect();
+        let sql = match dialect {
+            Dialect::MySql => "SELECT DATABASE()",
+            Dialect::Postgres => {
+                "SELECT pg_catalog.current_database(), pg_catalog.current_schema(), \
+                 pg_catalog.current_setting('search_path')"
+            }
+            Dialect::Sqlite => return Err(DbError::msg("SQLite has no USE/search_path context")),
+        };
+        let sets = rel.execute_read(sql).await?;
+        let row = sets
+            .iter()
+            .find_map(|set| set.rows.first())
+            .ok_or_else(|| DbError::msg("The session context query returned no row."))?;
+        let value = |ix| row.get(ix).cloned().flatten();
+        Ok(Self {
+            id: next_context_id(),
+            known: true,
+            database: value(0),
+            schema: (dialect == Dialect::Postgres).then(|| value(1)).flatten(),
+            search_path: (dialect == Dialect::Postgres).then(|| value(2)).flatten(),
+        })
+    }
+}
+
+fn next_context_id() -> u64 {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
+}
+
+async fn execute_with_context(
+    rel: &mut dyn Relational,
+    sql: &str,
+) -> DbResult<(Vec<ResultSet>, Option<DbResult<SessionContext>>)> {
+    let sets = rel.execute_statement(sql).await?;
+    let context = if session_setup(sql).is_some() {
+        Some(SessionContext::read(rel).await)
+    } else {
+        None
+    };
+    Ok((sets, context))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -206,10 +312,27 @@ impl QueryEditor {
             && dialect == Dialect::MySql
             && Settings::global(cx).show_profile;
         let mariadb = self.server_version(cx).contains("MariaDB");
+        let mut source = crate::results::RunInfo {
+            at: chrono::Local::now(),
+            query_time: Duration::ZERO,
+            connection: self.connection_name(cx),
+            connection_id: self.target.connection.clone().unwrap_or_default(),
+            database: self.target.database.clone(),
+            schema: self.target.schema.clone(),
+            search_path: None,
+            context_id: None,
+            context_known: true,
+            dialect: Some(dialect),
+        };
         cx.notify();
         self.task = Some(cx.spawn_in(window, async move |this, cx| {
             let session = match session.await {
-                Ok(s) => s,
+                Ok((session, context)) => {
+                    if let Some(context) = context {
+                        context.apply(&mut source);
+                    }
+                    session
+                }
                 Err(e) => {
                     let _ = this.update_in(cx, |this, window, cx| {
                         this.results.failed_to_start(&e.to_string(), window, cx);
@@ -219,7 +342,7 @@ impl QueryEditor {
                 }
             };
             if kind == RunKind::Explain {
-                explain_all(this.clone(), session, dialect, mariadb, planned, stop, cx).await;
+                explain_all(this.clone(), session, source, mariadb, planned, stop, cx).await;
                 let _ = this.update_in(cx, |this, window, cx| this.finish(kind, window, cx));
                 return;
             }
@@ -236,11 +359,27 @@ impl QueryEditor {
                 let clock = Instant::now();
                 let sql = p.sql.clone();
                 let result = run_on(session.clone(), move |rel| {
-                    Box::pin(async move { rel.execute_statement(&sql).await })
+                    Box::pin(async move { execute_with_context(rel, &sql).await })
                 })
                 .await
                 .map_err(|e| DbError::msg(e.to_string()))
                 .and_then(|r| r);
+                let result = result.map(|(sets, context)| {
+                    if let Some(context) = context {
+                        // A metadata probe cannot turn successful user SQL into a failure.
+                        let context =
+                            context.unwrap_or_else(|_| SessionContext::unknown(dialect, &source));
+                        context.apply(&mut source);
+                        let _ = this.update(cx, |this, _| {
+                            if let Some(live) = &mut this.live
+                                && Arc::ptr_eq(&live.session, &session)
+                            {
+                                live.context = Some(context);
+                            }
+                        });
+                    }
+                    sets
+                });
                 let failed = result.is_err();
                 let outcome = Outcome {
                     planned: p,
@@ -248,7 +387,9 @@ impl QueryEditor {
                     started,
                     elapsed: clock.elapsed(),
                 };
-                let _ = this.update_in(cx, |this, window, cx| this.record(outcome, window, cx));
+                let _ = this.update_in(cx, |this, window, cx| {
+                    this.record(outcome, source.clone(), window, cx)
+                });
                 if failed && !continue_on_error {
                     break;
                 }
@@ -268,7 +409,9 @@ impl QueryEditor {
         &mut self,
         dialect: Dialect,
         cx: &mut Context<Self>,
-    ) -> Option<impl std::future::Future<Output = DbResult<SharedSession>> + use<>> {
+    ) -> Option<
+        impl std::future::Future<Output = DbResult<(SharedSession, Option<SessionContext>)>> + use<>,
+    > {
         let conn = self.target.connection.clone()?;
         let pg = dialect == Dialect::Postgres;
         // Another connection, or another PostgreSQL database: that session cannot be reused
@@ -291,7 +434,7 @@ impl QueryEditor {
         let existing = self
             .live
             .as_ref()
-            .map(|l| (l.session.clone(), l.used.clone()));
+            .map(|l| (l.session.clone(), l.used.clone(), l.context.clone()));
         let want = match dialect {
             Dialect::MySql => self.target.database.clone(),
             Dialect::Postgres => self.target.schema.clone(),
@@ -301,7 +444,7 @@ impl QueryEditor {
         let this = cx.entity().downgrade();
         let mut async_cx = cx.to_async();
         Some(async move {
-            let (session, used) = match (existing, open) {
+            let (session, used, mut context) = match (existing, open) {
                 (Some(found), _) => found,
                 (None, Some(job)) => {
                     let s = job.await.map_err(|e| DbError::msg(e.to_string()))??;
@@ -313,13 +456,14 @@ impl QueryEditor {
                         connection: conn.clone(),
                         database: database.clone(),
                         used: None,
+                        context: None,
                     };
                     let _ = this.update(&mut async_cx, |this, _| {
                         if let Some(old) = this.live.replace(live) {
                             old.close();
                         }
                     });
-                    (session, None)
+                    (session, None, None)
                 }
                 (None, None) => unreachable!("no session and nothing opening one"),
             };
@@ -336,10 +480,12 @@ impl QueryEditor {
                 let _ = this.update(&mut async_cx, |this, _| {
                     if let Some(live) = this.live.as_mut() {
                         live.used = Some(name);
+                        live.context = None;
                     }
                 });
+                context = None;
             }
-            Ok(session)
+            Ok((session, context))
         })
     }
 
@@ -357,20 +503,23 @@ impl QueryEditor {
         }
     }
 
-    fn record(&mut self, outcome: Outcome, window: &mut Window, cx: &mut Context<Self>) {
+    fn record(
+        &mut self,
+        outcome: Outcome,
+        mut info: crate::results::RunInfo,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if let Err(e) = &outcome.result {
-            self.mark_error(outcome.planned.range.clone(), &e.to_string(), cx);
+            self.mark_error(
+                outcome.planned.range.clone(),
+                &crate::results::db_text(e),
+                cx,
+            );
         }
         let editor = cx.entity().downgrade();
-        let info = crate::results::RunInfo {
-            at: outcome.started,
-            query_time: outcome.elapsed,
-            connection: self.connection_name(cx),
-            connection_id: self.target.connection.clone().unwrap_or_default(),
-            database: self.target.database.clone(),
-            schema: self.target.schema.clone(),
-            dialect: self.dialect(cx),
-        };
+        info.at = outcome.started;
+        info.query_time = outcome.elapsed;
         self.results.record(outcome, info, editor, window, cx);
         cx.notify();
     }
@@ -541,12 +690,13 @@ pub(crate) fn status_changes(
 pub(crate) async fn explain_all(
     this: WeakEntity<QueryEditor>,
     session: SharedSession,
-    dialect: Dialect,
+    source: crate::results::RunInfo,
     mariadb: bool,
     planned: Vec<Planned>,
     stop: Arc<AtomicBool>,
     cx: &mut AsyncWindowContext,
 ) {
+    let dialect = source.dialect.expect("a run has a dialect");
     for p in planned {
         if stop.load(Ordering::Acquire) {
             break;
@@ -562,7 +712,10 @@ pub(crate) async fn explain_all(
         .and_then(|r| r);
         let elapsed = clock.elapsed();
         let _ = this.update_in(cx, |this, window, cx| {
-            this.record_plan(p, result, started, elapsed, window, cx)
+            let mut info = source.clone();
+            info.at = started;
+            info.query_time = elapsed;
+            this.record_plan(p, result, info, window, cx)
         });
     }
 }
@@ -570,6 +723,74 @@ pub(crate) async fn explain_all(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_context_probe_keeps_success_and_requires_the_same_context() {
+        type BoxFuture<'a, T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>;
+        struct ProbeFailure(usize);
+        impl Relational for ProbeFailure {
+            fn dialect(&self) -> Dialect {
+                Dialect::MySql
+            }
+            fn execute<'a>(&'a mut self, _: &'a str) -> BoxFuture<'a, DbResult<Vec<ResultSet>>> {
+                self.0 += 1;
+                Box::pin(async {
+                    Ok(vec![ResultSet {
+                        affected_rows: Some(0),
+                        ..Default::default()
+                    }])
+                })
+            }
+            fn execute_read<'a>(
+                &'a mut self,
+                _: &'a str,
+            ) -> BoxFuture<'a, DbResult<Vec<ResultSet>>> {
+                Box::pin(async { Err(DbError::msg("injected context probe failure")) })
+            }
+        }
+        let mut probe = ProbeFailure(0);
+        let (sets, context) = navidog_db::runtime::runtime()
+            .block_on(execute_with_context(&mut probe, "USE other"))
+            .unwrap();
+        assert_eq!(probe.0, 1, "successful user SQL is never replayed");
+        assert_eq!(sets[0].affected_rows, Some(0));
+        assert!(context.unwrap().is_err());
+        let mut info = crate::results::RunInfo {
+            at: chrono::Local::now(),
+            query_time: Duration::ZERO,
+            connection: "fixture".into(),
+            connection_id: "fixture".into(),
+            database: Some("original".into()),
+            schema: None,
+            search_path: None,
+            context_id: None,
+            context_known: true,
+            dialect: Some(Dialect::MySql),
+        };
+        let context = SessionContext::unknown(Dialect::MySql, &info);
+        context.apply(&mut info);
+        assert!(!info.context_known);
+        assert!(
+            info.database.is_none(),
+            "unknown context cannot claim the toolbar's database"
+        );
+        let mut live = Live {
+            session: Arc::new(tokio::sync::Mutex::new(None)),
+            cancel: None,
+            connection: "fixture".into(),
+            database: Some("original".into()),
+            used: Some("original".into()),
+            context: Some(context),
+        };
+        assert!(live.matches_source(&info));
+        live.context = Some(SessionContext::unknown(Dialect::MySql, &info));
+        assert!(
+            !live.matches_source(&info),
+            "a later unknown context cannot stand in for the original"
+        );
+        live.context = None;
+        assert!(!live.matches_source(&info));
+    }
 
     #[test]
     fn current_statement_prefers_the_one_before_a_gap() {

@@ -249,9 +249,9 @@ impl NavigatorPanel {
         let row = match target {
             Some(group) => row
                 .drag_over::<DraggedConnections>(move |s, _, _, _| s.bg(p.fill))
-                .on_drop(cx.listener(move |_, d: &DraggedConnections, _, cx| {
+                .on_drop(cx.listener(move |_, d: &DraggedConnections, window, cx| {
                     cx.stop_propagation();
-                    move_connections(&d.ids(cx), group.clone(), cx);
+                    move_connections(&d.ids(cx), group.clone(), window, cx);
                 })),
             None => row,
         };

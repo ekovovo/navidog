@@ -51,6 +51,12 @@ query:
   no_connection:
     en: Select a connection to run the query.
     zh-CN: 请先在工具栏中选择连接。
+  source_context_unknown:
+    en: The original session context could not be verified. Run the query again before refreshing this result.
+    zh-CN: 无法确认原会话的数据库或模式，请重新运行查询后再刷新此结果。
+  sort_blocked:
+    en: Commit or discard changes before sorting.
+    zh-CN: 排序前请先提交或放弃修改。
   empty:
     en: Query cannot be empty.
     zh-CN: 查询不能为空。

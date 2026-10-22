@@ -47,7 +47,7 @@ fn multi_select_drag_and_rename(cx: &mut TestAppContext) {
         navidog_navigator::init(cx);
         ConnectionStore::global(cx).update(cx, |s, cx| {
             s.set_key(Key::random());
-            let group = s.add_group("Group".into(), None, cx);
+            let group = s.add_group("Group".into(), None, cx).unwrap();
             let mut ids = ["A", "B"].map(|name| {
                 let mut c = Connection::new("sqlite");
                 c.name = name.into();
@@ -245,7 +245,9 @@ fn multi_select_drag_and_rename(cx: &mut TestAppContext) {
 
     // Quick filter: only starred connections
     cx.update(|cx| {
-        ConnectionStore::global(cx).update(cx, |s, cx| s.update(&a, |c| c.starred = true, cx))
+        ConnectionStore::global(cx)
+            .update(cx, |s, cx| s.update(&a, |c| c.starred = true, cx))
+            .unwrap()
     });
     cx.update_window(handle, |_, window, cx| {
         window.click("nav-filter-starred", cx);

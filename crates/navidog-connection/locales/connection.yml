@@ -333,18 +333,9 @@ conn:
   duplicate_failed:
     en: Failed to duplicate connection
     zh-CN: 无法复制连接
-  store_locked:
-    en: Navidog is locked. Open a connection with a saved password and enter the master password first.
-    zh-CN: 需要先解锁：打开一个保存了密码的连接，输入主密码。
-  secret_unreadable:
-    en: A saved password cannot be decrypted with the current key.
-    zh-CN: 有保存的密码无法用当前的密钥解开。
-  keychain_failed:
-    en: "The machine key cannot be read: %{detail}"
-    zh-CN: "无法读取本机密钥：%{detail}"
-  kdf_failed:
-    en: "The master password key could not be derived: %{detail}"
-    zh-CN: "主密码派生失败：%{detail}"
+  password_not_saved:
+    en: The password was not saved. This connection will use the password you entered.
+    zh-CN: 密码未保存。本次连接将使用刚输入的密码。
   ask_password_title:
     en: "Enter password for “%{name}”"
     zh-CN: "输入“%{name}”的密码"

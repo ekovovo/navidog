@@ -67,6 +67,8 @@ fn query_pages_follow_the_editor(cx: &mut TestAppContext) {
         navidog_ui::theme::init(cx);
         navidog_db::init(cx);
         crate::init(cx);
+        // Keep dialog hit regions fixed between the frame sampled by click and its dispatch.
+        cx.set_reduce_motion(true);
         ConnectionStore::global(cx).update(cx, |s, cx| {
             s.set_key(Key::random());
             let mut c = Connection::new("sqlite");
@@ -119,6 +121,10 @@ fn query_pages_follow_the_editor(cx: &mut TestAppContext) {
         window.render_frame(cx);
         assert!(window.try_find("snippet-new").is_some(), "the + button");
         window.click("snippet-new", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
         assert!(
             window.try_find("snippet-name").is_some(),
@@ -131,6 +137,9 @@ fn query_pages_follow_the_editor(cx: &mut TestAppContext) {
     cx.run_until_parked();
     cx.update_window(handle, |_, window, cx| {
         window.render_frame(cx);
+        let name = window.find("snippet-name");
+        assert_eq!(name.value(), Some("films"));
+        assert_eq!(name.focused(), Some(true));
         window.click("snippet-save", cx);
     })
     .unwrap();
