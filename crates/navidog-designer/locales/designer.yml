@@ -1,0 +1,332 @@
+_version: 2
+designer:
+  title:
+    en: Table design
+    zh-CN: 表设计器
+  untitled:
+    en: New table
+    zh-CN: 新建表
+  save:
+    en: Save
+    zh-CN: 保存
+  preview:
+    en: SQL preview
+    zh-CN: SQL 预览
+  execute:
+    en: Execute
+    zh-CN: 执行
+  reload:
+    en: Reload
+    zh-CN: 重新加载
+  add:
+    en: Add field
+    zh-CN: 添加字段
+  delete:
+    en: Delete field
+    zh-CN: 删除字段
+  duplicate:
+    en: Duplicate field
+    zh-CN: 复制字段
+  up:
+    en: Move up
+    zh-CN: 上移
+  down:
+    en: Move down
+    zh-CN: 下移
+  fields:
+    en: Fields
+    zh-CN: 字段
+  constraints:
+    en: Constraints
+    zh-CN: 约束
+  indexes:
+    en: Indexes
+    zh-CN: 索引
+  options:
+    en: Options
+    zh-CN: 选项
+  table_name:
+    en: Table name
+    zh-CN: 表名
+  name:
+    en: Name
+    zh-CN: 名称
+  definition:
+    en: Definition
+    zh-CN: 定义
+  definition_help:
+    en: 'Type and attributes, for example: VARCHAR(100) NOT NULL DEFAULT '''''
+    zh-CN: 类型与属性，例如：VARCHAR(100) NOT NULL DEFAULT ''
+  constraints_help:
+    en: One PRIMARY KEY, UNIQUE, CHECK or FOREIGN KEY definition per line.
+    zh-CN: 每行一条 PRIMARY KEY、UNIQUE、CHECK 或 FOREIGN KEY 定义。
+  indexes_help:
+    en: Complete CREATE INDEX statements, separated by semicolons.
+    zh-CN: 完整的 CREATE INDEX 语句，以分号分隔。
+  options_help:
+    en: 'Table options, for example: ENGINE=InnoDB or WITHOUT ROWID.'
+    zh-CN: 表选项，例如 ENGINE=InnoDB 或 WITHOUT ROWID。
+  loading:
+    en: Loading…
+    zh-CN: 正在加载…
+  saving:
+    en: Applying schema changes…
+    zh-CN: 正在修改表结构…
+  saved:
+    en: Table saved
+    zh-CN: 表已保存
+  disconnected:
+    en: Open the connection before loading or saving.
+    zh-CN: 请先打开连接，再加载或保存。
+  close_title:
+    en: Discard unsaved table changes?
+    zh-CN: 放弃未保存的表修改？
+  close_body:
+    en: Your table design has not been saved.
+    zh-CN: 表设计内容尚未保存。
+  discard:
+    en: Discard
+    zh-CN: 不保存
+  cancel:
+    en: Cancel
+    zh-CN: 取消
+  no_changes:
+    en: No schema changes
+    zh-CN: 表结构没有变化
+  reload_required:
+    en: Some DDL may have succeeded. Reload before applying more changes.
+    zh-CN: 部分 DDL 可能已执行成功，请重新加载后再修改。
+  reload_title:
+    en: Reload table and discard changes?
+    zh-CN: 重新加载并放弃修改？
+  data_type:
+    en: Type
+    zh-CN: 类型
+  length:
+    en: Length
+    zh-CN: 长度
+  scale:
+    en: Decimals
+    zh-CN: 小数点
+  not_null:
+    en: Not null
+    zh-CN: 不是 null
+  virtual:
+    en: Virtual
+    zh-CN: 虚拟
+  key:
+    en: Key
+    zh-CN: 键
+  comment:
+    en: Comment
+    zh-CN: 注释
+  default_value:
+    en: Default value
+    zh-CN: 默认值
+  collation:
+    en: Collation
+    zh-CN: 排序规则
+  charset:
+    en: Character set
+    zh-CN: 字符集
+  auto_increment:
+    en: Auto increment
+    zh-CN: 自动递增
+  unsigned:
+    en: Unsigned
+    zh-CN: 无符号
+  primary:
+    en: Primary key
+    zh-CN: 主键
+  foreign_keys:
+    en: Foreign keys
+    zh-CN: 外键
+  checks:
+    en: Checks
+    zh-CN: 检查
+  advanced:
+    en: Advanced
+    zh-CN: 高级
+  method:
+    en: Index method
+    zh-CN: 索引方法
+  index_type:
+    en: Index type
+    zh-CN: 索引类型
+  reference_schema:
+    en: Referenced schema
+    zh-CN: 被引用模式
+  reference_table:
+    en: Referenced table
+    zh-CN: 被引用表
+  reference_fields:
+    en: Referenced fields
+    zh-CN: 被引用字段
+  on_delete:
+    en: On delete
+    zh-CN: 删除时
+  on_update:
+    en: On update
+    zh-CN: 更新时
+  expression:
+    en: Expression
+    zh-CN: 表达式
+  unique:
+    en: Unique
+    zh-CN: 唯一
+  empty:
+    en: No definitions. Use Add to create one.
+    zh-CN: 没有定义，点按添加来创建。
+  add_object:
+    en: Add
+    zh-CN: 添加
+  delete_object:
+    en: Delete
+    zh-CN: 删除
+  advanced_help:
+    en: Advanced definitions preserve attributes that the forms cannot represent. Changes still require SQL preview and execution.
+    zh-CN: 高级定义保留表单无法表达的属性，修改后仍需 SQL 预览及执行。
+  generated_help:
+    en: Generated expressions and storage are preserved; unsupported migrations are rejected.
+    zh-CN: 生成表达式和存储方式会保留，不支持的迁移会明确拒绝。
+  actions_help:
+    en: 'Actions: NO ACTION, RESTRICT, CASCADE, SET NULL, SET DEFAULT.'
+    zh-CN: 操作：NO ACTION、RESTRICT、CASCADE、SET NULL、SET DEFAULT。
+  inline_primary:
+    en: This primary key is part of the field definition. Edit it in Advanced.
+    zh-CN: 此主键位于字段定义中，请在高级页修改。
+  generated_storage:
+    en: Generated type
+    zh-CN: 生成类型
+  choose:
+    en: Choose a value
+    zh-CN: 选择值
+  preserved_help:
+    en: Some definitions have additional attributes. They are preserved in Advanced.
+    zh-CN: 部分定义包含额外属性，已原样保留在高级页。
+  sqlite_auto_integer:
+    en: SQLite auto increment requires a single INTEGER primary key.
+    zh-CN: SQLite 自动递增需要单字段 INTEGER 主键。
+  options_pending:
+    en: Structured table options are not available yet. Existing options are preserved; use Advanced to edit their definitions.
+    zh-CN: 表选项的结构化表单尚未完成，现有选项会原样保留；可在高级页编辑定义。
+  refresh_references:
+    en: Refresh referenced objects
+    zh-CN: 刷新被引用对象
+  loading_references:
+    en: Loading referenced objects…
+    zh-CN: 正在加载被引用对象…
+  option_engine:
+    en: Engine
+    zh-CN: 引擎
+  option_charset:
+    en: Default character set
+    zh-CN: 默认字符集
+  option_collation:
+    en: Default collation
+    zh-CN: 默认排序规则
+  option_auto_increment:
+    en: Auto increment
+    zh-CN: 自动递增
+  option_row_format:
+    en: Row format
+    zh-CN: 行格式
+  option_avg_row_length:
+    en: Average row length
+    zh-CN: 平均行长度
+  option_max_rows:
+    en: Max rows
+    zh-CN: 最大行数
+  option_min_rows:
+    en: Min rows
+    zh-CN: 最小行数
+  option_key_block_size:
+    en: Key block size
+    zh-CN: 键块大小
+  option_stats_auto_recalc:
+    en: Stats auto recalc
+    zh-CN: 统计信息自动重算
+  option_stats_persistent:
+    en: Stats persistent
+    zh-CN: 持久化统计信息
+  option_stats_sample_pages:
+    en: Stats sample pages
+    zh-CN: 统计采样页数
+  option_checksum:
+    en: Checksum
+    zh-CN: 校验和
+  option_delay_key_write:
+    en: Delay key write
+    zh-CN: 延迟键写
+  option_pack_keys:
+    en: Pack keys
+    zh-CN: 打包键
+  option_insert_method:
+    en: Insert method
+    zh-CN: 插入方法
+  option_connection:
+    en: Connection
+    zh-CN: 连接
+  option_data_directory:
+    en: Data directory
+    zh-CN: 数据目录
+  option_index_directory:
+    en: Index directory
+    zh-CN: 索引目录
+  option_tablespace:
+    en: Tablespace
+    zh-CN: 表空间
+  option_compression:
+    en: Compression
+    zh-CN: 压缩
+  option_encryption:
+    en: Encryption
+    zh-CN: 加密
+  option_table_comment:
+    en: Comment
+    zh-CN: 注释
+  option_owner:
+    en: Owner
+    zh-CN: 拥有者
+  option_inherits:
+    en: Inherits from
+    zh-CN: 继承自
+  option_fillfactor:
+    en: Fill factor (%)
+    zh-CN: 填充因子 (%)
+  option_autovacuum_enabled:
+    en: Autovacuum enabled
+    zh-CN: 启用自动清理
+  option_unlogged:
+    en: Unlogged
+    zh-CN: 不记录日志
+  option_strict:
+    en: STRICT
+    zh-CN: STRICT
+  option_without_rowid:
+    en: WITHOUT ROWID
+    zh-CN: WITHOUT ROWID
+  table_options_help:
+    en: Options change only the draft. Review changes in SQL preview before saving. Other attributes can be edited in Advanced.
+    zh-CN: 选项只修改草稿，保存前可在 SQL 预览中检查变更。其他属性可在高级页编辑。
+  zerofill:
+    en: Zerofill
+    zh-CN: 零填充
+  on_update_expression:
+    en: On update
+    zh-CN: 更新时
+  identity_mode:
+    en: Identity mode
+    zh-CN: 标识模式
+  table_options_mysql_help:
+    en: Empty fields use database defaults for new tables. Existing options require explicit replacement values. Other attributes can be edited in Advanced.
+    zh-CN: 新表的空值使用数据库默认设置，已有选项需填写明确的替代值。其他属性可在高级页编辑。
+  invalid_comment:
+    en: Comments cannot contain NUL characters.
+    zh-CN: 注释不能包含 NUL 字符。
+  invalid_owner:
+    en: Invalid owner name.
+    zh-CN: 拥有者名称无效。
+  not_relational:
+    en: Not a relational connection.
+    zh-CN: 当前连接不是关系数据库连接。

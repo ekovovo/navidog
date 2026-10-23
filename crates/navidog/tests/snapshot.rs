@@ -443,6 +443,113 @@ mod macos {
         cx.update_window(handle, |_, window, cx| window.close_all_dialogs(cx))
             .unwrap();
 
+        // M4: open an existing table design and preview a pending field addition.
+        dispatch(
+            &mut cx,
+            Box::new(navidog_core::actions::DesignTable {
+                object: Some(actor_ref.clone()),
+            }),
+        );
+        wait(&mut cx, |_| false);
+        shot(&mut cx, "designer.png");
+        cx.update(|cx| Theme::change(ThemeMode::Dark, None, cx));
+        shot(&mut cx, "designer-dark.png");
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            window.click("designer-add", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        cx.update_window(handle, |_, window, cx| {
+            window.click("designer-save", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        shot(&mut cx, "designer-preview-dark.png");
+        cx.update(|cx| Theme::change(ThemeMode::Light, None, cx));
+        shot(&mut cx, "designer-preview.png");
+
+        // Table designer pages and a narrow viewport retain their structured controls.
+        for (page, name) in [
+            ("fields", "designer-grid"),
+            ("indexes", "designer-indexes"),
+            ("foreign_keys", "designer-foreign-keys"),
+            ("checks", "designer-checks"),
+            ("options", "designer-options"),
+        ] {
+            cx.update_window(handle, |_, w, cx| {
+                w.click(
+                    gpui_kit::SharedString::from(format!("designer-page-{page}")),
+                    cx,
+                )
+            })
+            .unwrap();
+            cx.run_until_parked();
+            if page != "fields" && page != "options" {
+                cx.update_window(handle, |_, w, cx| w.click("designer-add", cx))
+                    .unwrap();
+                cx.run_until_parked();
+            }
+            if page == "foreign_keys" {
+                cx.update_window(handle, |_, w, cx| {
+                    w.click("designer-entry-reference_table", cx);
+                    w.press("secondary-a", cx);
+                    w.input("actor", cx);
+                })
+                .unwrap();
+                cx.run_until_parked();
+                cx.update_window(handle, |_, w, cx| {
+                    w.click("designer-entry-reference_fields", cx);
+                    w.input("\"id\"", cx);
+                })
+                .unwrap();
+                wait(&mut cx, |_| false);
+            }
+            for (mode, suffix) in [(ThemeMode::Light, "light"), (ThemeMode::Dark, "dark")] {
+                cx.update(|cx| Theme::change(mode, None, cx));
+                shot(&mut cx, &format!("{name}-{suffix}.png"));
+            }
+        }
+        cx.update_window(handle, |_, w, cx| w.click("designer-page-fields", cx))
+            .unwrap();
+        cx.run_until_parked();
+        dispatch(&mut cx, Box::new(navidog::actions::ToggleInfoPane));
+        cx.run_until_parked();
+        shot(&mut cx, "designer-wide-dark.png");
+        // TestPlatform::resize changes only the capture dimensions, not the layout callback.
+        // Open a genuinely narrow designer viewport instead of cropping the full-size frame.
+        // raw-px: headless window rem size resolved from the shared font token.
+        let snapshot_rem = gpui_kit::px(navidog_ui::tokens::font::SIZE_BODY.value());
+        let small = cx
+            .update(|cx| {
+                gpui_kit::open_window(
+                    gpui_kit::WindowOptions {
+                        show: false,
+                        focus: false,
+                        window_bounds: Some(gpui_kit::WindowBounds::Windowed(
+                            gpui_kit::Bounds::new(
+                                gpui_kit::point(gpui_kit::Pixels::ZERO, gpui_kit::Pixels::ZERO),
+                                gpui_kit::size(
+                                    navidog_ui::tokens::window::MIN_WIDTH.to_pixels(snapshot_rem),
+                                    navidog_ui::tokens::window::MIN_HEIGHT.to_pixels(snapshot_rem),
+                                ),
+                            ),
+                        )),
+                        ..Default::default()
+                    },
+                    cx,
+                    |w, cx| navidog_designer::TableDesigner::open(actor_ref.clone(), w, cx),
+                )
+            })
+            .unwrap();
+        wait(&mut cx, |_| false);
+        shot_of(&mut cx, small.0, "designer-minimum-dark.png");
+        cx.update(|cx| Theme::change(ThemeMode::Light, None, cx));
+        shot_of(&mut cx, small.0, "designer-minimum-light.png");
+        cx.update_window(small.0, |_, w, _| w.remove_window())
+            .unwrap();
+        dispatch(&mut cx, Box::new(navidog::actions::ToggleInfoPane));
+
         // Manage Connections, searching highlights the matches
         dispatch(&mut cx, Box::new(navidog_core::actions::ManageConnections));
         cx.run_until_parked();
@@ -492,6 +599,339 @@ mod macos {
         })
         .unwrap();
         shot_of(&mut cx, prefs, "master-password.png");
+        // Optional real-server snapshots also exercise the dialect option forms.
+        if std::env::var_os("NAVIDOG_LIVE").is_some() {
+            for (driver, port, database, user, key, value) in [
+                ("mysql", 13306, "sakila", "root", "engine", "InnoDB"),
+                ("postgres", 15432, "pagila", "postgres", "fillfactor", "80"),
+            ] {
+                let id = cx.update(|cx| {
+                    ConnectionStore::global(cx).update(cx, |store, cx| {
+                        let mut c = Connection::new(driver);
+                        c.name = format!("{driver} options");
+                        c.general.host = "127.0.0.1".into();
+                        c.general.port = Some(port);
+                        c.general.database = Some(database.into());
+                        c.general.user = user.into();
+                        let id = c.id.clone();
+                        store.upsert(c, &[], cx).unwrap();
+                        id
+                    })
+                });
+                cx.update(|cx| {
+                    Sessions::global(cx).update(cx, |s, cx| {
+                        s.open(
+                            id.clone(),
+                            navidog_db::Secrets {
+                                password: Some("navidog".into()),
+                                ..Default::default()
+                            },
+                            cx,
+                        )
+                    })
+                });
+                wait(&mut cx, |cx| {
+                    Sessions::global(cx).read(cx).state(&id).is_open()
+                });
+                assert!(cx.update(|cx| Sessions::global(cx).read(cx).state(&id).is_open()));
+                let mut panel = None;
+                let options_window = cx
+                    .update(|cx| {
+                        gpui_kit::open_window(
+                            navidog::main_window_options(&AppState::default(), cx),
+                            cx,
+                            |w, cx| {
+                                let p = navidog_designer::TableDesigner::new(
+                                    Scope::new(id.clone(), database, Some("public".into())),
+                                    w,
+                                    cx,
+                                );
+                                panel = Some(p.clone());
+                                p
+                            },
+                        )
+                    })
+                    .unwrap();
+                cx.update_window(options_window.0, |_, w, cx| {
+                    w.render_frame(cx);
+                    w.click("designer-table-name", cx);
+                    w.input("new_table", cx);
+                })
+                .unwrap();
+                cx.run_until_parked();
+                cx.update_window(options_window.0, |_, w, cx| {
+                    w.click("designer-page-options", cx)
+                })
+                .unwrap();
+                cx.run_until_parked();
+                let input = gpui_kit::SharedString::from(format!("designer-option-{key}"));
+                cx.update_window(options_window.0, |_, w, cx| {
+                    w.click(input.clone(), cx);
+                    w.input(value, cx);
+                })
+                .unwrap();
+                cx.run_until_parked();
+                if driver == "postgres" {
+                    cx.update_window(options_window.0, |_, w, cx| {
+                        w.click(input.clone(), cx);
+                        w.press("secondary-a", cx);
+                        w.input("101", cx);
+                    })
+                    .unwrap();
+                    cx.run_until_parked();
+                    cx.update_window(options_window.0, |_, w, cx| w.click("designer-save", cx))
+                        .unwrap();
+                    cx.run_until_parked();
+                    cx.update_window(options_window.0, |_, w, cx| {
+                        w.render_frame(cx);
+                        assert!(w.try_find("designer-execute").is_none());
+                        w.click(input.clone(), cx);
+                        w.press("secondary-a", cx);
+                        w.input("80", cx);
+                    })
+                    .unwrap();
+                    cx.run_until_parked();
+                    cx.update_window(options_window.0, |_, w, cx| {
+                        w.click("designer-option-unlogged", cx)
+                    })
+                    .unwrap();
+                    cx.run_until_parked();
+                }
+                for (mode, suffix) in [(ThemeMode::Light, "light"), (ThemeMode::Dark, "dark")] {
+                    cx.update(|cx| Theme::change(mode, None, cx));
+                    shot_of(
+                        &mut cx,
+                        options_window.0,
+                        &format!("designer-options-{driver}-{suffix}.png"),
+                    );
+                }
+                if driver == "mysql" {
+                    cx.update_window(options_window.0, |_, w, cx| {
+                        w.scroll(
+                            input.clone(),
+                            gpui_kit::ScrollDelta::Lines(gpui_kit::point(0., -16.)),
+                            cx,
+                        )
+                    })
+                    .unwrap();
+                    cx.run_until_parked();
+                    cx.update_window(options_window.0, |_, w, cx| {
+                        w.click("designer-option-table_comment", cx);
+                        w.input("Table options preview", cx);
+                    })
+                    .unwrap();
+                    cx.run_until_parked();
+                    for (mode, suffix) in [(ThemeMode::Light, "light"), (ThemeMode::Dark, "dark")] {
+                        cx.update(|cx| Theme::change(mode, None, cx));
+                        shot_of(
+                            &mut cx,
+                            options_window.0,
+                            &format!("designer-options-mysql-bottom-{suffix}.png"),
+                        );
+                    }
+                }
+                cx.update_window(options_window.0, |_, w, cx| {
+                    w.click("designer-page-fields", cx)
+                })
+                .unwrap();
+                cx.run_until_parked();
+                cx.update_window(options_window.0, |_, w, cx| {
+                    if driver == "postgres" {
+                        w.click("designer-field-identity", cx);
+                        w.input("ALWAYS", cx);
+                    } else {
+                        w.click("designer-zerofill", cx);
+                    }
+                })
+                .unwrap();
+                cx.run_until_parked();
+                for (mode, suffix) in [(ThemeMode::Light, "light"), (ThemeMode::Dark, "dark")] {
+                    cx.update(|cx| Theme::change(mode, None, cx));
+                    shot_of(
+                        &mut cx,
+                        options_window.0,
+                        &format!("designer-attributes-{driver}-{suffix}.png"),
+                    );
+                }
+                cx.update(|cx| {
+                    use gpui_kit::component::dock::{BasePanel as _, PanelInfo};
+                    let PanelInfo::Panel(value) = panel.as_ref().unwrap().read(cx).dump(cx).info
+                    else {
+                        panic!("table draft");
+                    };
+                    if driver == "mysql" {
+                        assert!(
+                            value["draft"]["options"]
+                                .as_str()
+                                .unwrap()
+                                .contains("Table options preview")
+                        );
+                        assert!(
+                            value["draft"]["columns"][0]["definition"]
+                                .as_str()
+                                .unwrap()
+                                .contains("ZEROFILL")
+                        );
+                    } else {
+                        assert_eq!(value["draft"]["unlogged"], true);
+                        assert!(
+                            value["draft"]["columns"][0]["definition"]
+                                .as_str()
+                                .unwrap()
+                                .contains("GENERATED ALWAYS AS IDENTITY")
+                        );
+                    }
+                });
+                cx.update_window(options_window.0, |_, w, cx| w.click("designer-save", cx))
+                    .unwrap();
+                cx.run_until_parked();
+                cx.update_window(options_window.0, |_, w, cx| {
+                    w.render_frame(cx);
+                    assert!(w.try_find("designer-execute").is_some());
+                })
+                .unwrap();
+                cx.update_window(options_window.0, |_, w, _| w.remove_window())
+                    .unwrap();
+                if driver == "postgres" {
+                    use gpui_kit::component::dock::{BasePanel as _, PanelInfo};
+                    let name = format!("navidog_comment_snapshot_{}", std::process::id());
+                    let table = format!("public.\"{name}\"");
+                    let sql = format!(
+                        "CREATE TABLE {table}(id INTEGER PRIMARY KEY); COMMENT ON TABLE {table} IS '原表注释'; COMMENT ON COLUMN {table}.id IS '原字段注释'"
+                    );
+                    let job = cx
+                        .update(|cx| {
+                            Sessions::global(cx)
+                                .read(cx)
+                                .run_rel(&id, Some(database), move |r| {
+                                    Box::pin(async move { r.execute(&sql).await })
+                                })
+                        })
+                        .unwrap();
+                    navidog_db::runtime::runtime()
+                        .block_on(job)
+                        .unwrap()
+                        .unwrap();
+                    let mut comments = None;
+                    let comments_window = cx
+                        .update(|cx| {
+                            gpui_kit::open_window(
+                                navidog::main_window_options(&AppState::default(), cx),
+                                cx,
+                                |w, cx| {
+                                    let p = navidog_designer::TableDesigner::open(
+                                        ObjectRef {
+                                            scope: Scope::new(
+                                                id.clone(),
+                                                database,
+                                                Some("public".into()),
+                                            ),
+                                            kind: ObjectKind::Table,
+                                            name: name.clone(),
+                                        },
+                                        w,
+                                        cx,
+                                    );
+                                    comments = Some(p.clone());
+                                    p
+                                },
+                            )
+                        })
+                        .unwrap();
+                    let comments = comments.unwrap();
+                    wait(&mut cx, |cx| match comments.read(cx).dump(cx).info {
+                        PanelInfo::Panel(value) => value["baseline"].is_object(),
+                        _ => false,
+                    });
+                    cx.update(|cx| {
+                        let PanelInfo::Panel(value) = comments.read(cx).dump(cx).info else {
+                            panic!("comments draft")
+                        };
+                        assert_eq!(value["draft"]["comment"], "原表注释");
+                        assert_eq!(value["draft"]["columns"][0]["comment"], "原字段注释");
+                    });
+                    cx.update_window(comments_window.0, |_, w, cx| {
+                        w.render_frame(cx);
+                        w.render_frame(cx);
+                        let row = w.find(("row", 0usize)).bounds();
+                        let col = w.find(("col-header", 7usize)).bounds();
+                        w.click_at(
+                            ("row", 0usize),
+                            gpui_kit::point(
+                                col.left() - row.left() + col.size.width / 4.,
+                                row.size.height / 2.,
+                            ),
+                            cx,
+                        );
+                    })
+                    .unwrap();
+                    cx.run_until_parked();
+                    cx.update_window(comments_window.0, |_, w, cx| {
+                        w.click("designer-field-comment", cx);
+                        w.press("secondary-a", cx);
+                        w.input("客户编号 O'Brien", cx);
+                    })
+                    .unwrap();
+                    cx.run_until_parked();
+                    for (mode, suffix) in [(ThemeMode::Light, "light"), (ThemeMode::Dark, "dark")] {
+                        cx.update(|cx| Theme::change(mode, None, cx));
+                        shot_of(
+                            &mut cx,
+                            comments_window.0,
+                            &format!("designer-comments-postgres-fields-{suffix}.png"),
+                        );
+                    }
+                    cx.update_window(comments_window.0, |_, w, cx| {
+                        w.click("designer-page-options", cx)
+                    })
+                    .unwrap();
+                    cx.run_until_parked();
+                    cx.update_window(comments_window.0, |_, w, cx| {
+                        w.click("designer-option-table_comment", cx);
+                        w.press("secondary-a", cx);
+                        w.input("客户资料表 O'Brien", cx);
+                    })
+                    .unwrap();
+                    cx.run_until_parked();
+                    for (mode, suffix) in [(ThemeMode::Light, "light"), (ThemeMode::Dark, "dark")] {
+                        cx.update(|cx| Theme::change(mode, None, cx));
+                        shot_of(
+                            &mut cx,
+                            comments_window.0,
+                            &format!("designer-comments-postgres-table-{suffix}.png"),
+                        );
+                    }
+                    cx.update_window(comments_window.0, |_, w, cx| w.click("designer-save", cx))
+                        .unwrap();
+                    cx.run_until_parked();
+                    for (mode, suffix) in [(ThemeMode::Light, "light"), (ThemeMode::Dark, "dark")] {
+                        cx.update(|cx| Theme::change(mode, None, cx));
+                        shot_of(
+                            &mut cx,
+                            comments_window.0,
+                            &format!("designer-comments-postgres-preview-{suffix}.png"),
+                        );
+                    }
+                    cx.update_window(comments_window.0, |_, w, _| w.remove_window())
+                        .unwrap();
+                    let sql = format!("DROP TABLE {table}");
+                    let job = cx
+                        .update(|cx| {
+                            Sessions::global(cx)
+                                .read(cx)
+                                .run_rel(&id, Some(database), move |r| {
+                                    Box::pin(async move { r.execute(&sql).await })
+                                })
+                        })
+                        .unwrap();
+                    navidog_db::runtime::runtime()
+                        .block_on(job)
+                        .unwrap()
+                        .unwrap();
+                }
+                cx.update(|cx| Sessions::global(cx).update(cx, |s, cx| s.close(&id, cx)));
+            }
+        }
         let _ = std::fs::remove_dir_all(home);
     }
 

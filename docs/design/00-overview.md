@@ -21,6 +21,7 @@ navidog 用 [gpui-kit](https://gpui-kit.com/zh-CN/docs/) 全家桶（GPUI、`gpu
 | [21-table-viewer.md](21-table-viewer.md) | M2：表查看器与结果网格（含技术验证的判定规则） |
 | [30-query-editor.md](30-query-editor.md) | M3：查询编辑器、代码补全、代码段、保存查询、自动恢复（含编辑器技术验证） |
 | [31-query-results.md](31-query-results.md) | M3：运行、结果、解释、历史日志、命令列界面 |
+| [40-table-designer.md](40-table-designer.md) | M4 表设计器、方言迁移和首版边界 |
 | [db/](db/) | MySQL、PostgreSQL、SQLite 以外数据库的专属功能清单 |
 
 每个里程碑开工前，先在本目录补齐该里程碑的详细规格（编号 `1x-*.md`），规格 PR 合并后再开代码 PR。

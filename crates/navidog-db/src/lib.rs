@@ -16,6 +16,7 @@ pub mod sessions;
 pub mod sql;
 pub mod sqlite;
 pub mod ssh;
+pub mod table_design;
 
 use std::sync::Arc;
 
@@ -50,7 +51,7 @@ pub fn init(cx: &mut App) {
         registry
             .0
             .register(id, Source::Builtin, d)
-            .expect("内置驱动不会重复");
+            .expect("built-in driver IDs are unique");
     }
     cx.set_global(registry);
     sessions::init(cx);
@@ -72,7 +73,7 @@ pub fn connect(
             ssh::open(&ssh, params.host.clone(), params.port),
         )
         .await
-        .map_err(|_| DbError::msg("SSH: 连接超时"))??;
+        .map_err(|_| DbError::msg("SSH: connection timed out"))??;
         params.tls_host = Some(std::mem::replace(&mut params.host, "127.0.0.1".into()));
         params.port = tunnel.local_port;
         let inner = driver.connect(params).await?;

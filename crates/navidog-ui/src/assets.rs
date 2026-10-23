@@ -12,7 +12,7 @@ icon_assets!(pub ExtraIcons, [
     Plus, Minus, X, Search, Cable, Unplug, Palette, FolderInput, Copy, Trash, Pencil,
     Eraser, Scissors, List, TableProperties, Zap, KeyRound, ListOrdered, CircleX, Info, Code,
     Columns3, Check, RotateCcw, Play, Square, ChevronFirst, ChevronLast, ChevronLeft, ChevronRight,
-    Funnel, ArrowUpDown, Clipboard, Undo2, Save, FileText, GitCommitHorizontal, CircleStop,
+    Funnel, ArrowUpDown, ArrowUp, ArrowDown, Clipboard, Undo2, Save, FileText, GitCommitHorizontal, CircleStop,
     Hash, Binary, Braces, Key, Blocks, FileClock, Pin, ScrollText, ZoomIn, ZoomOut,
     ListTree, WandSparkles, PanelBottom, PanelRight,
 ]);

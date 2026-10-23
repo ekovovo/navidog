@@ -16,9 +16,9 @@ mod viewer;
 pub use grid::{GridEvent, GridTarget, ResultGrid, ToggleRawData};
 pub use model::{Cell, GridColumn};
 pub use viewer::{
-    ApplyFilterSort, BeginTransaction, ClearFilterSort, CommitTransaction, DesignTable, FindNext,
-    QueryTable, RefreshTable, RollbackTransaction, ShowFind, ShowReplace, SortAscending,
-    SortDescending, SortNone, StopLoad, TableViewer, ToggleFilter,
+    ApplyFilterSort, BeginTransaction, ClearFilterSort, CommitTransaction, FindNext, QueryTable,
+    RefreshTable, RollbackTransaction, ShowFind, ShowReplace, SortAscending, SortDescending,
+    SortNone, StopLoad, TableViewer, ToggleFilter,
 };
 
 pub fn init(cx: &mut gpui_kit::App) {

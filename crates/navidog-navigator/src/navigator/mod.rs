@@ -651,6 +651,14 @@ impl NavigatorPanel {
             Node::Object(o) => {
                 window.dispatch_action(Box::new(OpenObject { object: o.clone() }), cx);
             }
+            Node::TableItem(object, _, _) => {
+                window.dispatch_action(
+                    Box::new(DesignTable {
+                        object: Some(object.clone()),
+                    }),
+                    cx,
+                );
+            }
             Node::Placeholder(_) => {}
             _ => self.disclose(node, window, cx),
         }

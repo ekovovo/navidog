@@ -17,7 +17,8 @@ use gpui_kit::{
     Styled as _, Subscription, UniformListScrollHandle, WeakEntity, Window, div, img, uniform_list,
 };
 use navidog_core::actions::{
-    DeleteObjects, EmptyTables, NewQuery, OpenConnection, OpenObject, RunQuery, TruncateTables,
+    DeleteObjects, DesignTable, EmptyTables, NewQuery, NewTable, OpenConnection, OpenObject,
+    RunQuery, TruncateTables,
 };
 use navidog_core::object::{ObjectKind, ObjectRef, Scope};
 use navidog_core::settings::Settings;
@@ -472,17 +473,32 @@ impl ObjectsPanel {
             )
             .child(
                 button("obj-design", "pencil", t!("obj.design").to_string())
-                    .disabled(!is_query || selected.is_none())
+                    .disabled((!is_query && !is_table) || selected.is_none())
                     .on_click(cx.listener(|_, _, window, cx| {
                         if let Some(object) = Self::selected_object(cx) {
-                            window.dispatch_action(Box::new(OpenObject { object }), cx);
+                            if object.kind == ObjectKind::Table {
+                                window.dispatch_action(
+                                    Box::new(DesignTable {
+                                        object: Some(object),
+                                    }),
+                                    cx,
+                                );
+                            } else {
+                                window.dispatch_action(Box::new(OpenObject { object }), cx);
+                            }
                         }
                     })),
             )
             .child(
                 button("obj-new", "plus", t!("obj.new").to_string())
-                    .disabled(!is_query)
-                    .on_click(|_, window, cx| window.dispatch_action(Box::new(NewQuery), cx)),
+                    .disabled(!is_query && !is_table)
+                    .on_click(move |_, window, cx| {
+                        if is_table {
+                            window.dispatch_action(Box::new(NewTable), cx);
+                        } else {
+                            window.dispatch_action(Box::new(NewQuery), cx);
+                        }
+                    }),
             )
             .child(
                 button("obj-delete", "trash", t!("obj.delete").to_string())

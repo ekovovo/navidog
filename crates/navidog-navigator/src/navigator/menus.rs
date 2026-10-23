@@ -186,11 +186,11 @@ impl NavigatorPanel {
                 NativeMenu::new()
                     .menu_with_disabled(
                         t!("obj.new_object", kind = kind_label(*k)).to_string(),
-                        *k != ObjectKind::Query,
+                        !matches!(*k, ObjectKind::Query | ObjectKind::Table),
                         if *k == ObjectKind::Query {
                             Box::new(NewQuery)
                         } else {
-                            Box::new(Refresh)
+                            Box::new(NewTable)
                         },
                     )
                     .separator()
@@ -273,13 +273,15 @@ impl NavigatorPanel {
             )
             .menu_with_disabled(
                 t!("obj.design_kind", kind = kind).to_string(),
-                true,
-                Box::new(Refresh),
+                o.kind != ObjectKind::Table,
+                Box::new(DesignTable {
+                    object: Some(o.clone()),
+                }),
             )
             .menu_with_disabled(
                 t!("obj.new_object", kind = kind).to_string(),
-                true,
-                Box::new(Refresh),
+                o.kind != ObjectKind::Table,
+                Box::new(NewTable),
             )
             .menu_with_disabled(
                 t!("obj.delete_kind", kind = kind).to_string(),

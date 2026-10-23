@@ -68,7 +68,6 @@ actions!(
         BeginTransaction,
         CommitTransaction,
         RollbackTransaction,
-        DesignTable,
         QueryTable,
         ApplyFilterSort,
         ClearFilterSort,
@@ -128,7 +127,11 @@ pub(crate) fn init(cx: &mut App) {
         KeyBinding::new("cmd-.", StopLoad, Some(CONTEXT)),
         KeyBinding::new("ctrl-r", ApplyFilterSort, Some(CONTEXT)),
         KeyBinding::new("shift-cmd-y", QueryTable, Some(CONTEXT)),
-        KeyBinding::new("cmd-d", DesignTable, Some(CONTEXT)),
+        KeyBinding::new(
+            "secondary-d",
+            navidog_core::actions::DesignTable { object: None },
+            Some(CONTEXT),
+        ),
     ]);
     register_panel(cx, PANEL, |ctx, window, cx| {
         let object = match ctx.info() {
@@ -1843,7 +1846,20 @@ impl Render for TableViewer {
             }))
             .on_action(cx.listener(|this, _: &RollbackTransaction, _, cx| this.rollback(cx)))
             .on_action(cx.listener(|this, _: &QueryTable, window, cx| this.query_table(window, cx)))
-            .on_action(|_: &DesignTable, _, _| {})
+            .on_action(cx.listener(
+                |this, action: &navidog_core::actions::DesignTable, window, cx| {
+                    if action.object.is_none() {
+                        window.dispatch_action(
+                            Box::new(navidog_core::actions::DesignTable {
+                                object: Some(this.object.clone()),
+                            }),
+                            cx,
+                        );
+                    } else {
+                        cx.propagate();
+                    }
+                },
+            ))
             .on_action(
                 cx.listener(|this, _: &ApplyFilterSort, window, cx| this.apply_filter(window, cx)),
             )

@@ -18,6 +18,7 @@ navidog-connection.workspace = true
 navidog-navigator.workspace = true
 navidog-grid.workspace = true
 navidog-query.workspace = true
+navidog-designer.workspace = true
 navidog-util.workspace = true
 anyhow.workspace = true
 serde.workspace = true

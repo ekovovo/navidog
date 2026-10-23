@@ -113,6 +113,21 @@ pub mod editor_tab {
     pub const TITLE_MAX_WIDTH: Pt = Pt(160.);
 }
 
+/// Table designer: nib header measurement; remaining geometry is provisional until AX comparison.
+pub mod designer {
+    use super::Pt;
+    pub const HEADER_HEIGHT: Pt = Pt(23.);
+    pub const ROW_HEIGHT: Pt = Pt(24.);
+    pub const NAME_WIDTH: Pt = Pt(160.);
+    pub const TYPE_WIDTH: Pt = Pt(130.);
+    pub const ARG_WIDTH: Pt = Pt(80.);
+    pub const FLAG_WIDTH: Pt = Pt(75.);
+    pub const COMMENT_WIDTH: Pt = Pt(220.);
+    pub const PROPERTY_HEIGHT: Pt = Pt(200.);
+    pub const PROPERTY_MIN_HEIGHT: Pt = Pt(110.);
+    pub const GRID_MIN_HEIGHT: Pt = Pt(100.);
+}
+
 pub mod grid {
     use super::Pt;
     pub const HEADER_HEIGHT: Pt = Pt(28.);

@@ -21,6 +21,7 @@ navidog-plugin = { version = "0.0.1", path = "crates/navidog-plugin" }
 navidog-connection = { version = "0.0.1", path = "crates/navidog-connection" }
 navidog-navigator = { version = "0.0.1", path = "crates/navidog-navigator" }
 navidog-grid = { version = "0.0.1", path = "crates/navidog-grid" }
+navidog-designer = { version = "0.0.1", path = "crates/navidog-designer" }
 navidog-query = { version = "0.0.1", path = "crates/navidog-query" }
 
 gpui-kit = { version = "0.8", features = ["gpui-fast"] }

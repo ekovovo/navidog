@@ -288,6 +288,8 @@ mod tests {
         assert_eq!(type_kind("jsonb"), TypeKind::Json);
         assert_eq!(type_kind("integer[]"), TypeKind::Number);
         assert_eq!(type_kind("geometry"), TypeKind::Other);
+        assert_eq!(type_kind("POINT"), TypeKind::Other);
+        assert_eq!(type_kind("INTERVAL"), TypeKind::Time);
     }
 
     #[test]

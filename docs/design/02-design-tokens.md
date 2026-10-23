@@ -242,3 +242,7 @@ SQL 编辑器（DDL 页、DDL 选项卡，以及 M3 的查询编辑器）的底�
 - `editor.font_size`、`explain.node`、`explain.node_gap`（M3）：字号和计划图节点尺寸靠截图并排目测，AX 量不到。
 - `button.height`：macOS 26 上按钮的实际高度（M1）。
 - 连接表单窗口的整体尺寸和标签页切换控件（M1）：这部分由代码动态生成，nib 里没有。
+
+### M4 表设计器重新对齐
+
+`designer::HEADER_HEIGHT` 为 Navicat `TableDesignFieldModule_mysql` / `TableDesignFieldsModule_sqlite` 的 `NSTableHeaderView` 23pt。属性区控件复用 `form` 的 300pt 宽、22pt 行高、8pt 间距。`designer` 的 24pt 编辑行高，160/130/80/75/220pt 字段列宽，200pt 属性区默认高度及 110/100pt 区域最小高度为暂定值，用于容纳输入框和可滚动布局，未标为 AX 实测。

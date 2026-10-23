@@ -173,3 +173,19 @@ pub struct SwitchProfile {
 pub struct OpenObject {
     pub object: ObjectRef,
 }
+
+// Table design commands use the selected database or a named table.
+gpui_kit::actions!(designer, [NewTable]);
+#[derive(Clone, PartialEq, Debug, Action)]
+#[action(namespace = designer, no_json)]
+pub struct DesignTable {
+    /// None resolves the current table viewer; Some names a table from the navigator.
+    pub object: Option<ObjectRef>,
+}
+
+/// A table was saved; the shell refreshes catalog and completion caches.
+#[derive(Clone, PartialEq, Debug, Action)]
+#[action(namespace = designer, no_json)]
+pub struct TableStructureChanged {
+    pub scope: crate::object::Scope,
+}

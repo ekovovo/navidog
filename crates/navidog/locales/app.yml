@@ -772,3 +772,8 @@ uri:
   no_connection:
     en: "No saved connection matches “%{name}”"
     zh-CN: "没有与“%{name}”匹配的连接"
+
+app:
+  choose_database:
+    en: Select an open database first.
+    zh-CN: 请先选择已打开的数据库。

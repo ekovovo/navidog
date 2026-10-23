@@ -117,16 +117,6 @@ fn checked(name: String, action: Box<dyn gpui_kit::Action>, on: bool) -> MenuIte
     }
 }
 
-fn disabled(name: String, action: Box<dyn gpui_kit::Action>) -> MenuItem {
-    MenuItem::Action {
-        name: name.into(),
-        action,
-        os_action: None,
-        checked: false,
-        disabled: true,
-    }
-}
-
 fn format_menu() -> Menu {
     Menu::new(t!("menu.format").to_string()).items([
         MenuItem::submenu(Menu::new(t!("menu.indent").to_string()).items([
@@ -199,9 +189,9 @@ fn table_menu(in_transaction: bool, filter_open: bool) -> Menu {
             navidog_grid::BeginTransaction,
         ));
     }
-    items.push(disabled(
+    items.push(MenuItem::action(
         t!("menu.design_table").to_string(),
-        Box::new(navidog_grid::DesignTable),
+        navidog_core::actions::DesignTable { object: None },
     ));
     items.push(MenuItem::action(
         t!("menu.query_table").to_string(),

@@ -101,6 +101,7 @@ pub fn init(cx: &mut App) {
     navidog_navigator::init(cx);
     navidog_grid::init(cx);
     navidog_query::init(cx);
+    navidog_designer::init(cx);
     navidog_plugin::init(cx);
     register_commands(cx);
     cx.set_global(AppState::load());
@@ -203,6 +204,12 @@ fn on_front_window(cx: &mut App, f: impl FnOnce(&mut gpui_kit::Window, &mut App)
 /// (`menus::set_menus`); this side needs no platform UI, so headless tests use it too. Register
 /// once per app: a second call adds a second listener for every action.
 pub fn register_app_actions(cx: &mut App) {
+    cx.on_action(|a: &navidog_core::actions::TableStructureChanged, cx| {
+        navidog_navigator::catalog::Catalog::global(cx)
+            .update(cx, |catalog, cx| catalog.refresh_scope(&a.scope, cx));
+        navidog_db::outline::OutlineCache::global(cx)
+            .update(cx, |cache, cx| cache.ensure(&a.scope, true, cx));
+    });
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.on_action(|_: &Hide, cx| cx.hide());
     cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
