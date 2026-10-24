@@ -1,0 +1,159 @@
+name: Preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "scripts/**"
+      - ".github/workflows/preview.yml"
+
+concurrency:
+  # One preview per pull request; a new push supersedes the previous build.
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: 1.99.0
+
+jobs:
+  macos:
+    name: macos-aarch64
+    # A draft is not ready to be tried; `ready_for_review` builds it later.
+    if: github.event.pull_request.draft == false
+    runs-on: macos-latest
+    timeout-minutes: 60
+    outputs:
+      file: ${{ steps.checksum.outputs.file }}
+      sha256: ${{ steps.checksum.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The build runs pull request code; keep the token out of .git/config.
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Same key and target as the release builds, so a pull request restores
+          # the cache main already populated.
+          key: macos-build-aarch64-apple-darwin
+      - name: install tools
+        run: |
+          cargo install --locked cargo-bundle@0.11.0
+          brew install create-dmg
+      - name: bundle
+        run: cargo bundle --release -p navidog --target aarch64-apple-darwin --features mimalloc
+      - name: sign app
+        run: |
+          app="target/aarch64-apple-darwin/release/bundle/osx/Navidog.app"
+          # The shared ad-hoc signing script lands with the macOS distribution
+          # change; use it when present so the preview matches the release.
+          if [ -x scripts/sign-macos.sh ]; then
+            scripts/sign-macos.sh "$app"
+          else
+            codesign --force --sign - --timestamp=none "$app"
+            codesign --verify --deep --strict --all-architectures "$app"
+          fi
+      - name: create dmg
+        run: |
+          mkdir -p dist
+          create-dmg \
+            --volname "Navidog Preview" \
+            --window-pos 200 120 \
+            --window-size 800 400 \
+            --icon-size 100 \
+            --icon "Navidog.app" 200 190 \
+            --hide-extension "Navidog.app" \
+            --app-drop-link 600 185 \
+            "dist/Navidog-preview-macos-aarch64.dmg" \
+            "target/aarch64-apple-darwin/release/bundle/osx/Navidog.app"
+      - name: checksum
+        id: checksum
+        run: |
+          dmg="dist/Navidog-preview-macos-aarch64.dmg"
+          echo "file=$(basename "$dmg")" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(shasum -a 256 "$dmg" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v7
+        with:
+          # With `archive: false` the file name becomes the artifact name; the
+          # tester downloads the DMG directly instead of a zip inside a zip.
+          name: Navidog-preview-macos-aarch64
+          path: dist/Navidog-preview-macos-aarch64.dmg
+          archive: false
+          if-no-files-found: error
+          retention-days: 7
+      - name: summary
+        env:
+          FILE: ${{ steps.checksum.outputs.file }}
+          SHA256: ${{ steps.checksum.outputs.sha256 }}
+        run: |
+          {
+            echo "## macOS preview build"
+            echo
+            echo "- Artifact: \`$FILE\` (expires in 7 days)"
+            echo "- SHA-256: \`$SHA256\`"
+            echo "- Built from $GITHUB_SHA."
+            echo
+            echo "The app is ad-hoc signed and not notarized. Open the DMG, move"
+            echo "\`Navidog.app\` to \`~/Applications\`, then allow it in System Settings"
+            echo "→ Privacy & Security → Open Anyway if macOS blocks the first launch."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  comment:
+    needs: macos
+    # The build job is read-only, but this job only posts. Fork pull requests get
+    # a read-only token, so their artifact stays on the run page instead.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - name: upsert preview comment
+        # A read-only token (Dependabot, fork settings) must not fail the build.
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RUN_ID: ${{ github.run_id }}
+          ARTIFACT: ${{ needs.macos.outputs.file }}
+          SHA256: ${{ needs.macos.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          body="$(cat <<EOF
+          <!-- navidog-preview -->
+          ### macOS preview build
+
+          - **Run:** $RUN_URL
+          - **Artifact:** \`$ARTIFACT\` (expires in 7 days)
+          - **CLI:** \`gh run download $RUN_ID -n $ARTIFACT\`
+          - **SHA-256:** \`$SHA256\`
+
+          The app is ad-hoc signed and not notarized. Open the DMG, move \`Navidog.app\`
+          to \`~/Applications\` (create it if needed), then allow it in **System Settings
+          → Privacy & Security → Open Anyway** if macOS blocks the first launch.
+
+          This build comes from pull request code; review the diff before running it.
+          EOF
+          )"
+          existing="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+            --jq '.[] | select(.body | startswith("<!-- navidog-preview -->")) | .id')"
+          id="${existing%%$'\n'*}"
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${id}" \
+              -f body="$body" >/dev/null
+          else
+            gh api -X POST "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+              -f body="$body" >/dev/null
+          fi

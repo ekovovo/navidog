@@ -222,7 +222,7 @@ M2 的任务都已完成，逐项记录见 git 历史；M2 的功能状态仍在
 
 | 功能 | 状态 | 验证 | 说明 |
 | --- | --- | --- | --- |
-| F-REL-001 打包 | 部分 | publish 工作流（`main` 推送与每日定时；安装包经 artifact 汇总后统一替换 `nightly`） | macOS DMG、Windows zip / MSI / `.msi.zip`、Linux deb / rpm / AppImage / tarball，附 `latest.json` 和 `SHA256SUMS`。未在每台机器上安装验证 |
+| F-REL-001 打包 | 部分 | publish 工作流（`main` 推送与每日定时；安装包经 artifact 汇总后统一替换 `nightly`）；PR 预览构建产出 macOS aarch64 DMG artifact（7 天） | macOS DMG、Windows zip / MSI / `.msi.zip`、Linux deb / rpm / AppImage / tarball，附 `latest.json` 和 `SHA256SUMS`。未在每台机器上安装验证 |
 | F-REL-002 签名与公证 | 部分 | publish 工作流 | 没有证书时上传未签名包。配上证书后工作流里的公证步骤才会跑 |
 | F-REL-003 自动更新 | 完成 | update 单元测试 | 与 F-APP-018 同一条路径：读 `latest.json` 的 `releases` 并校验 SHA-256。tag 的发布说明由 changelogithub 写入清单。tag 在清单上传成功后取消 draft。tag 构建在编译前把 workspace 版本改成 tag，不改仓库里的 Cargo.toml |
 | F-REL-004 迁移或升级 | 未开始 | | 配置目录还没有版本迁移 |

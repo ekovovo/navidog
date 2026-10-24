@@ -79,7 +79,7 @@ navidog 用 [gpui-kit](https://gpui-kit.com/zh-CN/docs/) 全家桶（GPUI、`gpu
 **工程**
 1. 仓库结构：Cargo workspace，具体见第 4 节。
 2. 测试数据库：`docker-compose.yml`（MySQL 8、MariaDB 11、PostgreSQL 16，带种子数据），SQLite 用仓库内的测试文件。
-3. CI：GitHub Actions。每次推送在 macOS（aarch64 与 Intel）、Linux、Windows 上跑 clippy 和测试，macOS 另跑 fmt 和裸值检查；`main` 上另做三平台的 release 冒烟。打 `v*` tag 时构建 macOS `.dmg`、Windows `.msi`、zip 与 `.msi.zip`、Linux `.deb`、`.rpm`、AppImage 和 tarball（x86_64 与 aarch64），并上传 `latest.json`。tag 的发布说明由 changelogithub 生成。`main` 每次推送和每天定时都滚动发布 `nightly`：六个构建的安装包先汇总成 artifact，全部成功后才删除旧 `nightly` tag/release、按本次提交重建并统一上传，任一构建失败时保留上一版；`main` 的新推送取消旧构建，定时和手动运行排队执行，落后于 `main` 的定时运行直接跳过。Apple 公证在有签名证书时执行，没有证书时上传未签名包。实库测试在 Ubuntu 上用 `docker compose` 跑。
+3. CI：GitHub Actions。每次推送在 macOS（aarch64 与 Intel）、Linux、Windows 上跑 clippy 和测试，macOS 另跑 fmt 和裸值检查；`main` 上另做三平台的 release 冒烟。打 `v*` tag 时构建 macOS `.dmg`、Windows `.msi`、zip 与 `.msi.zip`、Linux `.deb`、`.rpm`、AppImage 和 tarball（x86_64 与 aarch64），并上传 `latest.json`。tag 的发布说明由 changelogithub 生成。`main` 每次推送和每天定时都滚动发布 `nightly`：六个构建的安装包先汇总成 artifact，全部成功后才删除旧 `nightly` tag/release、按本次提交重建并统一上传，任一构建失败时保留上一版；`main` 的新推送取消旧构建，定时和手动运行排队执行，落后于 `main` 的定时运行直接跳过。PR 打开或更新时，在 macOS（aarch64）构建 ad-hoc 签名的预览 DMG，作为 Actions artifact 保留 7 天，并在 PR 里留下一条带下载链接的评论；预览不进 release，也不写 `latest.json`。Apple 公证在有签名证书时执行，没有证书时上传未签名包。实库测试在 Ubuntu 上用 `docker compose` 跑。
 4. 分支流程：每个里程碑一个分支，通过 PR 合并到 `main`；规格 PR 和代码 PR 分开提。
 5. 模块细节：每份模块规格按 Navicat 现有行为写好默认值，提交评审。
 
