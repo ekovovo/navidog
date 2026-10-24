@@ -324,6 +324,24 @@ conn:
   reopen_now:
     en: Reopen Now
     zh-CN: 立即重新打开
+  reopen:
+    en: Reopen
+    zh-CN: 重新打开
+  confirm_reopen:
+    en: "Reopen connection “%{name}”?"
+    zh-CN: "重新打开连接“%{name}”？"
+  reopen_warning:
+    en: Transactions, locks, and temporary objects cannot be restored. Executed writes may have an unknown outcome. Query text, tabs, and unsaved row changes will be kept. Check the database state before submitting those changes again.
+    zh-CN: 事务、锁和临时对象无法恢复，已执行写入的结果可能未知。查询文本、选项卡和未提交的行修改会保留。再次提交这些修改前，请先核对数据库状态。
+  password_not_saved:
+    en: "The password was not saved and will only be used for this connection attempt. %{detail}"
+    zh-CN: "密码未保存，仅用于本次连接。%{detail}"
+  reload_session_lost:
+    en: "%{detail} The previous session state cannot be restored. Reopen the connection to continue."
+    zh-CN: "%{detail} 原会话状态无法恢复。请重新打开连接后继续。"
+  reload_outcome_unknown:
+    en: "%{detail} The execution outcome may be unknown. Check the database before retrying, then reopen the connection to continue."
+    zh-CN: "%{detail} 执行结果可能未知。请先检查数据库，确认后再重试，并重新打开连接后继续。"
   later:
     en: Later
     zh-CN: 稍后
@@ -333,9 +351,6 @@ conn:
   duplicate_failed:
     en: Failed to duplicate connection
     zh-CN: 无法复制连接
-  password_not_saved:
-    en: The password was not saved. This connection will use the password you entered.
-    zh-CN: 密码未保存。本次连接将使用刚输入的密码。
   ask_password_title:
     en: "Enter password for “%{name}”"
     zh-CN: "输入“%{name}”的密码"

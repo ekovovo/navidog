@@ -32,6 +32,7 @@ use navidog_util::sql_text;
 use rust_i18n::t;
 
 use crate::editor::QueryEditor;
+use crate::errors::error_message;
 use crate::explain::ExplainView;
 use crate::run::Outcome;
 
@@ -453,15 +454,6 @@ fn grid_data(set: &ResultSet) -> (Vec<GridColumn>, Vec<Vec<Cell>>) {
 }
 
 /// One statement on the messages page (31 §4.3).
-pub(crate) fn db_text(e: &navidog_db::DbError) -> String {
-    navidog_ui::db_error_text(
-        e.code.as_deref(),
-        &e.message,
-        e.disconnected,
-        e.outcome_unknown,
-    )
-}
-
 pub(crate) fn message_block(
     sql: &str,
     result: &navidog_db::DbResult<Vec<ResultSet>>,
@@ -485,7 +477,7 @@ pub(crate) fn message_block(
                 _ => out.push_str("> OK\n"),
             }
         }
-        Err(e) => out.push_str(&format!("> {}\n", db_text(e))),
+        Err(e) => out.push_str(&format!("> {}\n", error_message(e))),
     }
     out.push_str(&format!("> {}: {}\n\n", t!("query.time"), secs(elapsed)));
     out
@@ -498,7 +490,7 @@ fn summary_message(result: &navidog_db::DbResult<Vec<ResultSet>>) -> String {
             format!("{}: {n}", t!("query.affected_rows"))
         }
         Ok(_) => "OK".into(),
-        Err(e) => db_text(e),
+        Err(e) => error_message(e),
     }
 }
 
@@ -580,6 +572,8 @@ pub(crate) struct ResultView {
     pub pinned: bool,
     busy: bool,
     status: SharedString,
+    /// The last sort accepted by this result, including DataTable's header indicator.
+    accepted_sort: Option<(SharedString, bool)>,
     /// The cell editor under the grid (F-DATA-011 style), and the cell it shows
     cell_editor: bool,
     cell_input: Entity<TextareaState>,
@@ -641,6 +635,7 @@ impl ResultView {
                 pinned: false,
                 busy: false,
                 status: SharedString::default(),
+                accepted_sort: None,
                 cell_editor: false,
                 cell_input,
                 cell_at: None,
@@ -785,13 +780,38 @@ impl ResultView {
     }
 
     #[cfg(test)]
-    pub(crate) fn is_busy(&self) -> bool {
-        self.busy
+    pub(crate) fn refresh_now(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.refresh(window, cx);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn sort_now(
+        &mut self,
+        sort: Option<(SharedString, bool)>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.on_grid_event(
+            &self.grid.clone(),
+            &GridEvent::SortChanged(sort),
+            window,
+            cx,
+        );
     }
 
     #[cfg(test)]
     pub(crate) fn status_text(&self) -> &str {
         &self.status
+    }
+
+    #[cfg(test)]
+    pub(crate) fn status(&self) -> &str {
+        &self.status
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_busy(&self) -> bool {
+        self.busy
     }
 
     #[cfg(test)]
@@ -818,6 +838,7 @@ impl ResultView {
         let Some(scope) = self.info.scope_for(&schema) else {
             return;
         };
+        let generation = Sessions::global(cx).read(cx).generation(&scope.connection);
         let (s, t) = (scope.clone(), table.clone());
         let Some(job) = Sessions::global(cx).read(cx).run_rel(
             &scope.connection,
@@ -829,6 +850,9 @@ impl ResultView {
         cx.spawn(async move |this, cx| {
             let Ok(Ok(columns)) = job.await else { return };
             let _ = this.update(cx, |this, cx| {
+                if Sessions::global(cx).read(cx).generation(&scope.connection) != generation {
+                    return;
+                }
                 let pk: Vec<&str> = columns
                     .iter()
                     .filter(|c| c.primary_key)
@@ -865,6 +889,7 @@ impl ResultView {
                             c.primary_key = this.edit.as_ref().is_some_and(|e| e.is_pk(&c.name));
                         }
                     });
+                    g.set_sort(this.accepted_sort.clone(), cx);
                     g.set_locked(false, cx);
                 });
                 cx.notify();
@@ -882,16 +907,15 @@ impl ResultView {
     ) {
         match e {
             GridEvent::SortChanged(sort) => {
+                self.grid.update(cx, |g, cx| g.commit_edit(window, cx));
                 if self.grid.read(cx).model(cx).has_changes() {
-                    self.grid.update(cx, |g, cx| g.revert_header_sort(cx));
-                    self.status = t!("query.sort_blocked").into();
+                    self.grid
+                        .update(cx, |g, cx| g.set_sort(self.accepted_sort.clone(), cx));
+                    self.status = t!("query.sort_blocked").to_string().into();
                     cx.notify();
                     return;
                 }
-                let hint = t!("query.sort_blocked").to_string();
-                if self.status.as_ref() == hint {
-                    self.status = SharedString::default();
-                }
+                self.accepted_sort = sort.clone();
                 if let Some((name, asc)) = sort
                     && let Some(col) = self
                         .grid
@@ -901,11 +925,10 @@ impl ResultView {
                         .iter()
                         .position(|c| c.name == *name)
                 {
-                    self.grid.update(cx, |g, cx| {
-                        g.update_model(cx, |m| m.sort_rows(col, *asc));
-                        g.accept_header_sort(cx);
-                    });
+                    self.grid
+                        .update(cx, |g, cx| g.update_model(cx, |m| m.sort_rows(col, *asc)));
                 }
+                self.grid.update(cx, |g, cx| g.accept_header_sort(cx));
             }
             GridEvent::CommitRequested => self.commit(window, cx),
             GridEvent::Changed => cx.notify(),
@@ -932,13 +955,15 @@ impl ResultView {
         }
         self.status = statements.join(";\n").into();
         let commit = Commit::new(edit.dialect, statements);
+        let generation = Sessions::global(cx)
+            .read(cx)
+            .generation(&self.info.connection_id);
         let database = edit.scope.database.clone();
         let dialect = edit.dialect;
-        // On its own session, outside any transaction opened in the editor
-        // (31 §4.2, a recorded deviation). The shared metadata session stays recoverable.
-        let Some(job) = Sessions::global(cx).read(cx).run_once(
+        // A fresh operation session cannot inherit a metadata caller's transaction or locks.
+        let Some(job) = Sessions::global(cx).read(cx).run_operation_rel(
             &edit.scope.connection,
-            Some(&database.clone()),
+            Some(&edit.scope.database),
             move |rel| {
                 Box::pin(async move {
                     prepare_database(rel, dialect, &database).await?;
@@ -952,22 +977,28 @@ impl ResultView {
         cx.spawn_in(window, async move |this, cx| {
             let result = job
                 .await
-                .map_err(|e| e.to_string())
-                .and_then(|r| r.map_err(|e| db_text(&e)));
+                .map_err(|e| navidog_db::DbError::msg(e.to_string()))
+                .and_then(|r| r);
             let _ = this.update_in(cx, |this, window, cx| {
+                if !this.accepts_generation(generation, cx) {
+                    return;
+                }
                 this.set_busy(false, cx);
                 match result {
                     Ok(()) => {
                         let sync = Settings::global(cx).sync_record;
                         let unknown = this.grid.read(cx).model(cx).commit_needs_reload();
+                        // The write is complete even if the following SELECT fails. Leaving its
+                        // changes pending would allow a later Apply to replay the same batch.
+                        this.grid.update(cx, |g, cx| {
+                            g.update_model(cx, |m| m.accept_committed_preserving_drafts())
+                        });
                         if sync || unknown {
-                            this.refresh(window, cx);
-                        } else {
-                            this.grid
-                                .update(cx, |g, cx| g.update_model(cx, |m| m.accept_committed()));
+                            this.reload(cx);
                         }
                     }
                     Err(e) => {
+                        let e = error_message(&e);
                         this.status = e.clone().into();
                         window.open_alert_dialog(cx, move |alert, _, _| {
                             alert
@@ -983,11 +1014,24 @@ impl ResultView {
         .detach();
     }
 
-    /// Refreshes the result's original source, reusing the editor session only while it matches.
-    fn refresh(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+    /// Guard reserved for a future explicit refresh action; no user entry point exists yet.
+    #[allow(dead_code)] // Production currently reloads only after accepting a successful write.
+    fn refresh(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.grid.update(cx, |g, cx| g.commit_edit(window, cx));
+        if self.grid.read(cx).model(cx).has_changes() {
+            self.status = t!("query.pending_result_changes").to_string().into();
+            cx.notify();
+            return;
+        }
         if self.busy {
             return;
         }
+        self.reload(cx);
+    }
+
+    /// Reloads accepted rows after a successful commit, or the internal explicit-refresh guard.
+    /// Reuses the editor session only while it still matches the result's original source.
+    fn reload(&mut self, cx: &mut Context<Self>) {
         let session = self.editor.upgrade().and_then(|e| {
             e.read(cx)
                 .live
@@ -1012,6 +1056,9 @@ impl ResultView {
             cx.notify();
             return;
         }
+        let generation = Sessions::global(cx)
+            .read(cx)
+            .generation(&self.info.connection_id);
         let sql = self.sql.clone();
         let info = self.info.clone();
         self.set_busy(true, cx);
@@ -1066,6 +1113,9 @@ impl ResultView {
             }
             .await;
             let _ = this.update(cx, |this, cx| {
+                if !this.accepts_generation(generation, cx) {
+                    return;
+                }
                 this.set_busy(false, cx);
                 match result {
                     Ok(sets) => {
@@ -1077,15 +1127,49 @@ impl ResultView {
                                 }
                             }
                             this.columns = set.columns;
-                            this.grid.update(cx, |g, cx| g.set_data(columns, rows, cx));
+                            // Preserve a valid accepted sort across synchronization. Otherwise
+                            // the SQL's original order would disagree with the cached arrow.
+                            this.accepted_sort = this.accepted_sort.take().filter(|(name, _)| {
+                                columns.iter().any(|column| column.name == *name)
+                            });
+                            this.grid.update(cx, |g, cx| {
+                                let mut drafts = None;
+                                g.update_model(cx, |model| drafts = Some(model.take_blank_insert_drafts()));
+                                g.set_data(columns, rows, cx);
+                                if let Some((name, asc)) = &this.accepted_sort
+                                    && let Some(col) = g.model(cx).columns.iter().position(|c| c.name == *name)
+                                {
+                                    g.update_model(cx, |model| model.sort_rows(col, *asc));
+                                }
+                                g.update_model(cx, |model| model.restore_blank_insert_drafts(drafts.unwrap()));
+                                g.set_sort(this.accepted_sort.clone(), cx);
+                            });
                         }
                     }
-                    Err(error) => this.status = db_text(&error).into(),
+                    Err(error) => this.status = error_message(&error).into(),
                 }
                 cx.notify();
             });
         })
         .detach();
+    }
+
+    /// A retired operation must not replace rows, accept edits, or surface an old modal.
+    fn accepts_generation(&mut self, generation: u64, cx: &mut Context<Self>) -> bool {
+        if Sessions::global(cx)
+            .read(cx)
+            .generation(&self.info.connection_id)
+            == generation
+        {
+            return true;
+        }
+        // This view serializes its work through `busy`; reopening does not start a newer load.
+        self.set_busy(false, cx);
+        self.status = t!("query.connection_changed_during_operation")
+            .to_string()
+            .into();
+        cx.notify();
+        false
     }
 
     fn set_busy(&mut self, busy: bool, cx: &mut Context<Self>) {
@@ -1732,6 +1816,22 @@ mod tests {
         let out = rename_changes(changes, &names);
         assert_eq!(out.updates[0].values[0].0, "first_name");
         assert_eq!(out.updates[0].key.0[0].0, "actor_id");
+    }
+
+    #[test]
+    fn session_loss_guidance_reaches_query_messages_summary_and_console() {
+        let mut error = navidog_db::DbError::coded("08006", "transport disconnected");
+        error.disconnected = true;
+        let result = Err(error);
+        let detail = "08006 - transport disconnected";
+        for text in [
+            message_block("SELECT 1", &result, Duration::ZERO),
+            summary_message(&result),
+            crate::console::format_result(Dialect::Postgres, &result, 0.0),
+        ] {
+            assert!(text.contains(detail));
+            assert!(text.contains("Reopen the connection") || text.contains("重新打开连接"));
+        }
     }
 
     #[test]

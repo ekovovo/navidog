@@ -6,6 +6,7 @@ use futures::FutureExt as _;
 use futures::future::BoxFuture;
 use rusqlite::types::ValueRef;
 use rusqlite::{OpenFlags, params};
+use tokio::sync::watch;
 
 use crate::dialect::Dialect;
 use crate::driver::{
@@ -49,12 +50,35 @@ type Shared = Arc<Mutex<rusqlite::Connection>>;
 
 async fn blocking<T: Send + 'static>(
     conn: &Shared,
+    workers: &watch::Sender<bool>,
     f: impl FnOnce(&mut rusqlite::Connection) -> DbResult<T> + Send + 'static,
 ) -> DbResult<T> {
     let conn = conn.clone();
-    tokio::task::spawn_blocking(move || f(&mut conn.lock().unwrap_or_else(|p| p.into_inner())))
-        .await
-        .map_err(|e| DbError::msg(e.to_string()))?
+    // Register before spawning. Dropping this async wait must not detach an untracked worker.
+    let registration = workers.subscribe();
+    tokio::task::spawn_blocking(move || {
+        let result = {
+            let mut guard = conn.lock().unwrap_or_else(|p| p.into_inner());
+            let retired = *registration.borrow();
+            if retired {
+                Err(DbError::msg(
+                    rust_i18n::t!("database.sqlite_queued_session_closed").to_string(),
+                )
+                .with_session_loss(false))
+            } else {
+                f(&mut guard)
+            }
+        };
+        drop(conn);
+        drop(registration);
+        result
+    })
+    .await
+    .map_err(|e| DbError::msg(e.to_string()))?
+}
+
+fn worker_scope() -> watch::Sender<bool> {
+    watch::channel(false).0
 }
 
 impl Driver for SqliteDriver {
@@ -100,6 +124,7 @@ impl Driver for SqliteDriver {
                     interrupt,
                     version,
                     tag,
+                    workers: worker_scope(),
                 })
             })
             .await
@@ -115,6 +140,7 @@ pub struct SqliteSession {
     interrupt: Arc<rusqlite::InterruptHandle>,
     version: String,
     tag: Tag,
+    workers: watch::Sender<bool>,
 }
 
 impl Session for SqliteSession {
@@ -123,8 +149,13 @@ impl Session for SqliteSession {
     }
 
     fn ping(&mut self) -> BoxFuture<'_, DbResult<()>> {
-        async move { blocking(&self.conn, |c| c.execute_batch("SELECT 1").map_err(err)).await }
-            .boxed()
+        async move {
+            blocking(&self.conn, &self.workers, |c| {
+                c.execute_batch("SELECT 1").map_err(err)
+            })
+            .await
+        }
+        .boxed()
     }
 
     fn cancel_handle(&self) -> Option<CancelHandle> {
@@ -140,7 +171,11 @@ impl Session for SqliteSession {
     }
 
     fn close(self: Box<Self>) -> BoxFuture<'static, DbResult<()>> {
+        self.workers.send_replace(true);
         async move {
+            // A canceled execute future can leave a queued/running spawn_blocking task. Wait
+            // for its actual completion before the operation retirement fence is released.
+            self.workers.closed().await;
             drop(self.conn);
             Ok(())
         }
@@ -161,8 +196,16 @@ impl Relational for SqliteSession {
         let owned = sql.to_string();
         let conn = self.conn.clone();
         let tag = self.tag.clone();
-        async move { logged(&tag, sql, blocking(&conn, move |c| execute_all(c, &owned))).await }
-            .boxed()
+        let workers = self.workers.clone();
+        async move {
+            logged(
+                &tag,
+                sql,
+                blocking(&conn, &workers, move |c| execute_all(c, &owned)),
+            )
+            .await
+        }
+        .boxed()
     }
 }
 
@@ -215,5 +258,64 @@ fn value_text(v: ValueRef<'_>) -> Option<String> {
         ValueRef::Real(f) => Some(f.to_string()),
         ValueRef::Text(t) => Some(String::from_utf8_lossy(t).into_owned()),
         ValueRef::Blob(b) => Some(format!("(BLOB) {} bytes", b.len())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn close_drains_dropped_execute_and_skips_work_queued_behind_the_connection_lock() {
+        crate::runtime::runtime().block_on(async {
+            let connection = rusqlite::Connection::open_in_memory().unwrap();
+            connection
+                .execute_batch("CREATE TABLE audit (n INTEGER)")
+                .unwrap();
+            let interrupt = Arc::new(connection.get_interrupt_handle());
+            let conn = Arc::new(Mutex::new(connection));
+            let mut session = Box::new(SqliteSession {
+                conn: conn.clone(),
+                interrupt,
+                version: "test".into(),
+                tag: Tag::new("test", "SQLite"),
+                workers: worker_scope(),
+            });
+            let workers = session.workers.clone();
+            let (locked, locked_wait) = tokio::sync::oneshot::channel();
+            let (release, release_wait) = std::sync::mpsc::channel();
+            let held = conn.clone();
+            let holder = std::thread::spawn(move || {
+                let guard = held.lock().unwrap();
+                locked.send(()).unwrap();
+                release_wait.recv().unwrap();
+                drop(guard);
+            });
+            locked_wait.await.unwrap();
+            let cancel = session.cancel_handle().unwrap();
+            let mut execute = session.execute("INSERT INTO audit VALUES (1)");
+            assert!(futures::poll!(&mut execute).is_pending());
+            assert_eq!(workers.receiver_count(), 1);
+            drop(execute);
+            // SQLite's interrupt does not stop a statement that has not started. close must
+            // therefore revoke queued work and keep waiting for the actual worker to exit.
+            cancel().await.unwrap();
+            let mut close = session.close();
+            assert!(futures::poll!(&mut close).is_pending());
+            assert_eq!(workers.receiver_count(), 1);
+            release.send(()).unwrap();
+            tokio::time::timeout(std::time::Duration::from_secs(5), close)
+                .await
+                .expect("close must complete after the queued worker exits")
+                .unwrap();
+            holder.join().unwrap();
+            assert_eq!(workers.receiver_count(), 0);
+            let rows: i64 = conn
+                .lock()
+                .unwrap()
+                .query_row("SELECT COUNT(*) FROM audit", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(rows, 0, "retired queued SQL must never start");
+        });
     }
 }

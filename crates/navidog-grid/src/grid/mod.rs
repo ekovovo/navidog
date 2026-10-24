@@ -388,7 +388,6 @@ impl ResultGrid {
                     .position(|c| c.name == name)
                     .map(|i| (i, asc))
             });
-            d.applied_sort = d.sort;
             d.settled = Some(d.model.head().0);
             d.dragged = false;
             d.commit_requested = false;
@@ -403,21 +402,20 @@ impl ResultGrid {
     }
 
     /// Changes which columns are shown using the model's current accepted rows.
-    /// Returns false when pending writes must be committed or discarded first; nothing changes then.
+    /// Returns false without changing the display or editor while writes are pending.
     pub fn set_hidden_columns(&mut self, hidden: &HashSet<String>, cx: &mut Context<Self>) -> bool {
-        let mut applied = false;
-        self.table.update(cx, |t, cx| {
+        let accepted = self.table.update(cx, |t, cx| {
             let d = t.delegate_mut();
-            // Resolving an editable target can clear the layout after data was loaded.
-            // Remember the current order before hiding moves columns into the hidden partition.
-            d.layout.sync(&d.names());
+            let names_before = d.names();
             let sort = d
                 .sort
                 .and_then(|(ix, asc)| d.model.columns.get(ix).map(|c| (c.name.clone(), asc)));
             if !d.model.set_hidden(hidden) {
-                return;
+                return false;
             }
-            applied = true;
+            // Resolving an editable target can clear the layout after data was loaded.
+            // Remember the previous order before partitioning hidden columns.
+            d.layout.sync(&names_before);
             let names = d.names();
             let order: Vec<_> = d
                 .layout
@@ -433,16 +431,17 @@ impl ResultGrid {
                     .position(|c| c.name == name)
                     .map(|ix| (ix, asc))
             });
-            d.applied_sort = d.sort;
             d.editing = None;
             d.settled = Some(d.model.head().0);
             refit_auto(d, cx);
             t.refresh(cx);
+            true
         });
-        if applied {
+        if accepted {
+            self.edit_sub = None;
             cx.notify();
         }
-        applied
+        accepted
     }
 
     pub fn update_model(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut GridModel)) {
@@ -504,6 +503,25 @@ impl ResultGrid {
 
     pub fn scroll_to_row(&self, row: usize, cx: &mut App) {
         self.table.update(cx, |t, cx| t.scroll_to_row(row, cx));
+    }
+
+    /// Restores an owner-accepted sort without emitting another sort request.
+    /// Refreshes DataTable's cached headers as well as the delegate's sort state.
+    pub fn set_sort(&mut self, sort: Option<(SharedString, bool)>, cx: &mut Context<Self>) {
+        self.table.update(cx, |t, cx| {
+            let d = t.delegate_mut();
+            d.sort = sort.and_then(|(name, asc)| {
+                d.model
+                    .columns
+                    .iter()
+                    .position(|column| column.name == name)
+                    .map(|ix| (ix, asc))
+            });
+            d.sort_changed = false;
+            d.applied_sort = d.sort;
+            t.refresh(cx);
+            cx.notify();
+        });
     }
 
     /// Clears the sort shown in the header (e.g. after the ORDER BY text is cleared).

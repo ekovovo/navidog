@@ -5,10 +5,13 @@
 extern crate gpui_kit as gpui;
 
 rust_i18n::i18n!("locales", fallback = "en");
+// Keep generated translations current when only the locale file changes.
+const _: &str = include_str!("../locales/query.yml");
 
 mod completion;
 mod console;
 mod editor;
+mod errors;
 mod explain;
 mod explain_visual;
 mod find;

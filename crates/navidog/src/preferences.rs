@@ -488,8 +488,7 @@ impl Preferences {
                                     {
                                         Ok(dropped) => notify_dropped(&dropped, window, cx),
                                         Err(e) => {
-                                            let message =
-                                                navidog_connection::store_error_message(&e);
+                                            let message = e.localized_message();
                                             window.push_notification(message, cx);
                                         }
                                     }
@@ -626,7 +625,7 @@ impl MasterDialog {
                 notify_dropped(&dropped, window, cx);
             }
             Err(e) => {
-                self.error = Some(navidog_connection::store_error_message(&e).into());
+                self.error = Some(e.localized_message().into());
                 cx.notify();
             }
         }

@@ -178,3 +178,4 @@ pub struct ChangeSet {
 - [ ] 开启事务后，提交和回滚都正确；关闭选项卡时提示未结束的事务。
 - [ ] 区域选择后复制粘贴，以及“复制为 INSERT/UPDATE”的输出格式正确。
 - [ ] 10 万行数据滚动流畅。
+- [x] 隐藏列投影拒绝会返回到查看器，列菜单只在成功时更新；拒绝保留活动编辑器和待提交值，空白新增草稿仍可隐藏/恢复列。回归入口为 grid `refused_column_visibility_keeps_pending_values_and_the_editor` 与 viewer `visibility_uses_accepted_updates_inserts_and_deletes`；本轮完整验证见架构基础验收记录。

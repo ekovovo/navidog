@@ -34,7 +34,7 @@ fn change(
 ) -> bool {
     let open = Sessions::global(cx).read(cx).state(id).is_open();
     if let Err(error) = ConnectionStore::global(cx).update(cx, |s, cx| s.update(id, f, cx)) {
-        window.push_notification(crate::store_error_message(&error), cx);
+        window.push_notification(error.localized_message(), cx);
         return false;
     }
     if open {

@@ -343,6 +343,12 @@ viewer:
   closed:
     en: The connection is closed
     zh-CN: 连接已关闭
+  outcome_unknown:
+    en: "%{detail} The execution outcome may be unknown. Check the database before retrying, then reopen the connection to continue."
+    zh-CN: "%{detail} 执行结果可能未知。请先检查数据库，确认后再重试，并重新打开连接后继续。"
+  session_lost:
+    en: "%{detail} The previous session state cannot be restored. Reopen the connection to continue."
+    zh-CN: "%{detail} 原会话状态无法恢复。请重新打开连接后继续。"
   external_refresh_pending:
     en: Database changed. Finish editing or end this transaction, then refresh.
     zh-CN: 数据库已更改。请先处理编辑内容或结束当前事务，再刷新。

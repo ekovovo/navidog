@@ -18,7 +18,7 @@ mod macos {
     use gpui_kit::{AppContext as _, Focusable as _, HeadlessAppContext, InputEvent as _};
     use navidog::main_window::MainWindow;
     use navidog::state::AppState;
-    use navidog_core::actions::{NewConnection, NewConnectionOf, OpenObject};
+    use navidog_core::actions::{NewConnection, NewConnectionOf, OpenObject, ReopenConnectionId};
     use navidog_core::connection::Connection;
     use navidog_core::crypto::Key;
     use navidog_core::object::{ObjectKind, ObjectRef, Scope};
@@ -267,6 +267,20 @@ mod macos {
         shot(&mut cx, "viewer-wide-end-dark.png");
         cx.update(|cx| Theme::change(ThemeMode::Light, None, cx));
 
+        dispatch(&mut cx, Box::new(ReopenConnectionId::new(lite.clone())));
+        cx.run_until_parked();
+        shot(&mut cx, "session-reopen-light.png");
+        cx.update(|cx| Theme::change(ThemeMode::Dark, None, cx));
+        shot(&mut cx, "session-reopen-dark.png");
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.has_active_dialog(cx));
+            window.click("cancel", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        assert!(cx.update(|cx| Sessions::global(cx).read(cx).state(&lite).is_open()));
+        cx.update(|cx| Theme::change(ThemeMode::Light, None, cx));
         // Keep the last batch SQL visible instead of replacing it with a sync SELECT.
         let record_settings = cx.update(|cx| {
             let s = Settings::global(cx);

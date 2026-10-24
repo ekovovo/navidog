@@ -572,7 +572,7 @@ impl ConnectionForm {
         let was_open = Sessions::global(cx).read(cx).state(&id).is_open();
         let store = ConnectionStore::global(cx);
         if let Err(e) = store.update(cx, |s, cx| s.upsert(conn, &secrets, cx)) {
-            self.error = Some(crate::store_error_message(&e).into());
+            self.error = Some(e.localized_message().into());
             cx.notify();
             return;
         }

@@ -1,6 +1,10 @@
 //! Drivers: the traits, the tokio runtime, the built-in drivers (MySQL/MariaDB, PostgreSQL,
 //! SQLite) and the SSH tunnel.
 
+rust_i18n::i18n!("locales", fallback = "en");
+// Track locale edits in Cargo as well as the translation proc-macro.
+const _: &str = include_str!("../locales/database.yml");
+
 pub mod dialect;
 pub mod driver;
 mod execution;
@@ -39,6 +43,7 @@ pub(crate) fn lock_config_home() -> std::sync::MutexGuard<'static, ()> {
 
 /// Register the built-in drivers.
 pub fn init(cx: &mut App) {
+    let _ = _rust_i18n_backend();
     let mut registry = DriverRegistry::default();
     let builtin: [Arc<dyn Driver>; 4] = [
         Arc::new(mysql::MySqlDriver::mysql()),

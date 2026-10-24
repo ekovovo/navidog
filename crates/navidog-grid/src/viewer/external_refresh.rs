@@ -61,6 +61,7 @@ impl TableViewer {
         let (Some(session), Some(dialect)) = (self.session.clone(), self.dialect) else {
             return;
         };
+        let generation = self.session_generation;
         let (scope, table) = (self.object.scope.clone(), self.object.name.clone());
         let filter = self.filter.read(cx).value().to_string();
         let order = self.order.read(cx).value().to_string();
@@ -92,14 +93,15 @@ impl TableViewer {
             let result = job
                 .await
                 .map_err(|e| e.to_string())
-                .and_then(|r| r.map_err(|e| crate::db_text(&e)));
+                .and_then(|r| r.map_err(|e| error_message(&e)));
             let pending_close = this
                 .update(cx, |this, cx| {
                     // A connection reopen may have replaced the session while the job completed.
-                    if !this
-                        .session
-                        .as_ref()
-                        .is_some_and(|current| Arc::ptr_eq(current, &session))
+                    if !this.generation_matches(generation, cx)
+                        || !this
+                            .session
+                            .as_ref()
+                            .is_some_and(|current| Arc::ptr_eq(current, &session))
                     {
                         return false;
                     }
@@ -114,7 +116,7 @@ impl TableViewer {
                         Ok((columns, foreign_keys, page, total)) => {
                             this.accept_catalog(columns, foreign_keys, cx);
                             this.total = total;
-                            this.apply_page(Ok(page), cx)
+                            this.apply_page(generation, Ok(page), cx)
                         }
                         Err(error) => {
                             this.fail(error, cx);

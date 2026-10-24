@@ -859,9 +859,8 @@ fn uncertain_writes_are_never_replayed() {
                 observer.close().await.unwrap();
                 assert!(promptly, "a disconnected write was replayed or stalled");
                 let error = result.unwrap_err();
-                assert!(error.disconnected, "{error}");
-                assert!(error.outcome_unknown, "{error}");
-                assert!(!error.message.contains("outcome may be unknown"), "{error}");
+                assert!(error.is_session_lost(), "{error}");
+                assert!(error.is_outcome_unknown(), "{error}");
                 assert!(
                     same_session,
                     "a write silently moved to a different physical session"
@@ -896,7 +895,8 @@ fn transaction_loss_cannot_reconnect_through_metadata_or_ping() {
                 .execute_read("SELECT 1")
                 .await
                 .unwrap_err();
-            assert!(read.disconnected && !read.outcome_unknown, "{read}");
+            assert!(read.is_session_lost(), "{read}");
+            assert!(!read.is_outcome_unknown(), "{read}");
             assert!(session.ping().await.is_err());
             assert!(
                 session

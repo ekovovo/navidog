@@ -22,7 +22,6 @@ pub struct DbError {
     /// The physical session is dead. Ordinary SQL must never be replayed automatically;
     /// only an explicitly stateless read can opt in to recovery on a fresh session.
     pub disconnected: bool,
-    /// The statement may have reached the server; the client did not see how it ended.
     pub outcome_unknown: bool,
 }
 
@@ -52,6 +51,22 @@ impl DbError {
             disconnected: false,
             outcome_unknown: false,
         }
+    }
+
+    /// The physical session cannot accept more work. UI callers decide how to explain recovery.
+    pub fn is_session_lost(&self) -> bool {
+        self.disconnected
+    }
+
+    /// Ordinary SQL was submitted, but a disconnect prevented confirming its outcome.
+    pub fn is_outcome_unknown(&self) -> bool {
+        self.outcome_unknown
+    }
+
+    pub(crate) fn with_session_loss(mut self, outcome_unknown: bool) -> Self {
+        self.disconnected = true;
+        self.outcome_unknown = outcome_unknown;
+        self
     }
 }
 

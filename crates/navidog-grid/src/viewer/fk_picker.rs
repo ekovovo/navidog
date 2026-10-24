@@ -28,9 +28,19 @@ impl TableViewer {
         let (Some(session), Some(dialect)) = (self.session.clone(), self.dialect) else {
             return;
         };
+        let generation = self.session_generation;
         let viewer = cx.entity().downgrade();
-        let picker =
-            cx.new(|cx| FkPicker::new(key, dialect, session, viewer, (row, col), window, cx));
+        let picker = cx.new(|cx| {
+            FkPicker::new(
+                key,
+                dialect,
+                (session, generation),
+                viewer,
+                (row, col),
+                window,
+                cx,
+            )
+        });
         picker.update(cx, |picker, cx| picker.reload(cx));
         window.open_dialog(cx, move |dialog, window, _| {
             // Enter in the search field searches again and leaves the picker open
@@ -48,6 +58,7 @@ struct FkPicker {
     key: navidog_db::ForeignKey,
     dialect: Dialect,
     session: SharedSession,
+    generation: u64,
     viewer: WeakEntity<TableViewer>,
     cell: (usize, usize),
     search: Entity<InputState>,
@@ -60,7 +71,7 @@ impl FkPicker {
     fn new(
         key: navidog_db::ForeignKey,
         dialect: Dialect,
-        session: SharedSession,
+        (session, generation): (SharedSession, u64),
         viewer: WeakEntity<TableViewer>,
         cell: (usize, usize),
         window: &mut Window,
@@ -72,6 +83,7 @@ impl FkPicker {
             key,
             dialect,
             session,
+            generation,
             viewer,
             cell,
             search,
@@ -95,30 +107,36 @@ impl FkPicker {
         });
         cx.spawn(async move |this, cx| {
             let result = job.await;
-            let _ = this.update(cx, |this, cx| {
-                match result {
-                    Ok(Ok(sets)) => {
-                        this.rows = sets
-                            .into_iter()
-                            .next()
-                            .map(|set| {
-                                set.rows
-                                    .into_iter()
-                                    .map(|row| row.into_iter().next().unwrap_or(None))
-                                    .collect()
-                            })
-                            .unwrap_or_default();
-                        this.note = if this.rows.is_empty() {
-                            t!("grid.fk_empty").into()
-                        } else {
-                            SharedString::default()
-                        };
+            let _ =
+                this.update(cx, |this, cx| {
+                    if !this.viewer.upgrade().is_some_and(|viewer| {
+                        viewer.read(cx).generation_matches(this.generation, cx)
+                    }) {
+                        return;
                     }
-                    Ok(Err(e)) => this.note = crate::db_text(&e).into(),
-                    Err(e) => this.note = e.to_string().into(),
-                }
-                cx.notify();
-            });
+                    match result {
+                        Ok(Ok(sets)) => {
+                            this.rows = sets
+                                .into_iter()
+                                .next()
+                                .map(|set| {
+                                    set.rows
+                                        .into_iter()
+                                        .map(|row| row.into_iter().next().unwrap_or(None))
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+                            this.note = if this.rows.is_empty() {
+                                t!("grid.fk_empty").into()
+                            } else {
+                                SharedString::default()
+                            };
+                        }
+                        Ok(Err(e)) => this.note = crate::db_text(&e).into(),
+                        Err(e) => this.note = e.to_string().into(),
+                    }
+                    cx.notify();
+                });
         })
         .detach();
     }
@@ -166,8 +184,11 @@ impl Render for FkPicker {
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 let value = stored.clone();
                                 let (row, col) = this.cell;
+                                let generation = this.generation;
                                 let _ = this.viewer.update(cx, |viewer, cx| {
-                                    viewer.write_cell(row, col, value.map(Into::into), cx);
+                                    if viewer.generation_matches(generation, cx) {
+                                        viewer.write_cell(row, col, value.map(Into::into), cx);
+                                    }
                                 });
                                 window.close_dialog(cx);
                             }))

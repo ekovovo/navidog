@@ -11,6 +11,7 @@ description = "MySQL, MariaDB, PostgreSQL, and SQLite drivers for navidog."
 navidog-core.workspace = true
 navidog-util.workspace = true
 gpui-kit.workspace = true
+rust-i18n.workspace = true
 chrono.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true

@@ -84,6 +84,20 @@ pub struct OpenConnectionId {
     pub id: SharedString,
 }
 
+/// Explicit recovery after a lost session; confirmation belongs to the connection feature.
+#[derive(Clone, PartialEq, Debug, Action)]
+#[action(namespace = connection, no_json)]
+#[non_exhaustive]
+pub struct ReopenConnectionId {
+    pub id: SharedString,
+}
+
+impl ReopenConnectionId {
+    pub fn new(id: impl Into<SharedString>) -> Self {
+        Self { id: id.into() }
+    }
+}
+
 /// Inserts text at the caret of the active query editor (info pane identifiers and snippets).
 #[derive(Clone, PartialEq, Debug, Action)]
 #[action(namespace = query, no_json)]

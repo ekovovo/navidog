@@ -37,7 +37,7 @@ jobs:
       - name: start databases
         run: docker compose up -d --wait
       - name: live tests
-        run: NAVIDOG_LIVE=1 cargo test -p navidog-db --test live
+        run: NAVIDOG_LIVE=1 cargo test -p navidog-db --lib --test live --locked
       - name: stop databases
         if: always()
         run: docker compose down

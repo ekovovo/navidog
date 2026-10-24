@@ -190,6 +190,13 @@ pub enum StoreError {
     Io(#[from] std::io::Error),
 }
 
+impl StoreError {
+    /// User-facing diagnostics in the interface language. `Display` remains for logs.
+    pub fn localized_message(&self) -> String {
+        error_message(self)
+    }
+}
+
 pub enum StoreEvent {
     Changed,
 }
@@ -907,5 +914,66 @@ mod tests {
         assert_ne!(bytes, disk);
         assert!(std::str::from_utf8(&bytes).unwrap().contains("renamed"));
         assert!(!std::str::from_utf8(&bytes).unwrap().contains("\"missing\""));
+    }
+    #[gpui_kit::test]
+    fn missing_update_targets_are_rejected_before_any_callback(cx: &mut gpui_kit::TestAppContext) {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let fixture = StoreFixture::new();
+        let first = Connection::new("sqlite");
+        let second = Connection::new("sqlite");
+        let ids = [first.id.clone(), second.id.clone()];
+        let store = cx.new(|_| ConnectionStore::load(fixture.path.clone()));
+        store.update(cx, |store, cx| {
+            store.upsert(first, &[], cx).unwrap();
+            store.upsert(second, &[], cx).unwrap();
+        });
+        let original = cx.update(|cx| store.read(cx).file.clone());
+        let disk = std::fs::read(&fixture.path).unwrap();
+        let changes = Rc::new(Cell::new(0));
+        let seen = changes.clone();
+        let _subscription = cx.update(|cx| {
+            cx.subscribe(&store, move |_, _: &StoreEvent, _| seen.set(seen.get() + 1))
+        });
+        let callbacks = Cell::new(0);
+        fixture.block_write();
+        store.update(cx, |store, cx| {
+            let missing = "missing-connection".to_string();
+            let result = store.update(&missing, |_| callbacks.set(callbacks.get() + 1), cx);
+            assert!(matches!(result, Err(StoreError::NotFound)));
+            for targets in [
+                vec![ids[0].clone(), missing.clone()],
+                vec![missing.clone(), ids[1].clone()],
+                vec![ids[0].clone(), missing.clone(), ids[1].clone()],
+            ] {
+                let result = store.update_many(
+                    &targets,
+                    |connection| {
+                        callbacks.set(callbacks.get() + 1);
+                        connection.starred = true;
+                    },
+                    cx,
+                );
+                assert!(matches!(result, Err(StoreError::NotFound)));
+            }
+            store
+                .update_many(&[], |_| callbacks.set(callbacks.get() + 1), cx)
+                .unwrap();
+            assert!(store.file == original);
+        });
+        cx.run_until_parked();
+        assert_eq!(callbacks.get(), 0);
+        assert_eq!(changes.get(), 0);
+        assert!(std::fs::read(&fixture.path).unwrap() == disk);
+        fixture.unblock_write();
+        store
+            .update(cx, |store, cx| {
+                store.update_many(&ids, |connection| connection.starred = true, cx)
+            })
+            .unwrap();
+        cx.run_until_parked();
+        assert_eq!(changes.get(), 1);
+        assert!(cx.update(|cx| store.read(cx).connections().iter().all(|c| c.starred)));
     }
 }

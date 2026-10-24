@@ -619,6 +619,210 @@ fn accepted_results_keep_their_rows_and_original_source(cx: &mut TestAppContext)
     wait(cx, "editable original result", |cx| {
         cx.update(|cx| view.read(cx).editable())
     });
+    // Exercise DataTable's actual header hit target and cached arrow state, not request_sort.
+    let click_name_sort = |cx: &mut TestAppContext| {
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            window.render_frame(cx);
+            window.click(gpui_kit::ElementId::NamedInteger("icon-sort".into(), 2), cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+    };
+    click_name_sort(cx); // Default -> descending.
+    click_name_sort(cx); // Descending -> ascending (the last accepted sort).
+    for blank_draft in [false, true] {
+        cx.update(|cx| {
+            view.read(cx).grid.clone().update(cx, |g, cx| {
+                g.update_model(cx, |m| {
+                    if blank_draft {
+                        m.insert_row();
+                    } else {
+                        m.set_value(0, 1, Some("pending sort".into()));
+                    }
+                });
+            });
+        });
+        let before = cx.update(|cx| view.read(cx).rows(cx));
+        click_name_sort(cx); // Rejected: the accepted ascending arrow must remain.
+        cx.update(|cx| {
+            assert_eq!(view.read(cx).rows(cx), before);
+            assert_eq!(
+                view.read(cx).status(),
+                rust_i18n::t!("query.sort_blocked").as_ref()
+            );
+            view.read(cx).grid.clone().update(cx, |g, cx| {
+                g.update_model(cx, |m| m.discard());
+            });
+        });
+        click_name_sort(cx); // Ascending -> default: retain the accepted row order.
+        cx.update(|cx| assert_eq!(view.read(cx).rows(cx)[0][1].as_deref(), Some("a")));
+        click_name_sort(cx); // Default -> descending; catches a stale internal header arrow.
+        cx.update(|cx| assert_eq!(view.read(cx).rows(cx)[0][1].as_deref(), Some("b")));
+        click_name_sort(cx); // Descending -> ascending for the next case.
+    }
+
+    // A clean in-flight reload accepts sorting and reapplies it to the returned rows.
+    cx.update_window(handle, |_, window, cx| {
+        view.update(cx, |v, cx| {
+            v.refresh_now(window, cx);
+            assert!(v.is_busy());
+            v.sort_now(Some(("name".into(), false)), window, cx);
+            assert!(v.is_busy());
+            assert_eq!(v.rows(cx)[0][1].as_deref(), Some("b"));
+        });
+    })
+    .unwrap();
+    wait(cx, "sorting during a clean reload", |cx| {
+        cx.update(|cx| !view.read(cx).is_busy())
+    });
+    cx.update(|cx| assert_eq!(view.read(cx).rows(cx)[0][1].as_deref(), Some("b")));
+    click_name_sort(cx); // Return to ascending before checking pending input.
+
+    // The internal refresh guard must settle active input without issuing SQL.
+    let revision = navidog_db::log::revision();
+    cx.update_window(handle, |_, window, cx| {
+        view.read(cx)
+            .grid
+            .clone()
+            .update(cx, |g, cx| g.start_edit((0, 1), window, cx));
+        window.render_frame(cx);
+        window.press("secondary-a", cx);
+        window.input("uncommitted refresh", cx);
+    })
+    .unwrap();
+    cx.update_window(handle, |_, window, cx| {
+        view.update(cx, |v, cx| v.refresh_now(window, cx));
+        assert!(!view.read(cx).is_busy());
+        assert_eq!(
+            view.read(cx).rows(cx)[0][1].as_deref(),
+            Some("uncommitted refresh")
+        );
+        assert!(view.read(cx).grid.read(cx).model(cx).has_changes());
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert!(
+        navidog_db::log::since(revision)
+            .0
+            .iter()
+            .all(|entry| { entry.sql != "SELECT id, name FROM t ORDER BY id" })
+    );
+    cx.update_window(handle, |_, window, cx| {
+        view.update(cx, |v, cx| {
+            v.grid.update(cx, |g, cx| {
+                g.update_model(cx, |m| {
+                    m.discard();
+                    m.insert_row();
+                })
+            });
+            v.refresh_now(window, cx);
+            assert!(!v.is_busy());
+            assert_eq!(v.rows(cx).len(), 3);
+            assert!(v.grid.read(cx).model(cx).change_set().inserts.is_empty());
+            v.grid
+                .update(cx, |g, cx| g.update_model(cx, |m| m.discard()));
+        });
+    })
+    .unwrap();
+
+    // Reopening drops only the physical editor session, keeping the document and result drafts.
+    let unsaved_sql = "SELECT id, name FROM t ORDER BY id\n-- unsaved query survives reopening";
+    cx.update_window(handle, |_, window, cx| {
+        let state = editor.read(cx).editor.clone();
+        state.update(cx, |state, cx| {
+            let end = state.value().len();
+            state.replace_text_in_range(Some(0..end), unsaved_sql, window, cx);
+        });
+    })
+    .unwrap();
+    cx.update(|cx| {
+        view.read(cx).grid.clone().update(cx, |g, cx| {
+            g.update_model(cx, |m| {
+                m.set_value(0, 1, Some("draft survives reopening".into()));
+                m.insert_row();
+            });
+        })
+    });
+    cx.run_until_parked();
+    let draft_rows = cx.update(|cx| view.read(cx).rows(cx));
+    cx.update(|cx| {
+        assert!(editor.read(cx).live.is_some());
+        assert!(editor.read(cx).dirty);
+        Sessions::global(cx).update(cx, |sessions, cx| sessions.close_for_reopen(&ids[0], cx));
+    });
+    cx.run_until_parked();
+    cx.update(|cx| {
+        assert!(editor.read(cx).live.is_none());
+        assert_eq!(
+            editor.read(cx).editor.read(cx).value().to_string(),
+            unsaved_sql
+        );
+        assert!(editor.read(cx).dirty);
+        assert_eq!(view.read(cx).rows(cx), draft_rows);
+        assert!(view.read(cx).grid.read(cx).model(cx).has_changes());
+        assert!(
+            view.read(cx)
+                .grid
+                .read(cx)
+                .model(cx)
+                .change_set()
+                .inserts
+                .is_empty()
+        );
+        assert!(editor.read(cx).results.tabs.iter().any(|tab| {
+            tab.pinned && matches!(&tab.body, Body::Grid(result) if *result == view)
+        }));
+    });
+    cx.update(|cx| {
+        Sessions::global(cx).update(cx, |sessions, cx| {
+            sessions.open(ids[0].clone(), Secrets::default(), cx);
+        })
+    });
+    wait(cx, "the original connection to reopen", |cx| {
+        cx.update(|cx| Sessions::global(cx).read(cx).state(&ids[0]).is_open())
+    });
+    cx.run_until_parked();
+    cx.update(|cx| {
+        assert!(
+            editor.read(cx).live.is_none(),
+            "a user run lazily creates the next editor session"
+        );
+        assert_eq!(
+            editor.read(cx).editor.read(cx).value().to_string(),
+            unsaved_sql
+        );
+        assert!(editor.read(cx).dirty);
+        assert_eq!(view.read(cx).rows(cx), draft_rows);
+        assert!(view.read(cx).grid.read(cx).model(cx).has_changes());
+        view.read(cx)
+            .grid
+            .clone()
+            .update(cx, |g, cx| g.update_model(cx, |m| m.discard()));
+    });
+    assert_eq!(
+        sql(&first_file, "SELECT id, name FROM t ORDER BY id"),
+        [
+            vec![Some("1".into()), Some("a".into())],
+            vec![Some("2".into()), Some("b".into())],
+        ]
+    );
+    set_text(cx, handle, &editor, "SELECT id, name FROM t ORDER BY id");
+
+    // A metadata caller can leave a transaction open; result Apply must use its own session.
+    let metadata_transaction = cx.update(|cx| {
+        Sessions::global(cx)
+            .read(cx)
+            .run_rel(&ids[0], Some("main"), |rel| {
+                Box::pin(async move { rel.execute("BEGIN").await.map(|_| ()) })
+            })
+            .unwrap()
+    });
+    runtime::runtime()
+        .block_on(metadata_transaction)
+        .unwrap()
+        .unwrap();
+
     cx.update_window(handle, |_, window, cx| {
         view.update(cx, |v, cx| {
             v.grid.update(cx, |g, cx| {
@@ -638,6 +842,18 @@ fn accepted_results_keep_their_rows_and_original_source(cx: &mut TestAppContext)
     wait(cx, "accepted update, insert and delete", |cx| {
         cx.update(|cx| !view.read(cx).is_busy())
     });
+    let metadata_commit = cx.update(|cx| {
+        Sessions::global(cx)
+            .read(cx)
+            .run_rel(&ids[0], Some("main"), |rel| {
+                Box::pin(async move { rel.execute("COMMIT").await.map(|_| ()) })
+            })
+            .unwrap()
+    });
+    runtime::runtime()
+        .block_on(metadata_commit)
+        .unwrap()
+        .unwrap();
     assert_eq!(
         sql(&first_file, "SELECT id, name FROM t ORDER BY id"),
         [
@@ -694,8 +910,8 @@ fn accepted_results_keep_their_rows_and_original_source(cx: &mut TestAppContext)
         assert_eq!(
             view.read(cx).rows(cx),
             [
-                vec![Some("1".into()), Some("z".into())],
-                vec![Some("3".into()), Some("source A".into())]
+                vec![Some("3".into()), Some("source A".into())],
+                vec![Some("1".into()), Some("z".into())]
             ]
         )
     });
@@ -703,6 +919,22 @@ fn accepted_results_keep_their_rows_and_original_source(cx: &mut TestAppContext)
         sql(&second_file, "SELECT name FROM t"),
         [vec![Some("other database".into())]]
     );
+    cx.update(|cx| {
+        editor.update(cx, |e, _| {
+            let tab = e
+                .results
+                .tabs
+                .iter()
+                .find(|tab| matches!(&tab.body, Body::Grid(result) if *result == view))
+                .unwrap();
+            e.results.page = crate::results::Page::Tab(tab.id);
+        })
+    });
+    click_name_sort(cx); // Reload kept ascending: the next click clears it.
+    cx.update(|cx| assert_eq!(view.read(cx).rows(cx)[0][0].as_deref(), Some("3")));
+    click_name_sort(cx); // Default -> descending, in both the indicator and row data.
+    cx.update(|cx| assert_eq!(view.read(cx).rows(cx)[0][0].as_deref(), Some("1")));
+    click_name_sort(cx); // Restore ascending before continuing.
 
     // A matching editor session keeps its temporary objects available during refresh.
     cx.update_window(handle, |_, window, cx| {
@@ -755,6 +987,184 @@ fn accepted_results_keep_their_rows_and_original_source(cx: &mut TestAppContext)
         assert_eq!(source.connection_id, ids[0]);
         assert_eq!(source.database.as_deref(), Some("main"));
     });
+
+    // A committed batch stays accepted if synchronizing the result subsequently fails.
+    sql(
+        &first_file,
+        "CREATE TABLE applied_count(n INTEGER); INSERT INTO applied_count VALUES(0); CREATE TRIGGER count_apply AFTER UPDATE ON t BEGIN UPDATE applied_count SET n = n + 1; END",
+    );
+    cx.update_window(handle, |_, window, cx| {
+        view.update(cx, |v, cx| {
+            v.sql = "SELECT * FROM missing_refresh_target".into();
+            v.grid.update(cx, |g, cx| {
+                g.update_model(cx, |m| {
+                    m.set_value(0, 1, Some("accepted once".into()));
+                    m.insert_row();
+                    m.insert_row();
+                })
+            });
+            v.commit_now(window, cx);
+        });
+    })
+    .unwrap();
+    wait(cx, "the failed post-commit refresh", |cx| {
+        cx.update(|cx| !view.read(cx).is_busy())
+    });
+    cx.update(|cx| {
+        let model = view.read(cx).grid.read(cx).model(cx);
+        assert!(
+            model.has_changes(),
+            "unsubmitted blank drafts survive a failed reload"
+        );
+        let changes = model.change_set();
+        assert!(
+            changes.updates.is_empty() && changes.inserts.is_empty() && changes.deletes.is_empty()
+        );
+        assert_eq!(model.row_count(), 4);
+        assert!(model.value(2, 0).is_none() && model.value(3, 0).is_none());
+        assert_eq!(
+            view.read(cx).rows(cx)[0][1].as_deref(),
+            Some("accepted once")
+        );
+        assert!(view.read(cx).status().contains("missing_refresh_target"));
+    });
+    cx.update_window(handle, |_, window, cx| {
+        view.update(cx, |v, cx| v.commit_now(window, cx));
+        assert!(!view.read(cx).is_busy());
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert_eq!(
+        sql(&first_file, "SELECT n FROM applied_count"),
+        [vec![Some("1".into())]]
+    );
+
+    // Blank drafts also survive acceptance without synchronization and a successful reload.
+    for (sync, value) in [
+        (false, "accepted without sync"),
+        (true, "accepted with sync"),
+    ] {
+        cx.update(|cx| Settings::update(cx, |settings| settings.sync_record = sync));
+        cx.update_window(handle, |_, window, cx| {
+            view.update(cx, |v, cx| {
+                v.sql = "SELECT id, name FROM t ORDER BY id".into();
+                v.grid.update(cx, |grid, cx| {
+                    grid.update_model(cx, |model| model.set_value(0, 1, Some(value.into())));
+                });
+                v.commit_now(window, cx);
+            });
+        })
+        .unwrap();
+        wait(cx, "committing while retaining blank drafts", |cx| {
+            cx.update(|cx| !view.read(cx).is_busy())
+        });
+        cx.update(|cx| {
+            let model = view.read(cx).grid.read(cx).model(cx);
+            assert_eq!(
+                model.row_count(),
+                4,
+                "synchronization must not duplicate drafts"
+            );
+            let changes = model.change_set();
+            assert!(
+                changes.updates.is_empty()
+                    && changes.inserts.is_empty()
+                    && changes.deletes.is_empty()
+            );
+            assert!(model.value(2, 0).is_none() && model.value(3, 0).is_none());
+        });
+        cx.update_window(handle, |_, window, cx| {
+            view.update(cx, |v, cx| v.commit_now(window, cx))
+        })
+        .unwrap();
+    }
+    assert_eq!(
+        sql(&first_file, "SELECT n FROM applied_count"),
+        [vec![Some("3".into())]]
+    );
+    cx.update(|cx| {
+        view.read(cx)
+            .grid
+            .clone()
+            .update(cx, |g, cx| g.update_model(cx, |model| model.discard()))
+    });
+
+    // Retiring a connection in the same UI update fences any old completion, even if the
+    // database already finished the write. No old success may accept the new view's draft.
+    cx.update_window(handle, |_, window, cx| {
+        view.update(cx, |v, cx| {
+            v.grid.update(cx, |g, cx| {
+                g.update_model(cx, |model| {
+                    model.set_value(0, 1, Some("retired operation".into()))
+                })
+            });
+            v.commit_now(window, cx);
+            assert!(v.is_busy());
+        });
+        Sessions::global(cx).update(cx, |sessions, cx| {
+            sessions.close_for_reopen(&ids[0], cx);
+            sessions.open(ids[0].clone(), Secrets::default(), cx);
+        });
+    })
+    .unwrap();
+    wait(
+        cx,
+        "the replacement session and retired result callback",
+        |cx| {
+            cx.update(|cx| {
+                Sessions::global(cx).read(cx).state(&ids[0]).is_open() && !view.read(cx).is_busy()
+            })
+        },
+    );
+    cx.update(|cx| {
+        let result = view.read(cx);
+        let model = result.grid.read(cx).model(cx);
+        assert!(model.has_changes());
+        assert_eq!(
+            model.value(0, 1).and_then(|cell| cell.as_deref()),
+            Some("retired operation")
+        );
+        assert_eq!(
+            result.status(),
+            rust_i18n::t!("query.connection_changed_during_operation").as_ref()
+        );
+        assert_ne!(result.status(), "query.connection_changed_during_operation");
+        result
+            .grid
+            .clone()
+            .update(cx, |g, cx| g.update_model(cx, |model| model.discard()));
+    });
+
+    // A changed result shape invalidates the accepted sort rather than retaining a stale arrow.
+    cx.update_window(handle, |_, window, cx| {
+        view.update(cx, |v, cx| {
+            v.sql = "SELECT id FROM t ORDER BY id".into();
+            v.refresh_now(window, cx);
+        });
+    })
+    .unwrap();
+    wait(cx, "refreshing changed columns", |cx| {
+        cx.update(|cx| !view.read(cx).is_busy())
+    });
+    cx.update(|cx| {
+        editor.update(cx, |e, _| {
+            let tab = e
+                .results
+                .tabs
+                .iter()
+                .find(|tab| matches!(&tab.body, Body::Grid(result) if *result == view))
+                .unwrap();
+            e.results.page = crate::results::Page::Tab(tab.id);
+        })
+    });
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.render_frame(cx);
+        window.click(gpui_kit::ElementId::NamedInteger("icon-sort".into(), 1), cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update(|cx| assert_eq!(view.read(cx).rows(cx)[0][0].as_deref(), Some("3")));
 }
 
 #[gpui_kit::test]

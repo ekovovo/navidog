@@ -7,6 +7,7 @@ rust_i18n::i18n!("locales", fallback = "en");
 
 pub mod catalog;
 mod ddl;
+mod errors;
 mod identifiers;
 mod info;
 mod navigator;
@@ -198,13 +199,4 @@ pub fn status_text(cx: &App) -> SharedString {
         .into(),
         None => SharedString::default(),
     }
-}
-
-pub(crate) fn db_text(e: &navidog_db::DbError) -> String {
-    navidog_ui::db_error_text(
-        e.code.as_deref(),
-        &e.message,
-        e.disconnected,
-        e.outcome_unknown,
-    )
 }

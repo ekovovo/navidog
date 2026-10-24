@@ -57,7 +57,7 @@ fn resolve_inner(id: String, then: Then, window: &mut Window, cx: &mut App) {
                     continue;
                 }
                 Err(e) => {
-                    tracing::warn!("秘密字段无法解密，视为未保存: {e}");
+                    tracing::warn!("saved secret cannot be decrypted; asking for it: {e}");
                     missing.push(field);
                     continue;
                 }
@@ -129,7 +129,6 @@ struct AskPassword {
     inputs: Vec<(SecretField, Entity<InputState>)>,
     secrets: Secrets,
     save: bool,
-    error: Option<SharedString>,
     then: Then,
 }
 
@@ -151,7 +150,6 @@ impl AskPassword {
             inputs,
             secrets,
             save: false,
-            error: None,
             then,
         }
     }
@@ -174,15 +172,16 @@ impl AskPassword {
                 }
             }
             let store = ConnectionStore::global(cx);
-            if store
-                .update(cx, |s, cx| s.upsert(conn, &to_save, cx))
-                .is_err()
-            {
-                window.push_notification(t!("conn.password_not_saved").to_string(), cx);
+            if let Err(e) = store.update(cx, |s, cx| s.upsert(conn, &to_save, cx)) {
+                window.push_notification(
+                    t!("conn.password_not_saved", detail = e.localized_message()).to_string(),
+                    cx,
+                );
             }
         }
         window.close_dialog(cx);
-        if let Some(f) = self.then.borrow_mut().take() {
+        let then = self.then.borrow_mut().take();
+        if let Some(f) = then {
             f(secrets, window, cx);
         }
     }
@@ -213,11 +212,6 @@ impl Render for AskPassword {
                 )
                 .hug_label(),
             )
-            .when_some(self.error.clone(), |view, error| {
-                view.child(
-                    FormRow::bare(div().text_color(palette(cx).danger).child(error)).hug_label(),
-                )
-            })
             .child(footer(
                 t!("conn.ok").to_string(),
                 cx.listener(|this, _, window, cx| this.confirm(window, cx)),
@@ -321,5 +315,142 @@ impl Render for Unlock {
                 t!("conn.unlock").to_string(),
                 cx.listener(|this, _, window, cx| this.confirm(window, cx)),
             ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+
+    use gpui_kit::test::{TestQueryExt as _, TestWindowExt as _};
+    use gpui_kit::{Bounds, Role, TestAppContext, WindowBounds, WindowOptions, px, size};
+    use navidog_core::crypto::{self, CryptoMode, Key};
+    use navidog_core::store::{ConnectionsFile, StoreEvent};
+
+    use super::*;
+
+    struct Host;
+
+    impl Render for Host {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().size_full()
+        }
+    }
+
+    #[gpui_kit::test]
+    fn failed_password_save_still_uses_credentials_once(cx: &mut TestAppContext) {
+        let home =
+            std::env::temp_dir().join(format!("navidog-password-save-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        // SAFETY: no other test in this binary reads the environment.
+        unsafe { std::env::set_var("NAVIDOG_HOME", &home) };
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            navidog_ui::theme::init(cx);
+            cx.set_reduce_motion(true);
+        });
+        for locked in [false, true] {
+            let mut connection = Connection::new("mysql");
+            connection.name = "Unsaved password fixture".into();
+            connection.general.save_password = false;
+            let id = connection.id.clone();
+            let file = ConnectionsFile {
+                crypto: if locked {
+                    crypto::new_master("fixture-master").unwrap().0
+                } else {
+                    CryptoMode::Machine
+                },
+                connections: vec![connection],
+                ..Default::default()
+            };
+            let path = home.join("connections.json");
+            let disk = serde_json::to_vec(&file).unwrap();
+            std::fs::write(&path, &disk).unwrap();
+            if !locked {
+                std::fs::create_dir(path.with_extension("tmp")).unwrap();
+            }
+            cx.update(|cx| {
+                navidog_core::init(cx);
+                if !locked {
+                    ConnectionStore::global(cx).update(cx, |store, _| store.set_key(Key::random()));
+                }
+            });
+            let (handle, _) = cx.update(|cx| {
+                gpui_kit::open_window(
+                    WindowOptions {
+                        window_bounds: Some(WindowBounds::Windowed(Bounds::new(
+                            Default::default(),
+                            // raw-px: headless test window size
+                            size(px(800.), px(600.)),
+                        ))),
+                        ..Default::default()
+                    },
+                    cx,
+                    |_, cx| cx.new(|_| Host),
+                )
+                .unwrap()
+            });
+            let changes = Rc::new(Cell::new(0));
+            let changed = changes.clone();
+            let _subscription = cx.update(|cx| {
+                cx.subscribe(&ConnectionStore::global(cx), move |_, _: &StoreEvent, _| {
+                    changed.set(changed.get() + 1);
+                })
+            });
+            let calls = Rc::new(Cell::new(0));
+            let called = calls.clone();
+            cx.update_window(handle, |_, window, cx| {
+                resolve(id.clone(), window, cx, move |secrets, _, _| {
+                    called.set(called.get() + 1);
+                    assert!(secrets.password.as_deref() == Some("fixture-session-password"));
+                });
+            })
+            .unwrap();
+            cx.run_until_parked();
+            cx.update_window(handle, |_, window, cx| {
+                window.render_frame(cx);
+                assert!(window.has_active_dialog(cx));
+                let inputs = window.find_all_by_role(Role::PasswordInput);
+                assert_eq!(inputs.len(), 1);
+                let input_id = inputs[0].path().last().unwrap().clone();
+                window.input("fixture-session-password", cx);
+                window.click("save", cx);
+                assert_eq!(window.find("save").checked(), Some(true));
+                if locked {
+                    window.click(input_id, cx);
+                    window.press("enter", cx);
+                } else {
+                    window.click("ok", cx);
+                }
+            })
+            .unwrap();
+            cx.run_until_parked();
+            cx.update_window(handle, |_, window, cx| {
+                window.render_frame(cx);
+                assert!(!window.has_active_dialog(cx));
+                assert_eq!(window.notifications(cx).len(), 1);
+                assert!(window.try_find("save").is_none());
+                window.press("enter", cx);
+            })
+            .unwrap();
+            cx.run_until_parked();
+            assert_eq!(
+                calls.get(),
+                1,
+                "one connection attempt, including after another Enter"
+            );
+            assert_eq!(changes.get(), 0);
+            cx.update(|cx| {
+                let store = ConnectionStore::global(cx);
+                assert!(store.read(cx).file() == &file);
+                assert_eq!(store.read(cx).is_locked(), locked);
+            });
+            assert!(std::fs::read(&path).unwrap() == disk);
+            if !locked {
+                std::fs::remove_dir(path.with_extension("tmp")).unwrap();
+            }
+        }
+        let _ = std::fs::remove_dir_all(&home);
     }
 }

@@ -32,6 +32,15 @@ pub enum RowState {
 /// Row and column coordinates are data coordinates (they exclude the marker column on the left).
 pub type Pos = (usize, usize);
 
+/// A move-only transfer of completely unfilled insert drafts across an accepted page replacement.
+/// It contains no cell values or copy of the accepted result rows.
+#[must_use = "Restore the blank insert drafts after replacing or accepting the page"]
+pub struct BlankInsertDrafts {
+    count: usize,
+    anchor: Option<Pos>,
+    head: Option<Pos>,
+}
+
 #[derive(Default)]
 pub struct GridModel {
     pub columns: Vec<GridColumn>,
@@ -333,6 +342,89 @@ impl GridModel {
         self.new_rows.clear();
         self.deleted.clear();
         self.raw.clear();
+    }
+
+    /// Moves completely unfilled insert drafts out of the model. Other pending writes retain
+    /// their row coordinates and raw-SQL flags; restoring the token uses the current column width.
+    pub fn take_blank_insert_drafts(&mut self) -> BlankInsertDrafts {
+        let start = self.rows.len();
+        let mut drafts = BlankInsertDrafts {
+            count: 0,
+            anchor: None,
+            head: None,
+        };
+        let mut retained = Vec::with_capacity(self.new_rows.len());
+        let mut rows = Vec::with_capacity(self.new_rows.len());
+        for (index, row) in std::mem::take(&mut self.new_rows).into_iter().enumerate() {
+            if row.iter().all(Option::is_none) {
+                if self.anchor.0 == start + index {
+                    drafts.anchor = Some((drafts.count, self.anchor.1));
+                }
+                if self.head.0 == start + index {
+                    drafts.head = Some((drafts.count, self.head.1));
+                }
+                drafts.count += 1;
+                retained.push(None);
+            } else {
+                retained.push(Some(rows.len()));
+                rows.push(row);
+            }
+        }
+        self.new_rows = rows;
+        self.raw = std::mem::take(&mut self.raw)
+            .into_iter()
+            .filter_map(|(row, column)| match row.checked_sub(start) {
+                None => Some((row, column)),
+                Some(index) => retained
+                    .get(index)
+                    .copied()
+                    .flatten()
+                    .map(|index| (start + index, column)),
+            })
+            .collect();
+        let remap = |position: &mut Pos| {
+            if let Some(index) = position.0.checked_sub(start) {
+                position.0 = retained
+                    .get(index)
+                    .copied()
+                    .flatten()
+                    .map(|index| start + index)
+                    .unwrap_or_else(|| self.row_count().saturating_sub(1));
+            }
+        };
+        let (mut anchor, mut head) = (self.anchor, self.head);
+        remap(&mut anchor);
+        remap(&mut head);
+        self.anchor = anchor;
+        self.head = head;
+        drafts
+    }
+
+    /// Restores a moved token exactly once. Every cell remains unfilled (DEFAULT), rather than
+    /// becoming an explicit NULL or a pending INSERT, even when the visible columns changed.
+    pub fn restore_blank_insert_drafts(&mut self, drafts: BlankInsertDrafts) {
+        let start = self.row_count();
+        self.new_rows
+            .extend((0..drafts.count).map(|_| vec![None; self.columns.len()]));
+        let position = |(row, column): Pos| {
+            (
+                start + row,
+                column.min(self.columns.len().saturating_sub(1)),
+            )
+        };
+        if let Some(anchor) = drafts.anchor {
+            self.anchor = position(anchor);
+        }
+        if let Some(head) = drafts.head {
+            self.head = position(head);
+        }
+    }
+
+    /// Accepts only the writes that were sent, preserving independent, completely blank drafts.
+    pub fn accept_committed_preserving_drafts(&mut self) {
+        let drafts = self.take_blank_insert_drafts();
+        self.accept_committed();
+        self.restore_blank_insert_drafts(drafts);
     }
 
     /// Folds a successful commit into the loaded page when "synchronize after modifying" is off.
@@ -1034,6 +1126,86 @@ mod tests {
         assert_eq!(text(&m, 0, 0), Some("2".into()));
         assert_eq!(text(&m, 0, 1), Some("b".into()));
         assert_eq!(text(&m, 1, 1), Some("c".into()));
+    }
+
+    #[test]
+    fn accepting_writes_preserves_only_the_independent_blank_insert_drafts() {
+        let mut m = model(true);
+        m.set_value(0, 1, Some("updated".into()));
+        m.select((1, 0), false);
+        m.delete_selected_rows();
+        m.insert_row();
+        let filled = m.insert_row();
+        m.set_value(filled, 0, Some("3".into()));
+        m.set_value(filled, 1, Some("inserted".into()));
+        let selected = m.insert_row();
+        m.select((selected, 1), false);
+        let changes = m.change_set();
+        assert_eq!(changes.updates.len(), 1);
+        assert_eq!(changes.deletes.len(), 1);
+        assert_eq!(changes.inserts.len(), 1);
+
+        m.accept_committed_preserving_drafts();
+        assert_eq!(m.row_count(), 4);
+        assert_eq!(m.value(0, 1), Some(&Some("updated".into())));
+        assert_eq!(m.value(1, 1), Some(&Some("inserted".into())));
+        assert_eq!(m.head(), (3, 1));
+        assert!(m.has_changes());
+        let changes = m.change_set();
+        assert!(changes.updates.is_empty());
+        assert!(changes.deletes.is_empty());
+        assert!(changes.inserts.is_empty());
+        for row in 2..4 {
+            assert_eq!(m.row_state(row), RowState::Inserted);
+            assert_eq!(m.value(row, 0), None);
+            assert_eq!(m.value(row, 1), None);
+        }
+
+        // A successful sync can change the column projection without making defaults NULL.
+        for _ in 0..2 {
+            let drafts = m.take_blank_insert_drafts();
+            m.set_data(
+                vec![GridColumn {
+                    name: "name".into(),
+                    ..Default::default()
+                }],
+                vec![vec![Some("from server".into())]],
+            );
+            m.restore_blank_insert_drafts(drafts);
+            assert_eq!(m.row_count(), 3, "repeated sync must not duplicate drafts");
+            assert_eq!(m.head(), (2, 0));
+            assert_eq!(m.value(1, 0), None);
+            assert_eq!(m.value(2, 0), None);
+            assert!(m.change_set().inserts.is_empty());
+        }
+        m.set_value(2, 0, Some("next insert".into()));
+        assert_eq!(m.change_set().inserts.len(), 1);
+        m.discard();
+        assert_eq!(m.row_count(), 1);
+        assert!(!m.has_changes());
+    }
+
+    #[test]
+    fn moving_blank_drafts_keeps_filled_insert_values_and_raw_flags_together() {
+        let mut m = model(true);
+        m.insert_row();
+        let filled = m.insert_row();
+        m.set_raw(filled, 1, Some("UPPER('x')".into()));
+        m.insert_row();
+        m.select((filled, 1), false);
+        let drafts = m.take_blank_insert_drafts();
+        assert_eq!(m.row_count(), 3);
+        assert_eq!(m.head(), (2, 1));
+        let changes = m.change_set();
+        assert_eq!(changes.inserts.len(), 1);
+        assert_eq!(changes.inserts[0].len(), 1);
+        assert!(changes.inserts[0][0].1.raw);
+        assert_eq!(changes.inserts[0][0].1.value.as_deref(), Some("UPPER('x')"));
+        m.restore_blank_insert_drafts(drafts);
+        assert_eq!(m.row_count(), 5);
+        assert_eq!(m.head(), (2, 1));
+        assert_eq!(m.value(3, 1), None);
+        assert_eq!(m.value(4, 1), None);
     }
 
     #[test]

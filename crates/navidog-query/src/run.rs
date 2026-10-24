@@ -374,7 +374,8 @@ impl QueryEditor {
                 }
                 Err(e) => {
                     let _ = this.update_in(cx, |this, window, cx| {
-                        this.results.failed_to_start(&e.to_string(), window, cx);
+                        this.results
+                            .failed_to_start(&crate::errors::error_message(&e), window, cx);
                         this.finish(kind, window, cx);
                     });
                     return;
@@ -562,7 +563,7 @@ impl QueryEditor {
         if let Err(e) = &outcome.result {
             self.mark_error(
                 outcome.planned.range.clone(),
-                &crate::results::db_text(e),
+                &crate::errors::error_message(e),
                 cx,
             );
         }

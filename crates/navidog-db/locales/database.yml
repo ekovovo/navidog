@@ -1,0 +1,11 @@
+_version: 2
+database:
+  not_relational:
+    en: This connection is not a relational database.
+    zh-CN: 该连接不是关系型数据库。
+  operation_connection_retired:
+    en: The operation's connection was closed or reopened.
+    zh-CN: 操作所属的连接已关闭或重新打开。
+  sqlite_queued_session_closed:
+    en: The SQLite session was closed before queued work started.
+    zh-CN: 排队的操作开始前，SQLite 会话已关闭。

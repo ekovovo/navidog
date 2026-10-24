@@ -51,6 +51,12 @@ query:
   no_connection:
     en: Select a connection to run the query.
     zh-CN: 请先在工具栏中选择连接。
+  session_lost:
+    en: "%{detail} The query session was lost. Reopen the connection to continue; its previous transactions, locks, and temporary objects cannot be restored."
+    zh-CN: "%{detail} 查询会话已断开。请重新打开连接后再继续；原会话的事务、锁和临时对象无法恢复。"
+  outcome_unknown:
+    en: "%{detail} The query execution outcome may be unknown. Check the database before retrying. Reopen the connection to continue; its previous transactions, locks, and temporary objects cannot be restored."
+    zh-CN: "%{detail} 查询执行结果可能未知。请先检查数据库，确认后再重试。请重新打开连接后再继续；原会话的事务、锁和临时对象无法恢复。"
   source_context_unknown:
     en: The original session context could not be verified. Run the query again before refreshing this result.
     zh-CN: 无法确认原会话的数据库或模式，请重新运行查询后再刷新此结果。
@@ -195,6 +201,9 @@ query:
   discard:
     en: Discard Changes
     zh-CN: 放弃更改
+  pending_result_changes:
+    en: Commit or discard the result changes before sorting or refreshing.
+    zh-CN: 请先提交或放弃结果中的更改，再排序或刷新。
   commit_failed:
     en: The changes could not be saved.
     zh-CN: 无法保存更改。
@@ -396,3 +405,6 @@ query:
   form_view:
     en: Form View
     zh-CN: 表单视图
+  connection_changed_during_operation:
+    en: The connection changed while the operation was running. Check the database before applying the retained changes.
+    zh-CN: 操作期间连接已更改。再次提交保留的修改前，请先核对数据库状态。

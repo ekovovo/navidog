@@ -71,6 +71,23 @@ pub(crate) fn matched_a_row(sql: &str, sets: &[ResultSet], dialect: Dialect) -> 
     Ok(())
 }
 
+/// Formats driver details and localized recovery guidance at the grid UI boundary.
+/// The database layer retains the original code and message for diagnostics.
+pub fn error_message(error: &navidog_db::DbError) -> String {
+    localized_error_message(error, &rust_i18n::locale())
+}
+
+fn localized_error_message(error: &navidog_db::DbError, locale: &str) -> String {
+    navidog_ui::db_error_text_with(
+        error.code.as_deref(),
+        &error.message,
+        error.is_session_lost(),
+        error.is_outcome_unknown(),
+        |detail| t!("viewer.session_lost", locale = locale, detail = detail).to_string(),
+        |detail| t!("viewer.outcome_unknown", locale = locale, detail = detail).to_string(),
+    )
+}
+
 /// Closes a session the caller held, in the background.
 pub fn close_session(session: SharedSession) {
     navidog_db::runtime::spawn(async move {
@@ -83,6 +100,42 @@ pub fn close_session(session: SharedSession) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn grid_recovery_copy_keeps_the_driver_diagnostic_in_both_languages() {
+        let mut error = navidog_db::DbError::coded("08006", "original grid diagnostic");
+        let diagnostic = error.to_string();
+        for locale in ["en", "zh-CN"] {
+            assert_eq!(localized_error_message(&error, locale), diagnostic);
+            error.disconnected = true;
+            for unknown in [false, true] {
+                error.outcome_unknown = unknown;
+                let message = localized_error_message(&error, locale);
+                assert!(message.starts_with(&diagnostic));
+                assert!(!message.contains('\n'));
+                if locale == "en" {
+                    assert!(
+                        message
+                            .to_ascii_lowercase()
+                            .contains("reopen the connection")
+                    );
+                } else {
+                    assert!(message.contains("重新打开连接"));
+                }
+                assert_eq!(
+                    message.contains(if locale == "en" {
+                        "outcome may be unknown"
+                    } else {
+                        "执行结果可能未知"
+                    }),
+                    unknown,
+                );
+            }
+            error.disconnected = false;
+            error.outcome_unknown = false;
+        }
+        assert_eq!(error.to_string(), diagnostic);
+    }
 
     #[test]
     fn a_write_that_matched_no_row_fails() {

@@ -15,7 +15,7 @@
 | M0 参考资料与设计文档 | 完成 | `m0-reference-and-specs` | 00 ~ 03、10、11 | |
 | M1 应用外壳和连接管理 | 完成 | `m1-shell-connection` | 10-shell、11-connection | 部分 token 仍是暂定值，待 AX 实测（见第 3 节） |
 | M2 对象树、对象选项卡、表查看器 | 进行中 | `m2-specs`、`m2-objects-grid` | 20-objects、21-table-viewer | 任务都已完成，剩两份规格验收清单里的并排目测 |
-| M3 查询编辑器 | 进行中 | `feat/m3`、`codex/m3-completion` | 30-query-editor、31-query-results | 运行/选择/当前语句/停止、存储过程、结果上限和命令列交互验收已补齐；剩配色、解释视图和消息措辞的目测项。见 [本机验收记录](acceptance-m3.md)。查询创建工具（F-QRY-013）移到 M7 |
+| M3 查询编辑器 | 进行中 | `feat/m3`、`codex/m3-completion` | 30-query-editor、31-query-results | 运行/选择/当前语句/停止、存储过程、结果上限和命令列交互验收已补齐；剩配色、解释视图和消息措辞的目测项。见 [本机验收记录](pr/acceptance-m3.md)。查询创建工具（F-QRY-013）移到 M7 |
 | M4 表设计器及其他对象设计器 | 进行中 | `codex/m4-table-designer` | 40-table-designer | 已按原规格重做字段网格、下方属性区及索引/外键/检查表单；其他对象设计器和方言高级项未完成，见 [验收记录](pr/acceptance-m4.md) |
 | M5 插件体系 | 未开始 | | 03-plugin-api | |
 | M6 导入导出 | 未开始 | | | |
@@ -52,22 +52,25 @@ M2 的任务都已完成，逐项记录见 git 历史；M2 的功能状态仍在
 | 偏好设置：编辑器、代码补全、自动恢复、高级页的日志选项 | 完成 | 30 第 9 节，31 第 6 节 |
 | 历史日志、QueryExec.log | 完成 | 31 第 6 节 |
 | 命令列界面 | 完成 | 31 第 7 节 |
-| 批量删除后底部 SQL 状态文字溢出修复 | 完成 | 共享单行组件处理显式换行并保留悬停原文，表查看器与查询结果固定底栏高度；见 [验收记录](acceptance-status-overflow.md) |
-| TLS 依赖审计补丁更新 | 完成 | `rustls-webpki` 升至 0.103.16、`webpki-roots` 升至 1.0.10；audit 与 deny 均通过，未新增忽略项；见 [验收记录](acceptance-status-overflow.md) |
+| 批量删除后底部 SQL 状态文字溢出修复 | 完成 | 共享单行组件处理显式换行并保留悬停原文，表查看器与查询结果固定底栏高度；见 [验收记录](pr/acceptance-status-overflow.md) |
+| TLS 依赖审计补丁更新 | 完成 | `rustls-webpki` 升至 0.103.16、`webpki-roots` 升至 1.0.10；audit 与 deny 均通过，未新增忽略项；见 [验收记录](pr/acceptance-status-overflow.md) |
 | 查询执行后的对象与表格联动刷新 | 完成 | `codex/query-auto-refresh`；同连接已加载目录、DDL 和安全表格自动更新，编辑/事务保留，关闭查询窗口后仍通知；226 项测试、39 张本地截图及三项性能检查通过，见 [验收记录](acceptance-query-refresh.md) |
 | 联动刷新验证时的依赖审计补丁更新 | 完成 | `ctutils` 0.4.4、`tokio` 1.53.3 修复新公布的问题；audit 与 deny 通过，未新增忽略项，见同份验收记录 |
 
 ### 架构基础优化（独立分支）
 
-从 `upstream/main` 的 `4c403de` 创建 `codex/architecture-foundations`，规格见 [05-architecture-foundations.md](design/05-architecture-foundations.md)。M4 独立 PR 不包含在此基线中。
+从 `upstream/main` 的 `4c403de` 创建 `codex/architecture-foundations`，规格见 [05-architecture-foundations.md](design/05-architecture-foundations.md)。初版基线未含 M4；2026-10-24 冲突同步已合入最新 main 的 M4 与查询执行联动刷新。
 
 | 任务 | 状态 | 验证与说明 |
 | --- | --- | --- |
-| 数据库执行与会话安全 | 完成 | DB 实库 14 项：普通 SQL 不重放、元数据恢复、事务丢失守卫、重连后取消 |
-| 配置保存事务 | 完成 | core 失败注入与 connection UI：候选先落盘，失败不改变内存/密钥或重连 |
-| 查询结果的数据与来源 | 完成 | query/model/viewer 回归：网格唯一拥有当前行，保留空白新增行；固定结果绑定原来源，识别的 USE/search_path 记录实际上下文及完整 PG 路径，未知来源拒绝跨会话刷新 |
+| 数据库执行与会话安全 | 完成 | DB live 15 项与 lib 内的三驱动操作会话回归：普通 SQL 不重放、元数据恢复、事务丢失守卫、重连后取消；生成写入使用独立短期会话，错误保留原始诊断及结构化状态 |
+| 配置保存事务 | 完成 | core 失败注入与 connection UI：候选先落盘，失败不改变内存/密钥或重连；缺失 ID 在回调前整体拒绝，密码保存失败仍以本次凭据连接；StoreError 由 core 统一本地化 |
+| 查询结果的数据与来源 | 完成 | query/model/viewer 回归：网格唯一拥有当前行，保留空白新增行；固定结果绑定原来源，识别的 USE/search_path 记录实际上下文及完整 PG 路径，来源未知时拒绝跨会话同步；脏排序拒绝，隐藏列拒绝回传，提交成功后的重载失败不重复写入。当前没有查询结果手动刷新用户入口，内部刷新守卫只是未来调用的约束 |
+| PR #14 review 修复收尾 | 完成 | 八条评论均补充实现及回归；2026-10-22 基于最新 main 整理到 `codex/pr14-review-followup`，保留作者修复与 #15，实库模式 232 项/37 套件、静态检查、在线审计、37 张截图及三项 release 性能复验通过；显式重开保留本地草稿，恢复前提示旧事务状态和未知写入结果 |
+| PR #17 AI 与作者 review 修正 | 完成 | 旧配置错误格式化入口与 DbError 结构体兼容、操作会话随关闭/重开取消、提交后保留独立空白草稿；手动刷新声明收窄为内部守卫与提交后同步，未增加用户入口。五条 AI 与七条作者评论已处理；249 项/39 套件、静态检查、在线审计、37 张截图与三项 release 复验通过，ctutils/Tokio 安全补丁已更新。逐条说明见 [验收记录](pr/acceptance-architecture-foundations.md#pr-17-ai-与作者-review-修正2026-10-24) |
+| PR #17 与最新 main 冲突同步 | 完成 | 合并 `4ffa185` 的 M4 与查询执行联动刷新，保留操作生命周期和草稿保护，补齐自动刷新代际校验与排队重开回归；284 项/43 套件、fmt/clippy/裸值/审计、58 张浅深色截图及三项 release 复验通过。保留 main 依赖并升级 `crypto-bigint` 0.7.6，见架构验收记录 |
 
-本机 215 项测试与 29 张截图已验证；两项基线证书依赖漏洞已补丁更新，deny 与在线 audit 通过。PR #14 的 Intel 代码段对话框测试已固定动画/调度时序，并连续复跑 20 次。详细测试、CI 补验、性能和边界见 [验收记录](acceptance-architecture-foundations.md)。
+初版及 CI 时序修复在 2026-10-21 验证过 215 项测试与 29 张截图；两项基线证书依赖漏洞已补丁更新，deny 与在线 audit 当时通过。PR #14 的 Intel 代码段对话框测试已固定动画/调度时序，并连续复跑 20 次。本轮 review 修复的行为、逐条评论映射、回归入口及最终验证见 [验收记录](pr/acceptance-architecture-foundations.md)。
 
 ### M4 表设计器
 
@@ -114,10 +117,10 @@ M2 的任务都已完成，逐项记录见 git 历史；M2 的功能状态仍在
 | F-CONN-009 备注 | 完成 | 目测 | |
 | F-CONN-010 测试连接 | 完成 | live 测试 | |
 | F-CONN-011 编辑、复制、删除连接 | 完成 | store 单元测试 | |
-| F-CONN-012 打开、关闭连接 | 完成 | ui 测试、live 测试、tabs 测试 | 关闭连接时关掉该连接的编辑器选项卡（含弹出窗口），不另询问；重新打开时保留选项卡和未提交的修改 |
+| F-CONN-012 打开、关闭连接 | 完成 | ui 测试、live 测试、tabs 测试、connection `reopen` 与 navigator `recovery_tests` | 关闭连接时关掉该连接的编辑器选项卡（含弹出窗口），不另询问；显式重新打开先确认，复用 Reopening 保留选项卡、查询文本和本地行草稿，旧事务与临时状态无法恢复。查看器与查询编辑器的草稿保留已由真实重开回归验证 |
 | F-CONN-013 连接组 | 完成 | store 单元测试、navigator UI 测试 | M2 加入拖放和原地新建、重命名 |
 | F-CONN-014 连接颜色 | 完成 | snapshot | |
-| F-CONN-020 密码存储 | 完成 | crypto、store 单元测试、unlock UI 测试 | 设计见 12-secrets.md。macOS 调试构建一次读取仍可能连弹两次钥匙串框。重加密要么全部完成要么文件不动 |
+| F-CONN-020 密码存储 | 完成 | crypto、store 单元测试、unlock UI 测试、`failed_password_save_still_uses_credentials_once` | 设计见 12-secrets.md。macOS 调试构建一次读取仍可能连弹两次钥匙串框。重加密要么全部完成要么文件不动；保存密码失败提示未保存，本次连接仍使用内存凭据 |
 | F-NAV-001 连接树 | 完成 | ui 测试 | M1 到数据库层级，M2 到对象层级（见下表） |
 | F-NAV-003 筛选 | 部分 | | 搜索已完成；快速筛选在 M2 |
 | F-NAV-006 右键菜单 | 部分 | | 连接和组的菜单已完成 |
@@ -156,7 +159,7 @@ M2 的任务都已完成，逐项记录见 git 历史；M2 的功能状态仍在
 | F-OBJ-005 对象组与扁平列表 | 完成 | 目测 | |
 | F-OBJ-006 显示隐藏项和已删除项 | 部分 | live 测试 | 显示隐藏项目（系统库和系统模式）已完成；“已删除的项目”属于 Navicat Cloud，不实现 |
 | F-OBJ-007 表概况 | 完成 | objects 单元测试 | “查看 > 显示表概况”。列表底部显示当前选中对象已有的属性，不另查目录 |
-| F-OBJ-008 对象操作 | 部分 | dialect 单元测试、sqlite 测试、live 测试 | 删除、清空、截断、复制表、重命名已完成；新建、设计在 M4 |
+| F-OBJ-008 对象操作 | 部分 | dialect 单元测试、sqlite 测试、live 测试、DB `sessions::tests` | 删除、清空、截断、复制表、重命名已完成，生成 SQL 使用独立短期会话；断连错误提供原连接的重新打开入口。新建、设计在 M4 |
 | F-INFO-001 常规 | 完成 | snapshot | 含“共享”按钮；有多个配置文件时显示当前配置文件 |
 | F-INFO-002 DDL | 完成 | live 测试、snapshot | |
 | F-INFO-007 字段 | 完成 | info 单元测试 | 信息窗格字段页在表查看器选中列时只显示该列，没有对应列时显示全部 |
@@ -171,9 +174,9 @@ M2 的任务都已完成，逐项记录见 git 历史；M2 的功能状态仍在
 | F-DATA-006 筛选与排序窗格 | 完成 | filter 单元测试 | 创建工具、文本模式、右键快速筛选。括号只包住全部条件；在列表的值不含逗号 |
 | F-DATA-007 查找与替换 | 部分 | model 单元测试 | 查找栏是模式下拉（查找 / 替换 / 查找列）加输入框、上一个、下一个、完成。查找框回车是下一个，替换框回车是替换当前并跳到下一个。递增搜索在模式菜单里，默认关。不跨页 |
 | F-DATA-008 导航栏与分页 | 完成 | live 测试、viewer ownership 测试、query_refresh UI 测试、snapshot | 刷新按钮在加载时旋转，至少半圈；外部查询后自动更新当前页、总数及字段，保留筛选排序分页；编辑和事务阻止自动刷新并提示 |
-| F-DATA-009 格式设置 | 完成 | model 单元测试、dialect 单元测试、grid 单元测试、column_widths 单元测试 | 隐藏列、行高、冻结到此列、冻结列、解除所有冻结列、恢复默认顺序、拖拽列顺序、数字右对齐。打开表按内容定列宽；拖过的列按表保存在连接目录的 `.column-widths.json`，只记下拖动过的列。列顺序和冻结只在打开的查看器里保留 |
+| F-DATA-009 格式设置 | 完成 | model 单元测试、dialect 单元测试、grid UI 测试、column_widths 单元测试、viewer 投影回归 | 隐藏列、行高、冻结到此列、冻结列、解除所有冻结列、恢复默认顺序、拖拽列顺序、数字右对齐。隐藏列投影拒绝时保留菜单、列与待提交值；成功后才更新菜单。打开表按内容定列宽；拖过的列按表保存在连接目录的 `.column-widths.json`，只记下拖动过的列。列顺序和冻结只在打开的查看器里保留 |
 | F-DATA-013 字段信息 | 完成 | grid 单元测试、目测 | 同一个表头单元格里显示字段名和带颜色的类型图标；右键可关。显示类型时表头 34pt，数据行保持设置的行高 |
-| F-DATA-014 显示 SQL | 完成 | truncated UI 测试、snapshot、目测 | 底部栏显示最近的 SQL；批量 SQL 的换行折成空格，单行省略，悬停保留全文。预览窗口用只读 SQL 编辑器，含待提交语句；见 [验收记录](acceptance-status-overflow.md) |
+| F-DATA-014 显示 SQL | 完成 | truncated UI 测试、snapshot、目测 | 底部栏显示最近的 SQL；批量 SQL 的换行折成空格，单行省略，悬停保留全文。预览窗口用只读 SQL 编辑器，含待提交语句；见 [验收记录](pr/acceptance-status-overflow.md) |
 
 ### M3
 
@@ -185,7 +188,7 @@ M2 的任务都已完成，逐项记录见 git 历史；M2 的功能状态仍在
 | F-QRY-004 SQL 格式 | 完成 | sql_format 单元测试、query editor 测试 | 缩排、注释、大小写、美化 SQL（sqlformat，记号序列不变）、简化 SQL，每条命令一步撤销 |
 | F-QRY-005 剪贴板堆栈 | 完成 | format 单元测试、query editor 测试 | 10 项，⇧⌘V 连按依次替换 |
 | F-QRY-006 运行 | 完成 | query editor 测试、query_refresh UI 测试、live 测试 | 运行、运行当前语句、运行已选择的、停止、遇到错误时继续；出错的语句用诊断标出。执行结束通知原连接更新，包含部分失败、取消和执行中关闭窗口；解释不通知，固定结果保留执行时快照。重连后重放最近一次成功的 `USE` / `SET search_path`。⌘R 在查询编辑器和表查看器里不落到全局刷新 |
-| F-QRY-007 查询结果 | 完成 | query editor 测试、results 单元测试、truncated UI 测试、snapshot | 最多 20 个结果集；`-- NAME:` 命名；固定、三种位置。“保留之前的查询结果”默认关闭，打开后留下上次的结果和解释，标签上可关闭；消息和摘要仍只记这一次。结果标签右键在焦点停在编辑器时生效。已有结果时切到新页面仍显示结果；结果页上的位置按钮直接切换，不依赖焦点。查询结果右键没有快速筛选。单表且含主键的 SELECT 可编辑；底部 SQL 和提交状态保持单行，悬停保留原文 |
+| F-QRY-007 查询结果 | 完成 | query editor 测试、results 单元测试、truncated UI 测试、snapshot、`accepted_results_keep_their_rows_and_original_source` | 最多 20 个结果集；`-- NAME:` 命名；固定、三种位置。“保留之前的查询结果”默认关闭，打开后留下上次的结果和解释，标签上可关闭；消息和摘要仍只记这一次。结果标签右键在焦点停在编辑器时生效。已有结果时切到新页面仍显示结果；结果页上的位置按钮直接切换，不依赖焦点。查询结果右键没有快速筛选。单表且含主键的 SELECT 可编辑；待提交值或空白草稿阻止排序，保留已接受排序箭头；提交后同步按原结果来源读取，重载失败不重复写入。当前没有结果手动刷新用户入口，内部守卫不能视为已交付的交互。底部 SQL 和提交状态保持单行，悬停保留原文 |
 | F-QRY-008 查询解释 | 完成 | explain 单元测试、live 测试（MySQL 8、MariaDB 11、PostgreSQL 16）、snapshot | 可视化、网格、文本、JSON、统计信息、信息；不能下载 PNG（偏差） |
 | F-QRY-009 查询参数 | 完成 | query editor 测试、sql_text 单元测试 | |
 | F-QRY-010 代码段 | 完成 | snippets 单元测试、info 测试、query editor 测试 | 预设片段只读；占位符 Tab 跳转 |
@@ -271,7 +274,7 @@ M2 的任务都已完成，逐项记录见 git 历史；M2 的功能状态仍在
 | 补全浮层没有图标，用说明文字区分对象类型；关掉“自动选择第一个建议项目”后第一项仍画成选中的样子 | M3 | gpui-kit 的补全浮层支持图标后改用 |
 | 拖进编辑器的文字插在光标处，不在落点；不能从编辑器把代码拖进代码段页 | M3 | gpui-kit 公开坐标到文本位置的换算后改为落点 |
 | 正常退出时不询问是否保存查询：未保存的文本写入自动保存，随布局回到原选项卡；“恢复”是主窗口里的对话框 | M3 | 需要时加退出询问 |
-| 查询结果的修改在单独的会话上提交，不参与编辑器里手动开启的事务，也不占用元数据会话；表单视图只读 | M3 | 与 Navicat 并排实测后决定 |
+| 查询结果的修改在独立操作会话上提交，不参与编辑器里手动开启的事务；表单视图只读 | M3 | 共享元数据会话不再承接生成写入；查询编辑事务是否合并仍待 Navicat 并排实测后决定 |
 | 代码补全的别名只看当前语句里的 FROM / JOIN，不解析子查询作用域 | M3 | 需要时接语法树 |
 | 可视化解释不能下载为 PNG；节点尺寸暂定 | M3 | 需要时再做 |
 | 命令列界面分输出区和输入区，不支持 `\d`、`.tables` 等客户端命令 | M3 | 需要时加显示宽度表 |
@@ -287,7 +290,7 @@ M2 的任务都已完成，逐项记录见 git 历史；M2 的功能状态仍在
 | 裸值检查 | `scripts/check-raw-px.sh` | CI 执行 |
 | 依赖审计 | `cargo deny --all-features check`、`cargo audit` | CI 的 security-audit 工作流执行，配置在根目录 `deny.toml` 和 `.cargo/audit.toml`；只有直接依赖的 unmaintained 会失败，无补丁的 `RUSTSEC-2023-0071`（rsa）在两边都忽略 |
 | 单元测试与 headless UI 测试 | `cargo test --workspace` | CI 执行 |
-| 实库测试 | `docker compose up -d --wait && NAVIDOG_LIVE=1 cargo test -p navidog-db --test live` | CI 的 integration 工作流和本地都执行 |
+| 实库测试 | `docker compose up -d --wait && NAVIDOG_LIVE=1 cargo test -p navidog-db --lib --test live --locked` | CI 的 integration 工作流和本地都执行；`--lib` 包含操作写入完成后元数据断连恢复的三驱动回归，测完执行 `docker compose down` |
 | 截图 | `cargo test -p navidog --test snapshot` | 本地执行，输出 `target/snapshots/` |
 | 结果网格性能 | `cargo run --release -p navidog-grid --example spike` | 本地执行，需要 Metal |
 | 导航树性能 | `cargo run --release -p navidog-navigator --example tree_spike` | 本地执行，需要 Metal |

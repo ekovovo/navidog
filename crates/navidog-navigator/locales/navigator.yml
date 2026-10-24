@@ -1,5 +1,14 @@
 _version: 2
 nav:
+  reopen_connection:
+    en: Reopen connection…
+    zh-CN: 重新打开连接…
+  database_session_lost:
+    en: "%{detail} The database session was lost. Reopen the connection before continuing; its previous transactions, locks, and temporary objects cannot be restored."
+    zh-CN: "%{detail} 数据库会话已断开。请重新打开连接后再继续；原会话的事务、锁和临时对象无法恢复。"
+  database_outcome_unknown:
+    en: "%{detail} The execution outcome may be unknown. Reopen the connection before continuing; its previous transactions, locks, and temporary objects cannot be restored."
+    zh-CN: "%{detail} 执行结果可能未知。请重新打开连接后再继续；原会话的事务、锁和临时对象无法恢复。"
   search:
     en: Search
     zh-CN: 搜索
@@ -311,6 +320,12 @@ obj:
   failed:
     en: Operation failed
     zh-CN: 操作失败
+  close:
+    en: Close
+    zh-CN: 关闭
+  definition_unavailable:
+    en: The table definition could not be read.
+    zh-CN: 无法读取表定义。
 col:
   name:
     en: Name

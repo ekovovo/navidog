@@ -1,6 +1,8 @@
 //! Connection management: type picker, connection form, secret resolution and connection commands.
 
 rust_i18n::i18n!("locales", fallback = "en");
+// The proc-macro reads locales itself; include them so Cargo also tracks future edits.
+const _: &str = include_str!("../locales/connection.yml");
 
 mod form;
 mod manage;
@@ -66,7 +68,7 @@ pub fn bind_actions<E: InteractiveElement>(el: E) -> E {
             if let Err(e) = result {
                 show_error(
                     t!("conn.duplicate_failed").into(),
-                    store_error_message(&e).into(),
+                    e.localized_message().into(),
                     window,
                     cx,
                 );
@@ -75,6 +77,9 @@ pub fn bind_actions<E: InteractiveElement>(el: E) -> E {
         .on_action(|_: &DeleteConnection, window, cx| delete_selected(window, cx))
         .on_action(|a: &navidog_core::actions::OpenConnectionId, window, cx| {
             open_connection(a.id.to_string(), window, cx)
+        })
+        .on_action(|a: &ReopenConnectionId, window, cx| {
+            confirm_reopen_connection(a.id.to_string(), window, cx);
         })
         .on_action(|_: &OpenConnection, window, cx| {
             if let Some(id) = selected_connection(cx) {
@@ -100,7 +105,7 @@ pub fn bind_actions<E: InteractiveElement>(el: E) -> E {
             let result = ConnectionStore::global(cx)
                 .update(cx, |s, cx| s.update(&id, |c| c.color = color, cx));
             if let Err(error) = result {
-                window.push_notification(store_error_message(&error), cx);
+                window.push_notification(error.localized_message(), cx);
             }
         })
         .on_action(|_: &ToggleStar, window, cx| toggle_star(window, cx))
@@ -133,7 +138,7 @@ pub fn bind_actions<E: InteractiveElement>(el: E) -> E {
                 s.update_many(&ids, |c| c.group = group.clone(), cx)
             });
             if let Err(error) = result {
-                window.push_notification(store_error_message(&error), cx);
+                window.push_notification(error.localized_message(), cx);
             }
         })
 }
@@ -156,7 +161,7 @@ pub(crate) fn toggle_star(window: &mut Window, cx: &mut App) {
         .any(|id| store.read(cx).get(id).is_some_and(|c| !c.starred));
     let result = store.update(cx, |s, cx| s.update_many(&ids, |c| c.starred = star, cx));
     if let Err(error) = result {
-        window.push_notification(store_error_message(&error), cx);
+        window.push_notification(error.localized_message(), cx);
     }
 }
 
@@ -168,7 +173,7 @@ pub(crate) fn toggle_hidden(window: &mut Window, cx: &mut App) {
         .any(|id| store.read(cx).get(id).is_some_and(|c| !c.hidden));
     let result = store.update(cx, |s, cx| s.update_many(&ids, |c| c.hidden = hide, cx));
     if let Err(error) = result {
-        window.push_notification(store_error_message(&error), cx);
+        window.push_notification(error.localized_message(), cx);
     }
 }
 
@@ -211,6 +216,32 @@ pub(crate) fn reopen_connection(id: String, window: &mut Window, cx: &mut App) {
     open_connection(id, window, cx);
 }
 
+fn confirm_reopen_connection(id: String, window: &mut Window, cx: &mut App) {
+    let Some(name) = ConnectionStore::global(cx)
+        .read(cx)
+        .get(&id)
+        .map(|connection| connection.name.clone())
+    else {
+        return;
+    };
+    window.open_alert_dialog(cx, move |alert, _, _| {
+        let id = id.clone();
+        alert
+            .icon(navidog_ui::assets::lucide("triangle-alert"))
+            .title(t!("conn.confirm_reopen", name = name).to_string())
+            .description(t!("conn.reopen_warning").to_string())
+            .show_cancel(true)
+            .ok_text(t!("conn.reopen").to_string())
+            .cancel_text(t!("conn.cancel").to_string())
+            .on_ok(move |_, window, cx| {
+                let id = id.clone();
+                // Close this confirmation before resolving passwords, which can open a dialog.
+                window.defer(cx, move |window, cx| reopen_connection(id, window, cx));
+                true
+            })
+    });
+}
+
 fn confirm_delete_connection(window: &mut Window, cx: &mut App) {
     let Some(id) = selected_connection(cx) else {
         return;
@@ -235,7 +266,7 @@ fn confirm_delete_connection(window: &mut Window, cx: &mut App) {
             .on_ok(move |_, window, cx| {
                 let result = ConnectionStore::global(cx).update(cx, |s, cx| s.remove(&id, cx));
                 if let Err(error) = result {
-                    window.push_notification(store_error_message(&error), cx);
+                    window.push_notification(error.localized_message(), cx);
                     return false;
                 }
                 Sessions::global(cx).update(cx, |s, cx| s.close(&id, cx));
@@ -275,7 +306,7 @@ fn confirm_delete_group(window: &mut Window, cx: &mut App) {
                 let result =
                     ConnectionStore::global(cx).update(cx, |s, cx| s.remove_group(&id, cx));
                 if let Err(error) = result {
-                    window.push_notification(store_error_message(&error), cx);
+                    window.push_notification(error.localized_message(), cx);
                     return false;
                 }
                 Workspace::global(cx).update(cx, |w, cx| w.select(Selection::None, cx));
@@ -284,18 +315,10 @@ fn confirm_delete_group(window: &mut Window, cx: &mut App) {
     });
 }
 
-/// A store or key error in the interface language. The errors' own text is English, for logs.
-pub fn store_error_message(e: &StoreError) -> String {
-    navidog_core::store::error_message(e)
-}
-
-pub(crate) fn db_text(e: &navidog_db::DbError) -> String {
-    navidog_ui::db_error_text(
-        e.code.as_deref(),
-        &e.message,
-        e.disconnected,
-        e.outcome_unknown,
-    )
+/// A store or key error in the interface language. `Display` remains suitable for logs.
+#[deprecated(note = "Use navidog_core::store::StoreError::localized_message instead")]
+pub fn store_error_message(error: &StoreError) -> String {
+    error.localized_message()
 }
 
 pub(crate) fn show_error(
@@ -329,4 +352,13 @@ pub(crate) fn secret_label(field: SecretField) -> String {
         SecretField::SshPassword => t!("conn.ssh_password").to_string(),
         SecretField::SshPassphrase => t!("conn.passphrase").to_string(),
     }
+}
+
+pub(crate) fn db_text(e: &navidog_db::DbError) -> String {
+    navidog_ui::db_error_text(
+        e.code.as_deref(),
+        &e.message,
+        e.disconnected,
+        e.outcome_unknown,
+    )
 }

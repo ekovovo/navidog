@@ -259,3 +259,6 @@ flowchart LR
 - [ ] 重启应用后，连接、分组、颜色都恢复；`connections.json` 中没有明文密码。
 - [ ] 设置主密码后重启：首次连接时要求解锁，解锁后能连接；清除主密码后恢复为本机密钥。
 - [ ] 删除、复制、编辑连接的行为符合第 4 节。
+- [x] 缺失连接 ID 的单个/批量更新在修改回调前整体拒绝，空批量不保存；配置错误支持 en/zh-CN。回归入口为 core `missing_update_targets_are_rejected_before_any_callback` 与 `store_errors_have_english_and_chinese_messages`。
+- [x] 保存密码失败仍以本次内存凭据继续连接，提示未保存且回调只执行一次；回归入口为 connection `failed_password_save_still_uses_credentials_once`。
+- [x] 显式重新打开先确认，取消不关闭；确认发布 Reopening 而非 Closed，保留编辑器、查询文本与本地行草稿，并说明旧会话状态和结果未知的边界。connection `reopening_requires_confirmation_and_preserves_the_editor_lifecycle` 已覆盖确认生命周期，查看器/查询结果草稿保留的补充回归已包含在最终全量验证中。

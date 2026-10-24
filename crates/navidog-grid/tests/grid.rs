@@ -671,6 +671,74 @@ fn click_past_the_last_column_selects_the_row(cx: &mut TestAppContext) {
     assert_eq!(selection(cx), (1..=1, 0..=0));
 }
 
+/// A refused visibility change preserves both pending model writes and the active editor.
+#[gpui_kit::test]
+fn refused_column_visibility_keeps_pending_values_and_the_editor(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+        navidog_ui::theme::init(cx);
+        navidog_grid::init(cx);
+    });
+    let (handle, grid) = cx.update(|cx| {
+        gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+            cx.new(|cx| {
+                let mut grid = ResultGrid::new(window, cx);
+                grid.set_data(
+                    vec![col("id", true), col("name", false)],
+                    vec![vec![Some("1".into()), Some("a".into())]],
+                    cx,
+                );
+                grid
+            })
+        })
+        .unwrap()
+    });
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        grid.update(cx, |g, cx| {
+            g.update_model(cx, |m| m.set_value(0, 0, Some("2".into())));
+            g.start_edit((0, 1), window, cx);
+        });
+        window.render_frame(cx);
+        window.press("secondary-a", cx);
+        window.input("draft", cx);
+    })
+    .unwrap();
+    cx.update_window(handle, |_, window, cx| {
+        grid.update(cx, |g, cx| {
+            assert!(!g.set_hidden_columns(&["id".into()].into(), cx));
+            assert_eq!(g.model(cx).columns.len(), 2);
+            assert_eq!(g.model(cx).value(0, 0), Some(&Some("2".into())));
+        });
+        window.render_frame(cx);
+        window.input(" continued", cx);
+        window.press("enter", cx);
+    })
+    .unwrap();
+    cx.update(|cx| {
+        grid.update(cx, |g, cx| {
+            assert_eq!(
+                g.model(cx).value(0, 1),
+                Some(&Some("draft continued".into()))
+            );
+            g.update_model(cx, |m| {
+                m.discard();
+                m.insert_row();
+            });
+            assert!(g.set_hidden_columns(&["id".into()].into(), cx));
+            assert_eq!(g.model(cx).columns[0].name, "name");
+            assert_eq!(g.model(cx).row_count(), 2);
+            assert_eq!(g.model(cx).value(1, 0), None);
+            assert!(g.set_hidden_columns(&Default::default(), cx));
+            assert_eq!(g.model(cx).columns.len(), 2);
+            assert_eq!(g.model(cx).row_count(), 2);
+            assert_eq!(g.model(cx).value(1, 0), None);
+            assert_eq!(g.model(cx).value(1, 1), None);
+            assert!(g.model(cx).change_set().inserts.is_empty());
+        })
+    });
+}
+
 #[gpui_kit::test]
 fn hiding_a_column_keeps_a_pending_write(cx: &mut TestAppContext) {
     cx.update(|cx| {

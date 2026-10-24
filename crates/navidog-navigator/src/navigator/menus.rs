@@ -69,10 +69,15 @@ impl NavigatorPanel {
                     },
                 );
                 let menu = if open {
-                    NativeMenu::new().menu(
-                        t!("nav.close_connection").to_string(),
-                        Box::new(CloseConnection),
-                    )
+                    NativeMenu::new()
+                        .menu(
+                            t!("nav.close_connection").to_string(),
+                            Box::new(CloseConnection),
+                        )
+                        .menu(
+                            t!("nav.reopen_connection").to_string(),
+                            Box::new(ReopenConnectionId::new(id.clone())),
+                        )
                 } else {
                     NativeMenu::new().menu(
                         t!("nav.open_connection").to_string(),

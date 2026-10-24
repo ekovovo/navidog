@@ -112,7 +112,7 @@ impl Catalog {
         let task = cx.spawn(async move |this, cx| {
             let result = match job.await {
                 Ok(Ok(v)) => Load::Ready(v),
-                Ok(Err(e)) => Load::Failed(crate::db_text(&e).into()),
+                Ok(Err(e)) => Load::Failed(crate::errors::database_message(&e).into()),
                 Err(e) => Load::Failed(e.to_string().into()),
             };
             let _ = this.update(cx, |this, cx| {

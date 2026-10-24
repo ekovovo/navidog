@@ -26,7 +26,7 @@ use navidog_core::actions::*;
 use navidog_core::connection::Connection;
 use navidog_core::object::{ObjectKind, ObjectRef, Scope};
 use navidog_core::settings::Settings;
-use navidog_core::store::{ConnectionStore, error_message};
+use navidog_core::store::ConnectionStore;
 use navidog_core::vgroups::VirtualGroups;
 use navidog_core::workspace::{Selection, Workspace, WorkspaceEvent};
 use navidog_db::dialect::Dialect;
@@ -330,7 +330,7 @@ fn move_connections(ids: &[String], group: Option<String>, window: &mut Window, 
         s.update_many(ids, |c| c.group = group.clone(), cx)
     });
     if let Err(error) = result {
-        window.push_notification(error_message(&error), cx);
+        window.push_notification(error.localized_message(), cx);
     }
 }
 

@@ -30,10 +30,8 @@ impl RecoveryState {
     }
 }
 
-pub(crate) fn interrupted(mut error: DbError, outcome_unknown: bool) -> DbError {
-    error.disconnected = true;
-    error.outcome_unknown = outcome_unknown;
-    error
+pub(crate) fn interrupted(error: DbError, outcome_unknown: bool) -> DbError {
+    error.with_session_loss(outcome_unknown)
 }
 
 /// Only the driver owns this value; returned handles share the current target, not its snapshot.
@@ -58,7 +56,10 @@ impl Cancellation {
             async move {
                 match current {
                     Some(cancel) => cancel().await,
-                    None => Err(DbError::msg("The database session is no longer available.")),
+                    None => Err(interrupted(
+                        DbError::msg("The database session is no longer available."),
+                        false,
+                    )),
                 }
             }
             .boxed()
@@ -109,7 +110,9 @@ mod tests {
             }
             assert_eq!(calls.load(Ordering::SeqCst), 11);
             cancellation.clear();
-            assert!(handle().await.is_err());
+            let error = handle().await.unwrap_err();
+            assert!(error.is_session_lost());
+            assert!(!error.is_outcome_unknown());
             assert_eq!(calls.load(Ordering::SeqCst), 11);
             drop(cancellation);
             assert!(handle().await.is_err());
@@ -117,11 +120,18 @@ mod tests {
     }
 
     #[test]
-    fn uncertain_outcomes_keep_the_original_database_error_code() {
-        let error = interrupted(DbError::coded("08006", "connection lost"), true);
-        assert_eq!(error.code.as_deref(), Some("08006"));
-        assert!(error.disconnected);
-        assert!(error.outcome_unknown);
-        assert_eq!(error.message, "connection lost");
+    fn session_loss_keeps_the_original_database_error_and_structures_its_outcome() {
+        for outcome_unknown in [false, true] {
+            let original = DbError::coded("08006", "connection lost");
+            let error = interrupted(original.clone(), outcome_unknown);
+            assert_eq!(error.code, original.code);
+            assert_eq!(error.message, original.message);
+            assert_eq!(error.to_string(), "08006 - connection lost");
+            assert!(error.is_session_lost());
+            assert_eq!(error.is_outcome_unknown(), outcome_unknown);
+        }
+        let before_submission = DbError::msg("connection refused");
+        assert!(!before_submission.is_session_lost());
+        assert!(!before_submission.is_outcome_unknown());
     }
 }
