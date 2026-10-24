@@ -27,6 +27,7 @@ use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 
 use crate::editor::Stop;
+use crate::run::RefreshAfterRun;
 
 pub(crate) const PANEL: &str = "Console";
 const CONTEXT: &str = "Console";
@@ -438,9 +439,15 @@ impl Console {
             return true;
         };
         self.running = true;
+        let refresh = RefreshAfterRun::new(self.connection.clone(), cx);
+        refresh.mark_submitted();
         let started = Instant::now();
         let job = run_on(session, move |rel| {
-            Box::pin(async move { rel.execute_statement(&sql).await })
+            Box::pin(async move {
+                let result = rel.execute_statement(&sql).await;
+                drop(refresh);
+                result
+            })
         });
         self.task = Some(cx.spawn(async move |this, cx| {
             let result = job

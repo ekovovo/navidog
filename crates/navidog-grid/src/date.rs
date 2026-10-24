@@ -164,7 +164,7 @@ pub(crate) fn open(
     grid: WeakEntity<ResultGrid>,
     window: &mut Window,
     cx: &mut App,
-) {
+) -> WeakEntity<InputState> {
     let parts = parse_parts(current, kind);
     // The field starts from the cell's own text, so OK without a change writes it back unchanged
     // (a negative or 100-hour MySQL TIME, a value the calendar cannot show)
@@ -187,9 +187,11 @@ pub(crate) fn open(
             .child(view.clone())
     });
     // `open_dialog` focuses the dialog itself, so a focus call before that does not stick
+    let editing = input.downgrade();
     window.defer(cx, move |window, cx| {
         input.update(cx, |s, cx| s.focus(window, cx));
     });
+    editing
 }
 
 struct DateDialog {

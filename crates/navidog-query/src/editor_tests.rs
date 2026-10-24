@@ -14,6 +14,7 @@ use navidog_core::connection::Connection;
 use navidog_core::crypto::Key;
 use navidog_core::settings::{ResultsPosition, Settings};
 use navidog_core::store::ConnectionStore;
+use navidog_core::workspace::{Workspace, WorkspaceEvent};
 use navidog_db::sessions::Sessions;
 use navidog_db::sqlite::SqliteDriver;
 use navidog_db::{ConnectParams, Secrets, connect, runtime};
@@ -136,6 +137,399 @@ fn set_text(
         state.update(cx, |s, cx| s.set_value(text, window, cx));
     })
     .unwrap();
+}
+
+fn enter_console(
+    cx: &mut TestAppContext,
+    handle: AnyWindowHandle,
+    console: &Entity<crate::Console>,
+    text: &str,
+) {
+    let text = text.to_string();
+    cx.update_window(handle, |_, window, cx| {
+        let input = console.read(cx).input_state();
+        input.update(cx, |state, cx| {
+            let len = state.value().len();
+            state.set_selected_range(len..len, cx);
+            state.insert(text, window, cx);
+            state.focus(window, cx);
+        });
+        window.render_frame(cx);
+        window.press("enter", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+}
+
+#[gpui_kit::test]
+fn closing_query_and_console_windows_preserves_in_flight_refreshes(cx: &mut TestAppContext) {
+    let (_home, home) = isolate_home("closed-run");
+    let file = home.join("fixture.db");
+    sql(
+        &file,
+        "CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT); INSERT INTO t VALUES (1, 'initial')",
+    );
+    cx.executor().allow_parking();
+    let id = cx.update(|cx| {
+        gpui_kit::init(cx);
+        navidog_core::init(cx);
+        navidog_ui::theme::init(cx);
+        navidog_db::init(cx);
+        navidog_grid::init(cx);
+        crate::init(cx);
+        ConnectionStore::global(cx).update(cx, |store, cx| {
+            store.set_key(Key::random());
+            let mut connection = Connection::new("sqlite");
+            connection.general.file = Some(file.to_string_lossy().into_owned());
+            let id = connection.id.clone();
+            store.upsert(connection, &[], cx).unwrap();
+            id
+        })
+    });
+    cx.update(|cx| {
+        Sessions::global(cx).update(cx, |sessions, cx| {
+            sessions.open(id.clone(), Secrets::default(), cx)
+        });
+    });
+    wait(cx, "the connection", |cx| {
+        cx.update(|cx| Sessions::global(cx).read(cx).state(&id).is_open())
+    });
+    let changes = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let observed = changes.clone();
+    let _subscription = cx.update(|cx| {
+        cx.subscribe(
+            &Workspace::global(cx),
+            move |_, event: &WorkspaceEvent, _| {
+                if let WorkspaceEvent::DatabaseChanged(connection) = event {
+                    observed.borrow_mut().push(connection.clone());
+                }
+            },
+        )
+    });
+    let block_writes = || {
+        runtime::runtime()
+            .block_on(connect(
+                Arc::new(SqliteDriver::default()),
+                ConnectParams {
+                    file: Some(file.clone()),
+                    initial_queries: "BEGIN IMMEDIATE".into(),
+                    ..Default::default()
+                },
+            ))
+            .unwrap()
+    };
+    let release_writes = |mut blocker: Box<dyn navidog_db::Session>| {
+        runtime::runtime().block_on(async move {
+            blocker
+                .relational()
+                .unwrap()
+                .execute("COMMIT")
+                .await
+                .unwrap();
+            blocker.close().await.unwrap();
+        });
+    };
+
+    let (handle, editor) = cx.update(|cx| {
+        let mut editor = None;
+        let handle = gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+            let view = QueryEditor::new(
+                QuerySource::Untitled(1),
+                Target {
+                    connection: Some(id.clone()),
+                    database: Some("main".into()),
+                    schema: None,
+                },
+                "PRAGMA busy_timeout=30000".into(),
+                window,
+                cx,
+            );
+            editor = Some(view.clone());
+            cx.new(|_| Host { editor: view })
+        })
+        .unwrap();
+        (handle.0, editor.unwrap())
+    });
+    run(cx, handle, &editor, RunKind::All);
+    idle(cx, &editor);
+    wait(cx, "the query setup notification", |_| {
+        changes.borrow().len() == 1
+    });
+    changes.borrow_mut().clear();
+    let blocker = block_writes();
+    set_text(cx, handle, &editor, "UPDATE t SET name = 'query closed'");
+    run(cx, handle, &editor, RunKind::All);
+    wait(cx, "the blocked query", |cx| {
+        cx.update(|cx| {
+            editor
+                .read(cx)
+                .live
+                .as_ref()
+                .is_some_and(|live| live.session.try_lock().is_err())
+        })
+    });
+    let closed = editor.downgrade();
+    cx.update_window(handle, |_, window, _| window.remove_window())
+        .unwrap();
+    drop(editor);
+    cx.run_until_parked();
+    assert!(
+        closed.upgrade().is_none(),
+        "the query and its task were released"
+    );
+    assert!(
+        changes.borrow().is_empty(),
+        "refresh waits for the database job"
+    );
+    release_writes(blocker);
+    wait(cx, "the closed query's completion notification", |_| {
+        changes.borrow().len() == 1
+    });
+    assert_eq!(changes.borrow().as_slice(), std::slice::from_ref(&id));
+    assert_eq!(
+        sql(&file, "SELECT name FROM t"),
+        [vec![Some("query closed".to_string())]]
+    );
+
+    changes.borrow_mut().clear();
+    let (handle, console) = cx.update(|cx| {
+        let mut console = None;
+        let handle = gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+            let view = crate::Console::new(id.clone(), Some("main".into()), window, cx);
+            console = Some(view.clone());
+            view
+        })
+        .unwrap();
+        (handle.0, console.unwrap())
+    });
+    wait(cx, "the console session", |cx| {
+        cx.update(|cx| console.read(cx).has_session())
+    });
+    enter_console(cx, handle, &console, "PRAGMA busy_timeout=30000;");
+    wait(cx, "the console setup notification", |_| {
+        changes.borrow().len() == 1
+    });
+    cx.run_until_parked();
+    changes.borrow_mut().clear();
+    let blocker = block_writes();
+    enter_console(
+        cx,
+        handle,
+        &console,
+        "UPDATE t SET name = 'console closed';",
+    );
+    wait(cx, "the blocked console input", |cx| {
+        cx.update(|cx| console.read(cx).session_busy())
+    });
+    let closed = console.downgrade();
+    cx.update_window(handle, |_, window, _| window.remove_window())
+        .unwrap();
+    drop(console);
+    cx.run_until_parked();
+    assert!(
+        closed.upgrade().is_none(),
+        "the console and its task were released"
+    );
+    assert!(
+        changes.borrow().is_empty(),
+        "refresh waits for the database job"
+    );
+    release_writes(blocker);
+    wait(cx, "the closed console's completion notification", |_| {
+        changes.borrow().len() == 1
+    });
+    cx.run_until_parked();
+    assert_eq!(changes.borrow().as_slice(), std::slice::from_ref(&id));
+    assert_eq!(
+        sql(&file, "SELECT name FROM t"),
+        [vec![Some("console closed".to_string())]]
+    );
+}
+
+#[gpui_kit::test]
+fn query_runs_publish_one_refresh_for_the_original_connection(cx: &mut TestAppContext) {
+    let (_home, home) = isolate_home("database-changes");
+    let first_file = home.join("first.db");
+    let second_file = home.join("second.db");
+    for file in [&first_file, &second_file] {
+        sql(
+            file,
+            "CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT); INSERT INTO t VALUES (1, 'initial')",
+        );
+    }
+    cx.executor().allow_parking();
+    let ids = cx.update(|cx| {
+        gpui_kit::init(cx);
+        navidog_core::init(cx);
+        navidog_ui::theme::init(cx);
+        navidog_db::init(cx);
+        navidog_grid::init(cx);
+        crate::init(cx);
+        Settings::update(cx, |settings| settings.continue_on_error = false);
+        ConnectionStore::global(cx).update(cx, |store, cx| {
+            store.set_key(Key::random());
+            [&first_file, &second_file]
+                .into_iter()
+                .map(|file| {
+                    let mut connection = Connection::new("sqlite");
+                    connection.general.file = Some(file.to_string_lossy().into_owned());
+                    connection.general.database = Some("main".into());
+                    let id = connection.id.clone();
+                    store.upsert(connection, &[], cx).unwrap();
+                    id
+                })
+                .collect::<Vec<_>>()
+        })
+    });
+    cx.update(|cx| {
+        Sessions::global(cx).update(cx, |sessions, cx| {
+            for id in &ids {
+                sessions.open(id.clone(), Secrets::default(), cx);
+            }
+        });
+    });
+    wait(cx, "both connections", |cx| {
+        cx.update(|cx| {
+            ids.iter()
+                .all(|id| Sessions::global(cx).read(cx).state(id).is_open())
+        })
+    });
+    let (handle, editor) = cx.update(|cx| {
+        let mut editor = None;
+        let handle = gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+            let view = QueryEditor::new(
+                QuerySource::Untitled(1),
+                Target {
+                    connection: Some(ids[0].clone()),
+                    database: Some("main".into()),
+                    schema: None,
+                },
+                String::new(),
+                window,
+                cx,
+            );
+            editor = Some(view.clone());
+            cx.new(|_| Host { editor: view })
+        })
+        .unwrap();
+        (handle.0, editor.unwrap())
+    });
+    let changes = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let observed = changes.clone();
+    let _subscription = cx.update(|cx| {
+        cx.subscribe(
+            &Workspace::global(cx),
+            move |_, event: &WorkspaceEvent, _| {
+                if let WorkspaceEvent::DatabaseChanged(connection) = event {
+                    observed.borrow_mut().push(connection.clone());
+                }
+            },
+        )
+    });
+    let run_once = |cx: &mut TestAppContext, text: &str| {
+        changes.borrow_mut().clear();
+        set_text(cx, handle, &editor, text);
+        run(cx, handle, &editor, RunKind::All);
+        idle(cx, &editor);
+        cx.run_until_parked();
+        assert_eq!(*changes.borrow(), [ids[0].clone()], "{text}");
+    };
+
+    // A script publishes once, including when a later statement fails after a committed write.
+    run_once(
+        cx,
+        "UPDATE t SET name = 'first'; UPDATE t SET name = 'second'",
+    );
+    assert_eq!(
+        sql(&first_file, "SELECT name FROM t"),
+        [vec![Some("second".to_string())]]
+    );
+    run_once(
+        cx,
+        "UPDATE t SET name = 'partial'; SELECT * FROM missing; UPDATE t SET name = 'skipped'",
+    );
+    assert_eq!(
+        sql(&first_file, "SELECT name FROM t"),
+        [vec![Some("partial".to_string())]]
+    );
+    cx.update(|cx| {
+        let results = &editor.read(cx).results.rows;
+        assert_eq!(results.len(), 2);
+        assert!(results[1].error);
+    });
+
+    // Transaction completion needs its own notification; other sessions see only committed data.
+    run_once(cx, "BEGIN; UPDATE t SET name = 'committed'");
+    assert_eq!(
+        sql(&first_file, "SELECT name FROM t"),
+        [vec![Some("partial".to_string())]]
+    );
+    run_once(cx, "COMMIT");
+    assert_eq!(
+        sql(&first_file, "SELECT name FROM t"),
+        [vec![Some("committed".to_string())]]
+    );
+    run_once(cx, "BEGIN; UPDATE t SET name = 'rolled back'");
+    run_once(cx, "ROLLBACK");
+    assert_eq!(
+        sql(&first_file, "SELECT name FROM t"),
+        [vec![Some("committed".to_string())]]
+    );
+
+    changes.borrow_mut().clear();
+    set_text(cx, handle, &editor, "SELECT * FROM t");
+    run(cx, handle, &editor, RunKind::Explain);
+    idle(cx, &editor);
+    cx.run_until_parked();
+    assert!(
+        changes.borrow().is_empty(),
+        "Explain does not execute the SQL"
+    );
+
+    // Changing the toolbar while SQL is executing must not redirect its completion event.
+    set_text(
+        cx,
+        handle,
+        &editor,
+        "WITH RECURSIVE n(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM n WHERE x<1000000000) SELECT sum(x) FROM n",
+    );
+    run(cx, handle, &editor, RunKind::All);
+    wait(cx, "the original query to execute", |cx| {
+        cx.update(|cx| {
+            editor
+                .read(cx)
+                .live
+                .as_ref()
+                .is_some_and(|live| live.session.try_lock().is_err())
+        })
+    });
+    let cancel = cx.update(|cx| {
+        editor
+            .read(cx)
+            .live
+            .as_ref()
+            .unwrap()
+            .cancel
+            .clone()
+            .unwrap()
+    });
+    cx.update_window(handle, |_, window, cx| {
+        editor.update(cx, |editor, cx| {
+            editor.pick_connection(ids[1].clone(), window, cx)
+        });
+    })
+    .unwrap();
+    runtime::runtime().block_on(cancel()).unwrap();
+    idle(cx, &editor);
+    cx.run_until_parked();
+    assert_eq!(*changes.borrow(), [ids[0].clone()]);
+    cx.update(|cx| {
+        assert_eq!(
+            editor.read(cx).target.connection.as_deref(),
+            Some(ids[1].as_str())
+        );
+        assert!(editor.read(cx).results.rows.last().unwrap().error);
+    });
 }
 
 #[gpui_kit::test]
@@ -1125,28 +1519,31 @@ fn history_log_follows_the_log_and_the_console_runs_statements(cx: &mut TestAppC
     wait(cx, "the console session", |cx| {
         cx.update(|cx| console.read(cx).has_session())
     });
+    let changes = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let observed = changes.clone();
+    let _subscription = cx.update(|cx| {
+        cx.subscribe(
+            &Workspace::global(cx),
+            move |_, event: &WorkspaceEvent, _| {
+                if let WorkspaceEvent::DatabaseChanged(connection) = event {
+                    observed.borrow_mut().push(connection.clone());
+                }
+            },
+        )
+    });
 
     // An incomplete statement only gets a new line; with the terminator it runs
     let type_and_enter = |cx: &mut TestAppContext, text: &str| {
-        let text = text.to_string();
-        cx.update_window(handle, |_, window, cx| {
-            let input = console.read(cx).input_state();
-            input.update(cx, |s, cx| {
-                let len = s.value().len();
-                s.set_selected_range(len..len, cx);
-                s.insert(text, window, cx);
-                s.focus(window, cx);
-            });
-            window.render_frame(cx);
-            window.press("enter", cx);
-        })
-        .unwrap();
-        cx.run_until_parked();
+        enter_console(cx, handle, &console, text);
     };
     type_and_enter(cx, "SELECT v FROM c");
     assert_eq!(
         cx.update(|cx| console.read(cx).input_state().read(cx).value().to_string()),
         "SELECT v FROM c\n"
+    );
+    assert!(
+        changes.borrow().is_empty(),
+        "incomplete input executes no SQL"
     );
     type_and_enter(cx, "WHERE id = 1;");
     wait(cx, "the console output", |cx| {
@@ -1158,6 +1555,8 @@ fn history_log_follows_the_log_and_the_console_runs_statements(cx: &mut TestAppC
         "{out}"
     );
     assert!(out.contains("| x |"), "{out}");
+    cx.run_until_parked();
+    assert_eq!(changes.borrow().as_slice(), std::slice::from_ref(&id));
 
     // History navigation goes through the editor's real key handlers.
     for (key, expected) in [("up", "SELECT v FROM c\nWHERE id = 1;"), ("down", "")] {
@@ -1197,10 +1596,34 @@ fn history_log_follows_the_log_and_the_console_runs_statements(cx: &mut TestAppC
     wait(cx, "the console cancellation", |cx| {
         cx.update(|cx| console.read(cx).output_text().contains("ERROR"))
     });
+    cx.run_until_parked();
+    assert_eq!(*changes.borrow(), [id.clone(), id.clone()]);
     type_and_enter(cx, "SELECT 42 AS resumed;");
     wait(cx, "the console to run after cancellation", |cx| {
         cx.update(|cx| console.read(cx).output_text().contains("| 42 "))
     });
+    cx.run_until_parked();
+    assert_eq!(*changes.borrow(), [id.clone(), id.clone(), id.clone()]);
+
+    // The driver can lose earlier successful results when a later statement fails.
+    type_and_enter(
+        cx,
+        "INSERT INTO c(v) VALUES ('partial'); SELECT * FROM missing;",
+    );
+    wait(cx, "the partially successful console input", |cx| {
+        cx.update(|cx| {
+            console
+                .read(cx)
+                .output_text()
+                .contains("no such table: missing")
+        })
+    });
+    cx.run_until_parked();
+    assert_eq!(*changes.borrow(), [id.clone(), id.clone(), id.clone(), id]);
+    assert_eq!(
+        sql(&file, "SELECT v FROM c WHERE id = 2"),
+        [vec![Some("partial".to_string())]]
+    );
 
     // The history log picks the statement up on its next poll
     wait(cx, "the history log", |cx| {

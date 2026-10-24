@@ -7,6 +7,7 @@ use std::hash::Hash;
 
 use gpui_kit::{App, AppContext as _, Context, Entity, Global, SharedString, Task};
 use navidog_core::object::{ObjectKind, ObjectRef, Scope};
+use navidog_core::workspace::{Workspace, WorkspaceEvent};
 use navidog_db::sessions::{Sessions, SessionsEvent};
 use navidog_db::{ColumnInfo, DbResult, ObjectInfo, TableChildren};
 use tokio::task::JoinHandle;
@@ -254,6 +255,56 @@ impl Catalog {
             self.ensure_schemas(&scope.connection, &scope.database, true, cx);
         }
     }
+
+    /// Reloads existing entries after SQL on this connection, without expanding unopened nodes.
+    fn refresh_connection(&mut self, conn: &str, cx: &mut Context<Self>) {
+        Sessions::global(cx).update(cx, |sessions, cx| sessions.refresh(conn, cx));
+        let schemas: Vec<_> = self
+            .schemas
+            .keys()
+            .filter(|(c, _)| c == conn)
+            .cloned()
+            .collect();
+        let objects: Vec<_> = self
+            .objects
+            .keys()
+            .filter(|(s, kind)| s.connection == conn && *kind != ObjectKind::Query)
+            .cloned()
+            .collect();
+        let ddl: Vec<_> = self
+            .ddl
+            .keys()
+            .filter(|o| o.scope.connection == conn)
+            .cloned()
+            .collect();
+        let columns: Vec<_> = self
+            .columns
+            .keys()
+            .filter(|(s, _)| s.connection == conn)
+            .cloned()
+            .collect();
+        let children: Vec<_> = self
+            .children
+            .keys()
+            .filter(|(s, _)| s.connection == conn)
+            .cloned()
+            .collect();
+        for (connection, database) in schemas {
+            self.ensure_schemas(&connection, &database, true, cx);
+        }
+        for (scope, kind) in objects {
+            self.ensure_objects(&scope, kind, true, cx);
+        }
+        for object in ddl {
+            self.ensure_ddl(&object, true, cx);
+        }
+        for (scope, table) in columns {
+            self.ensure_columns(&scope, &table, true, cx);
+        }
+        for (scope, table) in children {
+            self.ensure_table_children(&scope, &table, true, cx);
+        }
+    }
 }
 
 /// Saved queries of a scope as object rows: name, modification date and size (30 §7).
@@ -280,9 +331,12 @@ fn query_infos(scope: &Scope) -> Vec<ObjectInfo> {
 pub(crate) fn init(cx: &mut App) {
     let catalog = cx.new(|cx: &mut Context<Catalog>| {
         cx.subscribe(
-            &navidog_core::workspace::Workspace::global(cx),
-            |this, _, e: &navidog_core::workspace::WorkspaceEvent, cx| {
-                if matches!(e, navidog_core::workspace::WorkspaceEvent::QueriesChanged) {
+            &Workspace::global(cx),
+            |this, _, event: &WorkspaceEvent, cx| match event {
+                WorkspaceEvent::DatabaseChanged(connection) => {
+                    this.refresh_connection(connection, cx);
+                }
+                WorkspaceEvent::QueriesChanged => {
                     let scopes: Vec<Scope> = this
                         .objects
                         .keys()
@@ -293,6 +347,7 @@ pub(crate) fn init(cx: &mut App) {
                         this.ensure_objects(&scope, ObjectKind::Query, true, cx);
                     }
                 }
+                WorkspaceEvent::SelectionChanged => {}
             },
         )
         .detach();
@@ -408,6 +463,58 @@ mod tests {
             )
         });
         panic!("fields and children did not both finish: {state:?}");
+    }
+
+    #[gpui_kit::test]
+    fn a_replaced_metadata_load_cannot_restore_older_values(cx: &mut gpui_kit::TestAppContext) {
+        cx.executor().allow_parking();
+        let catalog = cx.new(|_| Catalog::default());
+        let scope = Scope::new("c", "db", None);
+        let (release, pending) = tokio::sync::oneshot::channel();
+        let (completed, finished) = std::sync::mpsc::channel();
+        let older = runtime::spawn(async move {
+            pending.await.unwrap();
+            completed.send(()).unwrap();
+            Ok(vec![column("older")])
+        });
+        let newer = runtime::spawn(async { Ok(vec![column("newer")]) });
+        catalog.update(cx, |catalog, cx| {
+            for job in [older, newer] {
+                catalog.load(
+                    "columns",
+                    (scope.clone(), "items".into()),
+                    |catalog| &mut catalog.columns,
+                    move |_| Some(job),
+                    true,
+                    cx,
+                );
+            }
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            cx.run_until_parked();
+            if catalog.read_with(cx, |catalog, _| {
+                matches!(
+                    catalog.columns(&scope, "items"),
+                    Some(Load::Ready(columns)) if columns[0].name == "newer"
+                )
+            }) {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        release.send(()).unwrap();
+        finished
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap();
+        cx.run_until_parked();
+        catalog.read_with(cx, |catalog, _| {
+            assert!(matches!(
+                catalog.columns(&scope, "items"),
+                Some(Load::Ready(columns)) if columns[0].name == "newer"
+            ));
+        });
     }
 
     #[gpui_kit::test]

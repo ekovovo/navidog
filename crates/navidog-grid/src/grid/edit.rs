@@ -41,7 +41,14 @@ impl ResultGrid {
         };
         let text = self.model(cx).raw_text(pos.0, pos.1, raw, dialect);
         if let Some(kind) = kind {
-            crate::date::open(pos, kind, &text, cx.entity().downgrade(), window, cx);
+            self.temporal_input = Some(crate::date::open(
+                pos,
+                kind,
+                &text,
+                cx.entity().downgrade(),
+                window,
+                cx,
+            ));
             return;
         }
         let numeric = self

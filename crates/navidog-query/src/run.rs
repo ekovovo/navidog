@@ -11,6 +11,7 @@ use gpui_kit::component::{RopeExt as _, WindowExt as _};
 use gpui_kit::{App, AsyncWindowContext, Context, WeakEntity, Window};
 use navidog_core::actions::OpenConnectionId;
 use navidog_core::settings::{ResultsPosition, Settings};
+use navidog_core::workspace::Workspace;
 use navidog_db::dialect::Dialect;
 use navidog_db::sessions::{Sessions, SharedSession, run_on};
 use navidog_db::sql::{Statement, session_setup, split_script};
@@ -20,6 +21,42 @@ use navidog_util::sql_text;
 use rust_i18n::t;
 
 use crate::editor::QueryEditor;
+
+/// The final submitted database job publishes a batch's refresh even after its panel closes.
+#[derive(Clone)]
+pub(crate) struct RefreshAfterRun {
+    _lifetime: Arc<tokio::sync::oneshot::Sender<()>>,
+    submitted: Arc<AtomicBool>,
+}
+
+impl RefreshAfterRun {
+    pub(crate) fn new(connection: String, cx: &mut App) -> Self {
+        let (lifetime, completed) = tokio::sync::oneshot::channel();
+        let submitted = Arc::new(AtomicBool::new(false));
+        let observed = submitted.clone();
+        // This application task holds neither the panel nor its window. The sender is only
+        // dropped after both the batch owner and every submitted database closure finish.
+        cx.spawn(async move |cx| {
+            let _ = completed.await;
+            if observed.load(Ordering::Acquire) {
+                cx.update(|cx| {
+                    Workspace::global(cx).update(cx, |workspace, cx| {
+                        workspace.database_changed(connection, cx)
+                    });
+                });
+            }
+        })
+        .detach();
+        Self {
+            _lifetime: Arc::new(lifetime),
+            submitted,
+        }
+    }
+
+    pub(crate) fn mark_submitted(&self) {
+        self.submitted.store(true, Ordering::Release);
+    }
+}
 
 /// The session a query editor runs on. It stays open between runs, so `BEGIN`, `SET` and
 /// temporary tables carry over (31 §2).
@@ -324,6 +361,8 @@ impl QueryEditor {
             context_known: true,
             dialect: Some(dialect),
         };
+        let refresh = (kind != RunKind::Explain)
+            .then(|| RefreshAfterRun::new(source.connection_id.clone(), cx));
         cx.notify();
         self.task = Some(cx.spawn_in(window, async move |this, cx| {
             let session = match session.await {
@@ -351,6 +390,7 @@ impl QueryEditor {
             } else {
                 None
             };
+            let refresh = refresh.expect("ordinary SQL runs own a refresh completion guard");
             for p in planned {
                 if stop.load(Ordering::Acquire) {
                     break;
@@ -358,8 +398,14 @@ impl QueryEditor {
                 let started = chrono::Local::now();
                 let clock = Instant::now();
                 let sql = p.sql.clone();
+                refresh.mark_submitted();
+                let completed = refresh.clone();
                 let result = run_on(session.clone(), move |rel| {
-                    Box::pin(async move { execute_with_context(rel, &sql).await })
+                    Box::pin(async move {
+                        let result = execute_with_context(rel, &sql).await;
+                        drop(completed);
+                        result
+                    })
                 })
                 .await
                 .map_err(|e| DbError::msg(e.to_string()))
@@ -394,6 +440,9 @@ impl QueryEditor {
                     break;
                 }
             }
+            // Errors and cancellation can follow committed writes; release the batch owner
+            // without depending on the editor or window still being alive.
+            drop(refresh);
             if let Some(before) = before {
                 let profiled = crate::run::profile_end(&session, before).await;
                 let _ = this.update_in(cx, |this, window, cx| {

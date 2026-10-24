@@ -549,6 +549,115 @@ mod macos {
         cx.update_window(small.0, |_, w, _| w.remove_window())
             .unwrap();
         dispatch(&mut cx, Box::new(navidog::actions::ToggleInfoPane));
+        // An independent SQL session changes a table that is already open in the viewer.
+        let refresh_file = home.join("app.db");
+        execute_sample_sql(
+            &refresh_file,
+            "CREATE TABLE refresh_example(id INTEGER PRIMARY KEY, name TEXT); \
+             INSERT INTO refresh_example VALUES (1, '等待查询执行')",
+        );
+        let refresh_settings = cx.update(|cx| {
+            let settings = Settings::global(cx);
+            let saved = (settings.sync_record, settings.auto_begin_transaction);
+            Settings::update(cx, |settings| {
+                settings.sync_record = false;
+                settings.auto_begin_transaction = false;
+            });
+            saved
+        });
+        dispatch(&mut cx, Box::new(navidog_core::actions::ToggleFocusMode));
+        dispatch(
+            &mut cx,
+            Box::new(OpenObject {
+                object: ObjectRef {
+                    scope: actor_ref.scope.clone(),
+                    kind: ObjectKind::Table,
+                    name: "refresh_example".into(),
+                },
+            }),
+        );
+        wait_for_table(&mut cx, handle, "等待查询执行");
+        execute_sample_sql(
+            &refresh_file,
+            "ALTER TABLE refresh_example ADD COLUMN source TEXT; \
+             UPDATE refresh_example SET name = 'SQL 已更新', source = '查询面板'; \
+             INSERT INTO refresh_example VALUES (2, '新增记录', '查询面板')",
+        );
+        cx.update(|cx| {
+            Workspace::global(cx).update(cx, |workspace, cx| {
+                workspace.database_changed(lite.clone(), cx)
+            });
+        });
+        wait_for_table(&mut cx, handle, "SQL 已更新\t查询面板");
+        for (mode, name) in [
+            (ThemeMode::Light, "viewer-auto-refresh-light.png"),
+            (ThemeMode::Dark, "viewer-auto-refresh-dark.png"),
+        ] {
+            cx.update(|cx| Theme::change(mode, None, cx));
+            shot(&mut cx, name);
+        }
+
+        // Enter a real cell edit, then keep that draft when another SQL session updates the row.
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            let rem = window.rem_size();
+            let font = navidog_ui::tokens::font::SIZE_BODY.to_pixels(rem).as_f32();
+            let x = navidog_ui::tokens::grid::ROW_NUMBER_WIDTH.to_pixels(rem)
+                + navidog_grid::grid::auto_width("id", ["1", "2"], font)
+                + navidog_grid::grid::auto_width("name", ["SQL 已更新", "新增记录"], font) / 2.;
+            window.click_at(
+                gpui_kit::ElementId::NamedInteger("row".into(), 0),
+                gpui_kit::point(x, rem / 2.),
+                cx,
+            );
+            window.press("enter", cx);
+            window.render_frame(cx);
+            window.press("secondary-a", cx);
+            window.input("保留中的本地编辑", cx);
+            window.press("enter", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        wait_for_table(&mut cx, handle, "保留中的本地编辑");
+        execute_sample_sql(
+            &refresh_file,
+            "UPDATE refresh_example SET name = '数据库的后续值' WHERE id = 1",
+        );
+        cx.update(|cx| {
+            Workspace::global(cx).update(cx, |workspace, cx| {
+                workspace.database_changed(lite.clone(), cx)
+            });
+        });
+        cx.run_until_parked();
+        wait_for_table(&mut cx, handle, "保留中的本地编辑");
+        assert_eq!(
+            execute_sample_sql(
+                &refresh_file,
+                "SELECT name FROM refresh_example WHERE id = 1"
+            ),
+            [vec![Some("数据库的后续值".into())]],
+            "the notification retains local input without committing it"
+        );
+        for (mode, name) in [
+            (ThemeMode::Light, "viewer-auto-refresh-pending-light.png"),
+            (ThemeMode::Dark, "viewer-auto-refresh-pending-dark.png"),
+        ] {
+            cx.update(|cx| Theme::change(mode, None, cx));
+            shot(&mut cx, name);
+        }
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            window.click("row-discard", cx);
+        })
+        .unwrap();
+        dispatch(&mut cx, Box::new(navidog_core::actions::ToggleFocusMode));
+        cx.update(|cx| {
+            Theme::change(ThemeMode::Light, None, cx);
+            Settings::update(cx, |settings| {
+                settings.sync_record = refresh_settings.0;
+                settings.auto_begin_transaction = refresh_settings.1;
+            });
+        });
 
         // Manage Connections, searching highlights the matches
         dispatch(&mut cx, Box::new(navidog_core::actions::ManageConnections));
@@ -945,6 +1054,76 @@ mod macos {
             }
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
+    }
+
+    /// Reads the actual grid selection through its normal Copy action until a load has finished.
+    fn wait_for_table(
+        cx: &mut HeadlessAppContext,
+        handle: gpui_kit::AnyWindowHandle,
+        expected: &str,
+    ) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            cx.run_until_parked();
+            let found = cx
+                .update_window(handle, |_, window, cx| {
+                    window.render_frame(cx);
+                    let row = gpui_kit::ElementId::NamedInteger("row".into(), 0);
+                    if window.try_find(row.clone()).is_none() {
+                        return false;
+                    }
+                    window.click_at(
+                        row,
+                        gpui_kit::point(
+                            navidog_ui::tokens::grid::ROW_NUMBER_WIDTH.to_pixels(window.rem_size())
+                                / 2.,
+                            window.rem_size() / 2.,
+                        ),
+                        cx,
+                    );
+                    true
+                })
+                .unwrap();
+            if found {
+                cx.run_until_parked();
+                let value = cx
+                    .update_window(handle, |_, window, cx| {
+                        window.render_frame(cx);
+                        window.dispatch_action(Box::new(navidog_grid::grid::SelectAll), cx);
+                        window.dispatch_action(Box::new(navidog_grid::grid::Copy), cx);
+                        cx.read_from_clipboard().and_then(|item| item.text())
+                    })
+                    .unwrap();
+                if value.is_some_and(|value| value.contains(expected)) {
+                    return;
+                }
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the visible table never contained {expected:?}"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+
+    fn execute_sample_sql(path: &std::path::Path, sql: &str) -> Vec<Vec<Option<String>>> {
+        navidog_db::runtime::runtime().block_on(async {
+            let mut session = navidog_db::connect(
+                Arc::new(navidog_db::sqlite::SqliteDriver::default()),
+                navidog_db::ConnectParams {
+                    file: Some(path.into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+            let sets = session.relational().unwrap().execute(sql).await.unwrap();
+            session.close().await.unwrap();
+            sets.into_iter()
+                .last()
+                .map(|set| set.rows)
+                .unwrap_or_default()
+        })
     }
 
     /// Sample SQLite database: a few tables, a view and an index.

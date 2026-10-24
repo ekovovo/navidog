@@ -57,6 +57,7 @@ impl TableViewer {
             Kind::Json => pretty_json(&text).unwrap_or(text.clone()),
             _ => text.clone(),
         };
+        self.editor_baseline.clone_from(&shown);
         if kind == Kind::Json {
             self.json_input
                 .update(cx, |s, cx| s.set_value(shown, window, cx));
@@ -79,6 +80,10 @@ impl TableViewer {
     }
 
     pub(super) fn apply_editor(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        // A locked model rejects writes; retain both the draft and its original baseline.
+        if self.busy {
+            return;
+        }
         let Some((r, c, _, _)) = self.focused_cell(cx) else {
             return;
         };
@@ -87,6 +92,7 @@ impl TableViewer {
         } else {
             self.editor_input.read(cx).value().to_string()
         };
+        let baseline = raw.clone();
         let text = match self.editor {
             Some(Kind::Hex) => match decode_hex(&raw) {
                 Some(text) => text,
@@ -100,6 +106,7 @@ impl TableViewer {
             _ => return,
         };
         self.editor_note = SharedString::default();
+        self.editor_baseline = baseline;
         self.write_at(r, c, text, cx);
         self.editor_cell = Some((r, c));
     }
@@ -315,6 +322,7 @@ impl TableViewer {
                             .child(
                                 Button::new("editor-update")
                                     .xsmall()
+                                    .disabled(self.busy)
                                     .label(t!("viewer.editor_update").to_string())
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.apply_editor(window, cx)

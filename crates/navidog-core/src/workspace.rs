@@ -62,6 +62,8 @@ pub enum WorkspaceEvent {
     SelectionChanged,
     /// Saved query files were written, renamed or deleted; lists of them reload
     QueriesChanged,
+    /// User SQL finished on this connection; cached data and metadata may have changed.
+    DatabaseChanged(ConnectionId),
 }
 
 #[derive(Default)]
@@ -128,6 +130,11 @@ impl Workspace {
 
     pub fn queries_changed(&mut self, cx: &mut Context<Self>) {
         cx.emit(WorkspaceEvent::QueriesChanged);
+    }
+
+    /// Invalidates consumers of a completed SQL run without changing the current selection.
+    pub fn database_changed(&mut self, connection: ConnectionId, cx: &mut Context<Self>) {
+        cx.emit(WorkspaceEvent::DatabaseChanged(connection));
     }
 
     pub fn status(&self) -> &SharedString {

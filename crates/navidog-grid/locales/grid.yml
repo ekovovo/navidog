@@ -343,6 +343,9 @@ viewer:
   closed:
     en: The connection is closed
     zh-CN: 连接已关闭
+  external_refresh_pending:
+    en: Database changed. Finish editing or end this transaction, then refresh.
+    zh-CN: 数据库已更改。请先处理编辑内容或结束当前事务，再刷新。
   commit_failed:
     en: Failed to apply changes
     zh-CN: 应用更改失败

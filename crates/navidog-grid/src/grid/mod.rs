@@ -165,6 +165,7 @@ pub struct ResultGrid {
     table: Entity<TableState<GridDelegate>>,
     target: Option<GridTarget>,
     edit_sub: Option<Subscription>,
+    temporal_input: Option<WeakEntity<InputState>>,
     row_height: tokens::Pt,
     /// Typed cell text is SQL, not a quoted string (F-DATA-010)
     raw: bool,
@@ -241,6 +242,7 @@ impl ResultGrid {
             table,
             target: None,
             edit_sub: None,
+            temporal_input: None,
             row_height: tokens::grid::ROW_HEIGHT,
             raw: false,
             show_rowid: false,
@@ -335,6 +337,15 @@ impl ResultGrid {
             t.delegate_mut().raw = raw;
             cx.notify();
         });
+    }
+
+    /// An open editor owns input that has not reached the model yet.
+    pub(crate) fn is_editing(&self, cx: &App) -> bool {
+        self.table.read(cx).delegate().editing.is_some()
+            || self
+                .temporal_input
+                .as_ref()
+                .is_some_and(|input| input.upgrade().is_some())
     }
 
     /// Replaces the data with a new page, discarding uncommitted changes.

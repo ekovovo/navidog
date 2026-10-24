@@ -76,6 +76,10 @@ impl TableViewer {
     }
 
     pub(super) fn form_step(&mut self, delta: isize, cx: &mut Context<Self>) {
+        // Flushing while locked would silently drop the draft before changing records.
+        if self.busy {
+            return;
+        }
         self.flush_form(cx);
         let (row, n) = {
             let model = self.grid.read(cx).model(cx);
@@ -118,6 +122,7 @@ impl TableViewer {
                     .gap_2()
                     .child(
                         Button::new("form-prev")
+                            .disabled(self.busy)
                             .ghost()
                             .small()
                             .label(t!("viewer.prev_record").to_string())
@@ -125,6 +130,7 @@ impl TableViewer {
                     )
                     .child(
                         Button::new("form-next")
+                            .disabled(self.busy)
                             .ghost()
                             .small()
                             .label(t!("viewer.next_record").to_string())
