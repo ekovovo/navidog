@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds an unsigned navidog.app and .dmg for a local check.
+# Builds an ad-hoc signed navidog.app and .dmg for a local check.
 # Tagged releases are built by .github/workflows/publish.yml.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -38,6 +38,8 @@ cat > "$app/Contents/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
+
+./scripts/sign-macos.sh "$app"
 
 # Stage the app beside a symlink to /Applications. The link's name stays
 # "Applications"; Finder shows the viewer's own localized name (应用程序, …)

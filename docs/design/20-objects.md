@@ -140,7 +140,7 @@ pub struct Scope { pub database: String, pub schema: Option<String> }
 
 ## 8. 验收清单
 
-- [x] 查询执行后，同连接已加载的目录、字段、索引和打开的 DDL 更新，其他连接及未加载节点保持隔离，过期请求不覆盖新值。（`database_changes_reload_cached_metadata_and_open_ddl_without_touching_other_connections`、`a_replaced_metadata_load_cannot_restore_older_values`；见 [验收记录](../acceptance-query-refresh.md)。）
+- [x] 查询执行后，同连接已加载的目录、字段、索引和打开的 DDL 更新，其他连接及未加载节点保持隔离，过期请求不覆盖新值。（`database_changes_reload_cached_metadata_and_open_ddl_without_touching_other_connections`、`a_replaced_metadata_load_cannot_restore_older_values`；见 [验收记录](../pr/acceptance-query-refresh.md)。）
 - [x] 技术验证结论写回第 1 节，并按判定规则选定导航树的实现方式。
 - [x] 三种数据库都能逐级展开到表、视图、函数（PostgreSQL 还有模式），字段、索引、外键在偏好设置开启后显示。
 - [ ] 对象选项卡的列表视图和详细信息视图与 Navicat 并排目测一致；详细信息视图可排序、可选择显示的列。

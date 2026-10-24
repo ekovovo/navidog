@@ -21,6 +21,7 @@ navidog 用 gpui-kit 0.7 复刻 Navicat Premium 17（macOS）。决策、架构�
 - **注释**：代码注释用英文；改动一个文件时，把该文件里的中文注释顺手改成英文。`docs/` 和 `CONTEXT.md` 用中文。
 - **数据库调用**：驱动在 `navidog_db::runtime` 上执行，界面用 `Sessions::run_rel`（元数据会话）或 `sessions::run_on`（自己持有的会话，表查看器这类编辑器经 `Sessions::new_session` 获得），在 `cx.spawn` 中等待结果。
 - 组件能力不够时在外层补（delegate、自定义渲染），再不行基于 `gpui-base` 自建；gpui-kit 不 fork，`gpui-pre-*` 不单独覆盖。依赖不引入 GPL。
+- **CI 脚本**：工作流调用的 shell 脚本放 `scripts/`（如 `scripts/upload_asset.sh`），不要放进 `.github/workflows/`。
 
 ## gpui-kit 0.7.3 已知的坑
 
@@ -50,4 +51,5 @@ navidog 用 gpui-kit 0.7 复刻 Navicat Premium 17（macOS）。决策、架构�
 ## 收尾
 
 - 更新 progress.md：任务状态、功能状态及其“验证”列、临时偏差与遗留；同步勾选模块规格的验收清单。
+- PR 的验收记录放 `docs/pr/acceptance-<主题>.md`；`docs/progress.md` 用 `pr/…` 链接，`docs/design/` 里的规格用 `../pr/…`。
 - 提交到当前里程碑分支（`mN-…`）。推送和开 PR 要先征得用户同意。

@@ -257,8 +257,8 @@ SELECT * FROM nope
 
 ## 11. 验收清单
 
-- [x] 普通 SQL 每轮结束后只通知一次原连接，部分失败、取消、事务完成及执行中关闭查询/命令列窗口均覆盖；已开表和视图定义自动更新。（查询通知、关闭窗口及 `query_toolbar_refreshes_open_tables_and_view_definitions` 回归；见 [验收记录](../acceptance-query-refresh.md)。）
-- [x] 多行 SQL、批量提交状态和长文本在浅色及深色的底部栏中保持单行，操作按钮不被挤出，悬停保留原文。（复用 `skin::truncated`，`batch_sql_stays_on_one_line_beside_footer_controls` 验证几何约束；查询结果截图及共用组件的悬停截图见 [验收记录](../acceptance-status-overflow.md)。）
+- [x] 普通 SQL 每轮结束后只通知一次原连接，部分失败、取消、事务完成及执行中关闭查询/命令列窗口均覆盖；已开表和视图定义自动更新。（查询通知、关闭窗口及 `query_toolbar_refreshes_open_tables_and_view_definitions` 回归；见 [验收记录](../pr/acceptance-query-refresh.md)。）
+- [x] 多行 SQL、批量提交状态和长文本在浅色及深色的底部栏中保持单行，操作按钮不被挤出，悬停保留原文。（复用 `skin::truncated`，`batch_sql_stays_on_one_line_beside_footer_controls` 验证几何约束；查询结果截图及共用组件的悬停截图见 [验收记录](../pr/acceptance-status-overflow.md)。）
 - [x] 三种数据库：运行、运行已选择的、运行当前语句、停止都正确；多条语句各自写进消息和摘要；出错时停下并标出语句，勾选“遇到错误时继续”时执行完全部。（SQLite：`runs_scripts_into_messages_summary_and_editable_results`；MySQL、MariaDB、PostgreSQL：`NAVIDOG_LIVE=1 cargo test -p navidog-query live_editor`。停止前先确认服务端正在执行慢查询。）
 - [x] 用 `DELIMITER $$` 创建存储过程后能调用；`-- NAME:` 改了结果选项卡的名称；超过 20 个结果集时只显示 20 个。（MySQL、MariaDB 的 `live_editor_runs_selection_current_errors_and_stop` 创建、调用、删除测试过程并验证结果名称；SQLite 编辑器测试验证 21 条均执行但只保留 20 个结果。）
 - [x] 查询参数：同名参数只问一次，原始模式不加引号，上次输入的值预先填好。

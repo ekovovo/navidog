@@ -146,12 +146,6 @@ jobs:
           security list-keychains -d user -s "$KEYCHAIN_PATH" "${existing[@]}"
       - name: release
         run: cargo bundle --release -p navidog --target ${{ matrix.target }} --features mimalloc
-      - name: smoke test (first frame must paint)
-        timeout-minutes: 5
-        env:
-          NAVIDOG_SMOKE_TEST: "1"
-          NAVIDOG_HOME: ${{ runner.temp }}/navidog-smoke
-        run: ./target/${{ matrix.target }}/release/navidog
       - name: sign app
         if: steps.sign.outputs.cert == 'true'
         env:
@@ -170,6 +164,16 @@ jobs:
             echo "no secure timestamp embedded in the signature" >&2
             exit 1
           fi
+          codesign --verify --deep --strict --all-architectures --verbose=2 "$APP"
+      - name: ad-hoc sign app (no certificate)
+        if: steps.sign.outputs.cert != 'true'
+        run: ./scripts/sign-macos.sh "target/${{ matrix.target }}/release/bundle/osx/${{ env.APP_NAME }}.app"
+      - name: smoke test (signed app must paint)
+        timeout-minutes: 5
+        env:
+          NAVIDOG_SMOKE_TEST: "1"
+          NAVIDOG_HOME: ${{ runner.temp }}/navidog-smoke
+        run: ./target/${{ matrix.target }}/release/bundle/osx/${{ env.APP_NAME }}.app/Contents/MacOS/navidog
       - name: create dmg
         run: |
           mkdir -p release
@@ -184,7 +188,7 @@ jobs:
             "release/${{ env.APP_NAME }}-${{ matrix.arch }}.dmg" \
             "target/${{ matrix.target }}/release/bundle/osx/${{ env.APP_NAME }}.app"
       - name: notarize dmg
-        if: steps.sign.outputs.apple == 'true'
+        if: steps.sign.outputs.cert == 'true' && steps.sign.outputs.apple == 'true'
         env:
           AC_USERNAME: ${{ secrets.APPLE_ID }}
           AC_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
@@ -194,10 +198,10 @@ jobs:
           xcrun notarytool submit "$DMG" \
             --apple-id "$AC_USERNAME" --password "$AC_PASSWORD" --team-id "$AC_TEAM_ID" --wait
       - name: wait for propagation
-        if: steps.sign.outputs.apple == 'true'
+        if: steps.sign.outputs.cert == 'true' && steps.sign.outputs.apple == 'true'
         run: sleep 30
       - name: staple DMG
-        if: steps.sign.outputs.apple == 'true'
+        if: steps.sign.outputs.cert == 'true' && steps.sign.outputs.apple == 'true'
         run: xcrun stapler staple "release/${{ env.APP_NAME }}-${{ matrix.arch }}.dmg"
       - name: checksum
         if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main'
@@ -212,7 +216,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
-        run: ./.github/workflows/upload_asset.sh "release/${{ env.APP_NAME }}-${{ matrix.arch }}.dmg"
+        run: ./scripts/upload_asset.sh "release/${{ env.APP_NAME }}-${{ matrix.arch }}.dmg"
       - name: upload checksum meta
         if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v7
@@ -321,9 +325,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          ./.github/workflows/upload_asset.sh "./${{ env.ZIP_NAME }}"
-          ./.github/workflows/upload_asset.sh "./${{ env.MSI_NAME }}"
-          ./.github/workflows/upload_asset.sh "./${{ env.MSI_ZIP_NAME }}"
+          ./scripts/upload_asset.sh "./${{ env.ZIP_NAME }}"
+          ./scripts/upload_asset.sh "./${{ env.MSI_NAME }}"
+          ./scripts/upload_asset.sh "./${{ env.MSI_ZIP_NAME }}"
       - name: upload checksum meta
         if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v7
@@ -440,10 +444,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          ./.github/workflows/upload_asset.sh "navidog-linux-${{ matrix.arch }}.deb"
-          ./.github/workflows/upload_asset.sh "navidog-linux-${{ matrix.arch }}.rpm"
-          ./.github/workflows/upload_asset.sh "navidog-linux-${{ matrix.arch }}.tar.gz"
-          ./.github/workflows/upload_asset.sh "navidog-${{ matrix.arch }}.AppImage.tar.gz"
+          ./scripts/upload_asset.sh "navidog-linux-${{ matrix.arch }}.deb"
+          ./scripts/upload_asset.sh "navidog-linux-${{ matrix.arch }}.rpm"
+          ./scripts/upload_asset.sh "navidog-linux-${{ matrix.arch }}.tar.gz"
+          ./scripts/upload_asset.sh "navidog-${{ matrix.arch }}.AppImage.tar.gz"
       - name: upload checksum meta
         if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v7
@@ -527,7 +531,7 @@ jobs:
           gh release create "$tag" --target "$GITHUB_SHA" --prerelease \
             --title "Development Build (Nightly)" \
             --notes "Rolling build from the latest main branch. Build date: ${{ needs.prepare_vars.outputs.build_date }}"
-          ./.github/workflows/upload_asset.sh dist/*
+          ./scripts/upload_asset.sh dist/*
       - name: build SHA256SUMS and latest.json
         env:
           GH_TOKEN: ${{ github.token }}
@@ -568,7 +572,7 @@ jobs:
           printf '{"version":"%s","tag":"%s","notes":"https://github.com/%s/releases/tag/%s","assets":[%s]}' \
             "$VERSION" "$TAG" "$REPO" "$TAG" "$items" \
             | jq --rawfile body notes.md '. + {body: $body}' > latest.json
-          ./.github/workflows/upload_asset.sh ./SHA256SUMS
+          ./scripts/upload_asset.sh ./SHA256SUMS
           # Keep the release being published in the index even while its tag is a
           # draft. Other drafts stay out.
           gh api "repos/${REPO}/releases?per_page=30" > releases.json
@@ -602,13 +606,13 @@ jobs:
           jq -s '{releases: .}' entries-with-assets.jsonl > releases-index.json
           jq --slurpfile index releases-index.json '. + {releases: $index[0].releases}' latest.json > latest.indexed.json
           mv latest.indexed.json latest.json
-          ./.github/workflows/upload_asset.sh ./latest.json
+          ./scripts/upload_asset.sh ./latest.json
           # Keep nightly's own version and assets; only refresh its release list.
           if [ "$TAG" != "nightly" ] && gh release view nightly >/dev/null 2>&1 \
             && gh release download nightly --pattern latest.json --clobber --dir index-work >/dev/null 2>&1; then
             jq --slurpfile index releases-index.json '. + {releases: $index[0].releases}' index-work/latest.json > index-work/patched.json
             mv index-work/patched.json index-work/latest.json
-            RELEASE_TAG=nightly ./.github/workflows/upload_asset.sh index-work/latest.json
+            RELEASE_TAG=nightly ./scripts/upload_asset.sh index-work/latest.json
           fi
           if [ "$TAG" != "nightly" ]; then
             gh release edit "$TAG" --draft=false

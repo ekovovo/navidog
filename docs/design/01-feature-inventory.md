@@ -294,6 +294,6 @@
 | 编号 | 功能 | 摘要与验收要点 | 帮助页 | 里程碑 |
 | --- | --- | --- | --- | --- |
 | F-REL-001 | 打包 | macOS `.app` 与 DMG，Windows zip、MSI 与 `.msi.zip`，Linux `.deb`、`.rpm`、AppImage 与 tarball，均为 x86_64 和 aarch64。tag 发布附带 `latest.json` 和 `SHA256SUMS`。 | — | M15 |
-| F-REL-002 | 签名与公证 | macOS：hardened runtime、`codesign`、`notarytool`、`stapler`。没有证书时上传未签名包。 | — | M15 |
+| F-REL-002 | 签名与公证 | macOS：完整应用打包后，无证书走免费 ad-hoc 签名并严格验签；有证书保留 hardened runtime 与正式签名，配齐凭据后公证。免费包仍可能需要在系统设置中允许打开；见 150 规格。 | — | M15 |
 | F-REL-003 | 自动更新 | 两个渠道都读同一份 `latest.json` 里的 `releases`；不含预发布时跳过预发布和 nightly。下载后按 SHA-256 校验。macOS 能写到当前 `.app` 时就地替换，否则交给系统打开安装包。 | — | M15 |
 | F-REL-004 | 迁移或升级 | 配置目录版本化，升级时自动迁移旧配置。 | migration | M15 |

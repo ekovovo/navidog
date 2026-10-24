@@ -65,6 +65,9 @@ jobs:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
           targets: ${{ matrix.target }}
           components: clippy, rustfmt
+      - name: macOS signing and DMG round trip
+        timeout-minutes: 3
+        run: scripts/test-macos-signing.sh
       - uses: Swatinem/rust-cache@v2
         with:
           key: macos-lint-${{ matrix.target }}

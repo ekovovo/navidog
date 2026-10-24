@@ -54,16 +54,7 @@ jobs:
       - name: bundle
         run: cargo bundle --release -p navidog --target aarch64-apple-darwin --features mimalloc
       - name: sign app
-        run: |
-          app="target/aarch64-apple-darwin/release/bundle/osx/Navidog.app"
-          # The shared ad-hoc signing script lands with the macOS distribution
-          # change; use it when present so the preview matches the release.
-          if [ -x scripts/sign-macos.sh ]; then
-            scripts/sign-macos.sh "$app"
-          else
-            codesign --force --sign - --timestamp=none "$app"
-            codesign --verify --deep --strict --all-architectures "$app"
-          fi
+        run: ./scripts/sign-macos.sh "target/aarch64-apple-darwin/release/bundle/osx/Navidog.app"
       - name: create dmg
         run: |
           mkdir -p dist
