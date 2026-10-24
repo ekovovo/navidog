@@ -2,11 +2,19 @@ name: Publish
 
 on:
   push:
+    branches: ["main"]
     tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
   schedule:
-    # Daily nightly at 18:00 UTC. Skipped when main has not moved.
+    # Daily fallback at 18:00 UTC. A push to main publishes nightly immediately.
     - cron: "0 18 * * *"
   workflow_dispatch:
+
+concurrency:
+  # One publish at a time per ref. A newer push to main supersedes the build in
+  # flight; tag, schedule, and manual runs queue instead so an upload is never
+  # cut off halfway.
+  group: publish-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
 permissions:
   contents: write
@@ -31,41 +39,31 @@ jobs:
         run: |
           echo "date=$(date -u +'%Y-%m-%d %H:%M')" >> "$GITHUB_OUTPUT"
           echo "rfc3339=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@v7
-      - name: Skip scheduled run when main has no new commits
+      - name: Decide whether this run should build
         id: gate
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           should_build=true
-          if [ "${{ github.event_name }}" = "schedule" ]; then
-            nightly_sha=$(gh api "repos/${{ github.repository }}/git/refs/tags/nightly" -q .object.sha 2>/dev/null || echo "")
-            if [ "$nightly_sha" = "${{ github.sha }}" ]; then
-              echo "main unchanged since last nightly; skipping"
+          # A run queued behind another one may carry an older commit. Only the
+          # push that matches main's head may publish a nightly, so a delayed
+          # schedule or manual run cannot overwrite a newer build.
+          if [ "${GITHUB_REF}" = "refs/heads/main" ] && [ "${GITHUB_EVENT_NAME}" != "push" ]; then
+            head_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${GITHUB_REF_NAME}" -q .object.sha 2>/dev/null || echo "")"
+            if [ -n "$head_sha" ] && [ "$head_sha" != "$GITHUB_SHA" ]; then
+              echo "main moved to $head_sha; skipping stale run for $GITHUB_SHA"
+              should_build=false
+            fi
+          fi
+          # The daily fallback skips when the last nightly already built this commit.
+          if [ "${GITHUB_EVENT_NAME}" = "schedule" ] && [ "$should_build" = true ]; then
+            nightly_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/refs/tags/nightly" -q .object.sha 2>/dev/null || echo "")"
+            if [ "$nightly_sha" = "$GITHUB_SHA" ]; then
+              echo "nightly already built $GITHUB_SHA; skipping"
               should_build=false
             fi
           fi
           echo "should_build=$should_build" >> "$GITHUB_OUTPUT"
-      - name: Delete old nightly release and tag
-        if: github.ref == 'refs/heads/main' && steps.gate.outputs.should_build == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          ids="$(
-            gh api --paginate "repos/${{ github.repository }}/releases" \
-              -q '.[] | select(.tag_name == "nightly") | .id' 2>/dev/null || true
-          )"
-          for id in $ids; do
-            gh api -X DELETE "repos/${{ github.repository }}/releases/$id" || true
-          done
-          gh api -X DELETE "repos/${{ github.repository }}/git/refs/tags/nightly" 2>/dev/null || true
-      - name: Pre-create nightly release
-        if: github.ref == 'refs/heads/main' && steps.gate.outputs.should_build == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create nightly --prerelease --title "Development Build (Nightly)" \
-            --notes "Rolling build from the latest main branch — assets uploading…" || true
       - name: Pre-create draft release for tag
         if: startsWith(github.ref, 'refs/tags/')
         env:
@@ -221,15 +219,15 @@ jobs:
         with:
           name: meta-macos-${{ matrix.arch }}
           path: meta/macos-${{ matrix.arch }}.txt
-      - name: Release nightly assets
+      - name: stage installers for the nightly release
         if: github.ref == 'refs/heads/main'
-        uses: softprops/action-gh-release@v3
+        uses: actions/upload-artifact@v7
         with:
-          tag_name: nightly
-          name: "Development Build (Nightly)"
-          prerelease: true
-          files: release/*.dmg
-          body: "Rolling build from the latest main branch. Build date: ${{ needs.prepare_vars.outputs.build_date }}"
+          name: dist-macos-${{ matrix.arch }}
+          path: release/${{ env.APP_NAME }}-${{ matrix.arch }}.dmg
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
 
   windows:
     needs: prepare_vars
@@ -332,18 +330,18 @@ jobs:
         with:
           name: meta-windows-${{ matrix.arch }}
           path: meta/windows-${{ matrix.arch }}.txt
-      - name: Release nightly assets
+      - name: stage installers for the nightly release
         if: github.ref == 'refs/heads/main'
-        uses: softprops/action-gh-release@v3
+        uses: actions/upload-artifact@v7
         with:
-          tag_name: nightly
-          name: "Development Build (Nightly)"
-          prerelease: true
-          body: "Rolling build from the latest main branch. Build date: ${{ needs.prepare_vars.outputs.build_date }}"
-          files: |
+          name: dist-windows-${{ matrix.arch }}
+          path: |
             ${{ env.ZIP_NAME }}
             ${{ env.MSI_NAME }}
             ${{ env.MSI_ZIP_NAME }}
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
 
   linux:
     needs: prepare_vars
@@ -452,24 +450,25 @@ jobs:
         with:
           name: meta-linux-${{ matrix.arch }}
           path: meta/linux-${{ matrix.arch }}.txt
-      - name: Release nightly assets
+      - name: stage installers for the nightly release
         if: github.ref == 'refs/heads/main'
-        uses: softprops/action-gh-release@v3
+        uses: actions/upload-artifact@v7
         with:
-          tag_name: nightly
-          name: "Development Build (Nightly)"
-          prerelease: true
-          body: "Rolling build from the latest main branch. Build date: ${{ needs.prepare_vars.outputs.build_date }}"
-          files: |
+          name: dist-linux-${{ matrix.arch }}
+          path: |
             navidog-linux-${{ matrix.arch }}.deb
             navidog-linux-${{ matrix.arch }}.rpm
             navidog-linux-${{ matrix.arch }}.tar.gz
             navidog-${{ matrix.arch }}.AppImage.tar.gz
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
 
-  checksums:
+  release:
     needs: [prepare_vars, macos, windows, linux]
     if: needs.prepare_vars.outputs.should_build == 'true' && (startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
         with:
@@ -484,6 +483,51 @@ jobs:
           pattern: meta-*
           path: meta
           merge-multiple: true
+      - name: download nightly installers
+        if: github.ref == 'refs/heads/main'
+        uses: actions/download-artifact@v8
+        with:
+          pattern: "dist-*"
+          path: dist
+          merge-multiple: true
+      - name: verify nightly installers
+        if: github.ref == 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          meta_files=(meta/*.txt)
+          test "${#meta_files[@]}" -gt 0
+          # The metadata is the manifest: every entry must have arrived, and no
+          # extra file may ride along, before the current nightly is touched.
+          expected=0
+          while read -r os arch kind name sha size; do
+            test -f "dist/${name}" || { echo "missing installer: ${name}" >&2; exit 1; }
+            expected=$((expected + 1))
+          done < <(cat "${meta_files[@]}")
+          actual=$(find dist -maxdepth 1 -type f | wc -l | tr -d ' ')
+          echo "installers: expected ${expected}, found ${actual}"
+          test "${expected}" -eq "${actual}"
+      - name: replace the nightly release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: nightly
+        run: |
+          set -euo pipefail
+          tag=nightly
+          # Deleting the release leaves the tag behind; drop both, including any
+          # draft left by a canceled run. Recreating (instead of clobbering
+          # assets) refreshes published_at, which is what clients compare.
+          ids=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases" \
+            -q ".[] | select(.tag_name == \"${tag}\") | .id" 2>/dev/null || true)
+          for id in $ids; do
+            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/${id}"
+          done
+          gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/${tag}" 2>/dev/null || true
+          gh release create "$tag" --target "$GITHUB_SHA" --prerelease \
+            --title "Development Build (Nightly)" \
+            --notes "Rolling build from the latest main branch. Build date: ${{ needs.prepare_vars.outputs.build_date }}"
+          ./.github/workflows/upload_asset.sh dist/*
       - name: build SHA256SUMS and latest.json
         env:
           GH_TOKEN: ${{ github.token }}
@@ -504,7 +548,8 @@ jobs:
             exit 1
           fi
           # --output writes the changelog and does not publish the release.
-          # The tag stays a draft until the assets below are uploaded.
+          # Nightly was recreated above; a tag release stays a draft until the
+          # last step.
           if [ "$TAG" = "nightly" ]; then
             printf '%s\n' "Rolling build from the latest main branch. Build date: $BUILD_DATE" > notes.md
           else
@@ -524,7 +569,8 @@ jobs:
             "$VERSION" "$TAG" "$REPO" "$TAG" "$items" \
             | jq --rawfile body notes.md '. + {body: $body}' > latest.json
           ./.github/workflows/upload_asset.sh ./SHA256SUMS
-          # This tag is still a draft, so keep it in the index. Other drafts stay out.
+          # Keep the release being published in the index even while its tag is a
+          # draft. Other drafts stay out.
           gh api "repos/${REPO}/releases?per_page=30" > releases.json
           jq -c --arg current "$TAG" --arg fallback "$BUILD_RFC3339" '
             [ .[] | select(.draft != true or .tag_name == $current)

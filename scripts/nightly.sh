@@ -1,5 +1,7 @@
 #!/bin/bash
-# Trigger the rolling nightly: a workflow_dispatch of publish.yml on main.
+# Rebuild the rolling nightly: a workflow_dispatch of publish.yml on main.
+# Pushes to main publish the nightly automatically; use this to rebuild the
+# current main without a new commit.
 #
 #   scripts/nightly.sh            ask, then start the run
 #   scripts/nightly.sh --watch    follow it to the end
@@ -19,7 +21,7 @@ for arg in "$@"; do
     --yes | -y) assume_yes=true ;;
     --force) force=true ;;
     -h | --help)
-      sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
