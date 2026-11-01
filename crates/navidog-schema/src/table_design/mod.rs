@@ -53,6 +53,16 @@ pub struct TableDesign {
     pub owner: String,
     #[serde(default)]
     pub unlogged: bool,
+    /// `None` means “use the snapshot’s trigger list”. `Some` is an explicit edit, including
+    /// an empty list when every trigger was removed.
+    #[serde(default)]
+    pub triggers: Option<Vec<String>>,
+    /// `PARTITION BY …` clause, without a leading space. Empty when the table is not partitioned.
+    #[serde(default)]
+    pub partition: String,
+    /// Extra statements for PostgreSQL child partitions (`CREATE TABLE … PARTITION OF`).
+    #[serde(default)]
+    pub partition_children: Vec<String>,
 }
 impl TableDesign {
     pub fn new() -> Self {
@@ -85,6 +95,9 @@ impl TableDesign {
             && self.comment.is_empty()
             && self.owner.is_empty()
             && !self.unlogged
+            && self.triggers.as_ref().is_none_or(|t| t.is_empty())
+            && self.partition.is_empty()
+            && self.partition_children.is_empty()
             && self.constraints.len() == 1
             && self.constraints[0] == "PRIMARY KEY (id)"
             && self.columns.len() == 1
@@ -106,7 +119,7 @@ impl TableDesign {
             .collect();
         parts.extend(self.constraints.iter().map(|c| format!("  {}", c.trim())));
         Ok(format!(
-            "CREATE {}TABLE {} (\n{}\n){}",
+            "CREATE {}TABLE {} (\n{}\n){}{}",
             if dialect.features().supports_unlogged && self.unlogged {
                 "UNLOGGED "
             } else {
@@ -118,6 +131,11 @@ impl TableDesign {
                 String::new()
             } else {
                 format!(" {}", self.options.trim())
+            },
+            if self.partition.trim().is_empty() {
+                String::new()
+            } else {
+                format!(" {}", self.partition.trim())
             }
         ))
     }
@@ -162,6 +180,25 @@ impl TableDesign {
             parse::fragment(c, dialect)?;
         }
         parse::fragment(&self.options, dialect)?;
+        parse::fragment(&self.partition, dialect)?;
+        for trigger in self.triggers.iter().flatten() {
+            if navidog_db::sql::split_script(trigger, dialect.lex()).len() != 1
+                || !trigger.trim_start().to_uppercase().starts_with("CREATE ")
+            {
+                return Err(DbError::msg(
+                    "Each trigger must contain one CREATE TRIGGER statement.",
+                ));
+            }
+        }
+        for child in &self.partition_children {
+            if navidog_db::sql::split_script(child, dialect.lex()).len() != 1
+                || !child.trim_start().to_uppercase().starts_with("CREATE ")
+            {
+                return Err(DbError::msg(
+                    "Each partition must contain one CREATE TABLE statement.",
+                ));
+            }
+        }
         for index in &self.indexes {
             if navidog_db::sql::split_script(index, dialect.lex()).len() != 1 {
                 return Err(DbError::msg(
@@ -293,6 +330,20 @@ pub async fn load(r: &mut dyn Relational, scope: &Scope, name: &str) -> DbResult
                 }
             }
         }
+        design.triggers = Some(triggers.clone());
+    } else if let Some(sql) = dialect.trigger_definitions_sql(scope, name) {
+        for set in r.execute(&sql).await? {
+            for row in set.rows {
+                if let Some(value) = row
+                    .first()
+                    .and_then(|value| value.clone())
+                    .filter(|v| !v.is_empty())
+                {
+                    triggers.push(value);
+                }
+            }
+        }
+        design.triggers = Some(triggers.clone());
     }
     Ok(TableSnapshot {
         design,

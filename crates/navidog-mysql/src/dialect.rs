@@ -32,7 +32,44 @@ impl Dialect for MysqlDialect {
             ObjectKind::View,
             ObjectKind::Function,
             ObjectKind::Event,
+            ObjectKind::Tablespace,
         ]
+    }
+    fn lists_kind(&self, kind: ObjectKind, driver: &str, version: &str) -> bool {
+        if kind == ObjectKind::Sequence {
+            return navidog_sql::definition::mariadb_sequences(driver, version);
+        }
+        self.object_kinds().contains(&kind)
+    }
+    fn definition_family(&self) -> Option<navidog_sql::definition::DefinitionFamily> {
+        Some(navidog_sql::definition::DefinitionFamily::Mysql)
+    }
+    fn trigger_definitions_sql(&self, scope: &Scope, table: &str) -> Option<String> {
+        let database = self.string_literal(&scope.database);
+        let table = self.string_literal(table);
+        // Names are quoted in SQL so a backtick in the identifier cannot break the statement.
+        Some(format!(
+            "SELECT CONCAT( \
+                'CREATE TRIGGER `', REPLACE(TRIGGER_NAME, '`', '``'), '` ', \
+                ACTION_TIMING, ' ', EVENT_MANIPULATION, \
+                ' ON `', REPLACE(EVENT_OBJECT_TABLE, '`', '``'), '` FOR EACH ', \
+                ACTION_ORIENTATION, ' ', ACTION_STATEMENT) \
+             FROM information_schema.TRIGGERS \
+             WHERE EVENT_OBJECT_SCHEMA = {database} AND EVENT_OBJECT_TABLE = {table} \
+             ORDER BY TRIGGER_NAME, EVENT_MANIPULATION"
+        ))
+    }
+    fn definition_statements(
+        &self,
+        scope: &navidog_model::object::Scope,
+        draft: &navidog_sql::definition::DefinitionDraft,
+    ) -> Result<Vec<String>, String> {
+        navidog_sql::definition::plan(
+            self,
+            navidog_sql::definition::DefinitionFamily::Mysql,
+            scope,
+            draft,
+        )
     }
     fn begin_transaction(&self) -> &'static str {
         "START TRANSACTION"
@@ -89,6 +126,7 @@ impl Dialect for MysqlDialect {
             supports_column_charset: true,
             supports_unsigned: true,
             supports_index_expression: false,
+            supports_partitions: true,
             ..DialectFeatures::default()
         }
     }
@@ -234,3 +272,13 @@ const COLUMN_TYPES: &[ColumnType] = &[
         args: TypeArgs::None,
     },
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mysql_has_no_master_table() {
+        assert!(MysqlDialect.master_table_sql("testdb").is_none());
+    }
+}

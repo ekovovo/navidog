@@ -1,7 +1,9 @@
 use super::*;
+use gpui_kit::TestSupportExt;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::resizable::{resizable_panel, v_resizable};
 use gpui_kit::component::skeleton::Skeleton;
+use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::relative;
 use structured::{ENTRY_KEYS, PROPERTIES, PROPERTY_IDS};
 
@@ -530,38 +532,58 @@ impl Render for TableDesigner {
                     ),
                 )
             })
-            .child(
-                h_flex()
-                    .px_2()
-                    .gap_1()
-                    .flex_wrap()
-                    .border_b_1()
-                    .border_color(p.separator)
-                    .children(
-                        [
-                            (Page::Fields, "fields"),
-                            (Page::Indexes, "indexes"),
-                            (Page::ForeignKeys, "foreign_keys"),
-                            (Page::Checks, "checks"),
-                            (Page::Options, "options"),
-                            (Page::Preview, "preview"),
-                            (Page::Advanced, "advanced"),
-                        ]
-                        .into_iter()
-                        .map(|(page, key)| {
-                            Button::new(SharedString::from(format!("designer-page-{key}")))
-                                .ghost()
-                                .small()
-                                .label(t!(format!("designer.{key}")).to_string())
-                                .selected(self.page == page)
-                                .on_click(
-                                    cx.listener(move |this, _, w, cx| {
-                                        this.switch_page(page, w, cx)
-                                    }),
-                                )
-                        }),
-                    ),
-            )
+            .child({
+                let pages: Vec<(Page, &'static str)> = [
+                    (Page::Fields, "fields"),
+                    (Page::Indexes, "indexes"),
+                    (Page::ForeignKeys, "foreign_keys"),
+                    (Page::Checks, "checks"),
+                    (Page::Exclusions, "exclusions"),
+                    (Page::Triggers, "triggers"),
+                    (Page::Partitions, "partitions"),
+                    (Page::Options, "options"),
+                    (Page::Preview, "preview"),
+                    (Page::Advanced, "advanced"),
+                ]
+                .into_iter()
+                .filter(|(page, _)| {
+                    let features = self.dialect.features();
+                    match page {
+                        Page::Exclusions => features.supports_exclude,
+                        Page::Partitions => features.supports_partitions,
+                        _ => true,
+                    }
+                })
+                .collect();
+                let selected = pages
+                    .iter()
+                    .position(|(page, _)| *page == self.page)
+                    .unwrap_or(0);
+                let pages_for_bar = pages.clone();
+                TabBar::new("designer-pages")
+                    .segmented()
+                    .small()
+                    .w_full()
+                    .selected_index(selected)
+                    .on_click(cx.listener(move |this, ix: &usize, window, cx| {
+                        if let Some((page, _)) = pages_for_bar.get(*ix) {
+                            this.switch_page(*page, window, cx);
+                        }
+                    }))
+                    .children(pages.into_iter().map(|(page, key)| {
+                        let label = t!(format!("designer.{key}")).to_string();
+                        Tab::new().child(
+                            div()
+                                .id(SharedString::from(format!("designer-page-{key}")))
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    cx.stop_propagation();
+                                    this.switch_page(page, window, cx);
+                                }))
+                                .child(label)
+                                .test_support(),
+                        )
+                    }))
+            })
             .when_some(self.error.clone(), |v, error| {
                 v.child(gpui_kit::div().px_2().text_color(p.danger).child(error))
             })
@@ -628,6 +650,9 @@ impl Render for TableDesigner {
                     match self.page {
                         Page::Fields | Page::Indexes | Page::ForeignKeys | Page::Checks => {
                             self.render_grid_page(window, cx).into_any_element()
+                        }
+                        Page::Exclusions | Page::Triggers | Page::Partitions => {
+                            self.render_more(cx).into_any_element()
                         }
                         Page::Preview => Editor::new(&self.sql).size_full().into_any_element(),
                         Page::Options => self.render_table_options(cx).into_any_element(),

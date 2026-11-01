@@ -31,6 +31,7 @@ mod test_env {
 }
 
 use gpui_kit::{Action, App, SharedString};
+use navidog_app_state::actions::OpenTool;
 use navidog_app_state::registry::{CommandInfo, CommandRegistry, Source};
 use navidog_app_state::store::ConnectionStore;
 use navidog_app_state::workspace::{Selection, Workspace};
@@ -84,13 +85,23 @@ fn category_enabled(cx: &App, kind: ObjectKind) -> bool {
     if kind == ObjectKind::Query {
         return category_scope(cx).is_some();
     }
-    category_scope(cx)
-        .and_then(|s| {
-            navidog_session::sessions::Sessions::global(cx)
-                .read(cx)
-                .dialect(&s.connection)
-        })
-        .is_some_and(|d| d.object_kinds().contains(&kind))
+    let Some(scope) = category_scope(cx) else {
+        return false;
+    };
+    let sessions = navidog_session::sessions::Sessions::global(cx).read(cx);
+    let Some(dialect) = sessions.dialect(&scope.connection) else {
+        return false;
+    };
+    let driver = navidog_app_state::store::ConnectionStore::global(cx)
+        .read(cx)
+        .get(&scope.connection)
+        .map(|c| c.driver.clone())
+        .unwrap_or_default();
+    let version = match sessions.state(&scope.connection) {
+        navidog_session::sessions::ConnState::Open { version, .. } => version.clone(),
+        _ => String::new(),
+    };
+    dialect.lists_kind(kind, &driver, &version)
 }
 
 fn register_commands(cx: &mut App) {
@@ -102,7 +113,7 @@ fn register_commands(cx: &mut App) {
         fn() -> Box<dyn Action>,
         fn(&App) -> bool,
     );
-    let commands: [Entry; 4] = [
+    let commands: [Entry; 5] = [
         (
             "objects.tables",
             "kind.table",
@@ -146,6 +157,19 @@ fn register_commands(cx: &mut App) {
                 })
             },
             |cx| category_enabled(cx, ObjectKind::Query),
+        ),
+        (
+            "objects.users",
+            "toolbar.user",
+            "icons/user.svg",
+            || {
+                Box::new(OpenTool {
+                    scope: None,
+                    tool: "users".into(),
+                    target: None,
+                })
+            },
+            |cx| category_scope(cx).is_some(),
         ),
     ];
     for (id, title, icon, action, enabled) in commands {

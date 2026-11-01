@@ -73,6 +73,20 @@ fn object_sql(
                 "comment",
             ],
         ),
+        ObjectKind::Tablespace => (
+            "SELECT TABLESPACE_NAME FROM information_schema.FILES \
+             WHERE TABLESPACE_NAME IS NOT NULL AND TABLESPACE_NAME <> '' \
+             GROUP BY TABLESPACE_NAME ORDER BY TABLESPACE_NAME"
+                .into(),
+            &[],
+        ),
+        ObjectKind::Sequence => (
+            format!(
+                "SELECT SEQUENCE_NAME FROM information_schema.SEQUENCES \
+                 WHERE SEQUENCE_SCHEMA = {db} ORDER BY SEQUENCE_NAME"
+            ),
+            &[],
+        ),
         other => return Err(metadata::unsupported(other)),
     })
 }
@@ -89,6 +103,16 @@ pub async fn object_ddl<R: Relational + ?Sized>(
         ObjectKind::Table => (format!("SHOW CREATE TABLE {target}"), 1),
         ObjectKind::View => (format!("SHOW CREATE VIEW {target}"), 1),
         ObjectKind::Event => (format!("SHOW CREATE EVENT {target}"), 3),
+        ObjectKind::Tablespace => (
+            format!(
+                "SELECT CONCAT('CREATE TABLESPACE ', TABLESPACE_NAME, ' ADD DATAFILE ', QUOTE(FILE_NAME)) \
+                 FROM information_schema.FILES WHERE TABLESPACE_NAME = {} LIMIT 1",
+                d.string_literal(name)
+            ),
+            0,
+        ),
+        // MariaDB returns `Table` and `Create Table`, same as SHOW CREATE TABLE.
+        ObjectKind::Sequence => (format!("SHOW CREATE SEQUENCE {target}"), 1),
         ObjectKind::Function => {
             let ty = metadata::query(
                 r,

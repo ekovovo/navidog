@@ -610,6 +610,32 @@ mod macos {
         shot_of(&mut cx, small.0, "designer-minimum-light.png");
         cx.update_window(small.0, |_, w, _| w.remove_window())
             .unwrap();
+        dispatch(
+            &mut cx,
+            Box::new(navidog_app_state::actions::OpenDefinition {
+                scope: actor_ref.scope.clone(),
+                kind: "view".into(),
+                name: None,
+            }),
+        );
+        cx.run_until_parked();
+        shot(&mut cx, "object-designer-light.png");
+        cx.update(|cx| Theme::change(ThemeMode::Dark, None, cx));
+        shot(&mut cx, "object-designer-dark.png");
+        cx.update(|cx| Theme::change(ThemeMode::Light, None, cx));
+        dispatch(
+            &mut cx,
+            Box::new(navidog_app_state::actions::OpenTool {
+                scope: Some(actor_ref.scope.clone()),
+                tool: "users".into(),
+                target: None,
+            }),
+        );
+        cx.run_until_parked();
+        shot(&mut cx, "users-light.png");
+        cx.update(|cx| Theme::change(ThemeMode::Dark, None, cx));
+        shot(&mut cx, "users-dark.png");
+        cx.update(|cx| Theme::change(ThemeMode::Light, None, cx));
         dispatch(&mut cx, Box::new(navidog::actions::ToggleInfoPane));
         // An independent SQL session changes a table that is already open in the viewer.
         let refresh_file = home.join("app.db");

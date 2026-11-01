@@ -1,6 +1,6 @@
 # M4 规格：表设计器
 
-覆盖 F-DSG-001、002、003、004、007、009、010。其他对象设计器、排除约束、触发器和分区的专门表单另开规格，不在本次实现范围。
+覆盖 F-DSG-001、002、003、004、007、009、010。排除约束、触发器、分区和后续迁移见 [41-table-designer-more.md](41-table-designer-more.md)。其他对象设计器见 [42-object-designers.md](42-object-designers.md)。
 
 ## 1. 入口与布局
 
@@ -56,8 +56,8 @@
 ## 5. 首版边界与后续
 
 - 原首版的 SQL 输入主界面被撤回，改为字段网格及结构化索引、外键和检查表单；高级 SQL 仅供无法结构化表达的定义使用。
-- SQLite 主数据库支持完整常见表的事务重建，保留索引、触发器、入站外键、视图、隐藏 rowid 和 AUTOINCREMENT 序列高水位；纯索引变更直接执行。生成列表的重建、附加数据库明确拒绝。字段重命名单独保存，由 SQLite 原生重写依赖。删除字段先在保存点内用原生 DROP COLUMN 检查依赖，回滚预检后再迁移；有依赖时要求先移除依赖。
-- PostgreSQL 不支持现有列的物理重排，也不猜测生成列、identity、collation 等特殊属性的 ALTER。加载额外读取这些标志及列注释，保留属性并纳入外部变更指纹。常用表选项修改已由第 8 节补齐，表和字段注释修改见第 9 节。
+- SQLite 主数据库支持完整常见表的事务重建，保留索引、触发器、入站外键、视图、隐藏 rowid 和 AUTOINCREMENT 序列高水位；纯索引变更直接执行。生成列、已有表的 `WITHOUT ROWID` 切换、以及重命名和其他改动一次保存，按 [41-table-designer-more.md](41-table-designer-more.md) 第 4 节重建。附加数据库上的表重建仍然拒绝。删除字段先在保存点内用原生 DROP COLUMN 检查依赖，回滚预检后再迁移；有依赖时要求先移除依赖。
+- PostgreSQL 现有列重排和 identity 的添加、删除、模式切换见 41 第 4 节。序列选项和解析不了的字段定义仍然拒绝。加载额外读取这些标志及列注释，保留属性并纳入外部变更指纹。常用表选项修改已由第 8 节补齐，表和字段注释修改见第 9 节。
 - MySQL DDL 可能部分成功；失败必须重新加载。先检查结构再执行不能消除 MySQL DDL 的并发变更窗口，保存期间应避免在别的客户端同时改同一张表。
 - 本次不修改其他 M4 对象设计器的状态，不把 Navicat 并排视觉校准视为已完成。
 
@@ -86,8 +86,8 @@
 
 - MySQL/MariaDB：引擎、字符集、排序规则、自增值、行格式、平均行长度、最大/最小行数、键块大小、统计信息自动重算/持久化/采样页数、校验和、延迟键写、打包键、插入方法、连接、数据/索引目录、表空间、压缩、加密和表注释。枚举菜单提供常用合法值，版本/引擎能力由服务器验证；不猜测其他引擎私有属性。
 - PostgreSQL：拥有者、表空间、继承（有序、可带模式的引用表列表）、填充因子、autovacuum_enabled 和 UNLOGGED。读取 pg_class/pg_inherits，存储参数、拥有者和持久性纳入并发指纹；修改生成 OWNER TO、SET TABLESPACE、INHERIT/NO INHERIT、SET/RESET、SET LOGGED/UNLOGGED，和其他表结构变更放在同一事务中。高级存储参数保留，不因编辑填充因子而丢失。不提供新版本已删除的 OIDS。
-- SQLite：WITHOUT ROWID 与 STRICT；启用 WITHOUT ROWID 会丢弃隐式 rowid，普通表与 WITHOUT ROWID 的相互转换明确拒绝（创建新表允许）；STRICT 修改沿用事务重建，类型/现有数据不兼容时回滚。
-- 字段补充 MySQL/MariaDB 的 ON UPDATE 表达式与 ZEROFILL；PostgreSQL identity 模式（无/ALWAYS/BY DEFAULT），编辑已有 identity 仅支持模式切换，复杂 sequence 选项保持原样，不猜测降级。
+- SQLite：WITHOUT ROWID 与 STRICT。已有表切换 WITHOUT ROWID 会丢掉隐式 rowid，按 41 第 4 节重建并在预览里写明；新表可以直接带上。STRICT 修改沿用事务重建，类型/现有数据不兼容时回滚。
+- 字段补充 MySQL/MariaDB 的 ON UPDATE 表达式与 ZEROFILL；PostgreSQL identity 模式（无/ALWAYS/BY DEFAULT）。添加、删除和模式切换按 41 第 4 节生成 ALTER；括号里的序列选项保持原样，改了就拒绝。
 
 参考本地 TableDesignOptionsModule_mysql/pgsql/sqlite 导出，以及 PostgreSQL 16 ALTER TABLE、MySQL 8.4 CREATE TABLE 与 SQLite STRICT 官方语法。排除约束、分区和引擎私有选项仍在各自规格范围，不以本节宣称完整 M4 验收。
 

@@ -243,12 +243,28 @@ impl TreeBuilder<'_> {
         if !self.show_objects {
             return Vec::new();
         }
-        // Every database (PostgreSQL: every schema) also lists its saved queries
-        dialect
-            .object_kinds()
-            .iter()
-            .chain([&ObjectKind::Query])
-            .filter_map(|&kind| {
+        // Every database (PostgreSQL: every schema) also lists its saved queries.
+        // MariaDB sequences are not on the shared MySQL kind list; `lists_kind` adds them.
+        let driver = self
+            .store
+            .get(&scope.connection)
+            .map(|c| c.driver.as_str())
+            .unwrap_or("");
+        let version = match self.sessions.state(&scope.connection) {
+            ConnState::Open { version, .. } => version.as_str(),
+            _ => "",
+        };
+        let mut kinds: Vec<ObjectKind> = dialect.object_kinds().to_vec();
+        if !kinds.contains(&ObjectKind::Sequence) {
+            kinds.push(ObjectKind::Sequence);
+        }
+        kinds.push(ObjectKind::Query);
+        kinds.retain(|kind| {
+            *kind == ObjectKind::Query || dialect.lists_kind(*kind, driver, version)
+        });
+        kinds
+            .into_iter()
+            .filter_map(|kind| {
                 let node = Node::Category(scope.clone(), kind);
                 let children = match self.catalog.objects(scope, kind) {
                     Some(Load::Ready(list)) => {

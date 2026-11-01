@@ -16,6 +16,17 @@ pub enum ObjectKind {
     Trigger,
     Index,
     Sequence,
+    /// A tablespace (MySQL `CREATE TABLESPACE`, PostgreSQL `CREATE TABLESPACE`).
+    Tablespace,
+    /// PostgreSQL `CREATE TYPE`.
+    Type,
+    Domain,
+    Extension,
+    ForeignServer,
+    Aggregate,
+    Cast,
+    Operator,
+    Collation,
     /// A saved query: a `.sql` file in the profile folder, not a server object (30 §7)
     Query,
 }
@@ -32,6 +43,15 @@ impl ObjectKind {
             Self::Trigger => "trigger",
             Self::Index => "index",
             Self::Sequence => "sequence",
+            Self::Tablespace => "tablespace",
+            Self::Type => "type",
+            Self::Domain => "domain",
+            Self::Extension => "extension",
+            Self::ForeignServer => "foreign_server",
+            Self::Aggregate => "aggregate",
+            Self::Cast => "cast",
+            Self::Operator => "operator",
+            Self::Collation => "collation",
             Self::Query => "query",
         }
     }
@@ -46,6 +66,15 @@ impl ObjectKind {
             "trigger" => Self::Trigger,
             "index" => Self::Index,
             "sequence" => Self::Sequence,
+            "tablespace" => Self::Tablespace,
+            "type" => Self::Type,
+            "domain" => Self::Domain,
+            "extension" => Self::Extension,
+            "foreign_server" => Self::ForeignServer,
+            "aggregate" => Self::Aggregate,
+            "cast" => Self::Cast,
+            "operator" => Self::Operator,
+            "collation" => Self::Collation,
             "query" => Self::Query,
             _ => return None,
         })

@@ -99,6 +99,9 @@ designer:
   saved:
     en: Table saved
     zh-CN: 表已保存
+  readback_failed:
+    en: The server definition is not loaded. Close this tab and open the object again before saving.
+    zh-CN: 尚未读到服务器上的定义。请关闭此选项卡并重新打开对象后再保存。
   disconnected:
     en: Open the connection before loading or saving.
     zh-CN: 请先打开连接，再加载或保存。
@@ -108,6 +111,12 @@ designer:
   close_body:
     en: Your table design has not been saved.
     zh-CN: 表设计内容尚未保存。
+  object_close_title:
+    en: Discard unsaved changes?
+    zh-CN: 放弃未保存的更改？
+  object_close_body:
+    en: This object has not been saved.
+    zh-CN: 对象尚未保存。
   discard:
     en: Discard
     zh-CN: 不保存
@@ -168,6 +177,36 @@ designer:
   checks:
     en: Checks
     zh-CN: 检查
+  exclusions:
+    en: Exclusions
+    zh-CN: 排除
+  triggers:
+    en: Triggers
+    zh-CN: 触发器
+  partitions:
+    en: Partitions
+    zh-CN: 分区
+  timing:
+    en: Timing
+    zh-CN: 时机
+  events:
+    en: Events
+    zh-CN: 事件
+  elements:
+    en: Elements
+    zh-CN: 元素
+  where_clause:
+    en: Where
+    zh-CN: WHERE
+  partition_method:
+    en: Method
+    zh-CN: 方式
+  partition_key:
+    en: Key
+    zh-CN: 键
+  bounds:
+    en: Bounds
+    zh-CN: 边界
   advanced:
     en: Advanced
     zh-CN: 高级
@@ -351,3 +390,469 @@ designer:
   not_relational:
     en: Not a relational connection.
     zh-CN: 当前连接不是关系数据库连接。
+  untitled_object:
+    en: New object
+    zh-CN: 新建对象
+  preview_data:
+    en: Preview Data
+    zh-CN: 预览数据
+  run:
+    en: Run
+    zh-CN: 运行
+  arguments:
+    en: Arguments
+    zh-CN: 参数
+  raw_arguments:
+    en: Raw
+    zh-CN: 原始
+  kind_materialized_view:
+    en: Materialized View
+    zh-CN: 实体化视图
+  kind_procedure:
+    en: Procedure
+    zh-CN: 过程
+  kind_event:
+    en: Event
+    zh-CN: 事件
+  kind_tablespace:
+    en: Tablespace
+    zh-CN: 表空间
+  kind_sequence:
+    en: Sequence
+    zh-CN: 序列
+  kind_domain:
+    en: Domain
+    zh-CN: 域
+  kind_extension:
+    en: Extension
+    zh-CN: 扩展
+  kind_foreign_server:
+    en: Foreign Server
+    zh-CN: 外部服务器
+  kind_aggregate:
+    en: Aggregate
+    zh-CN: 聚合
+  kind_cast:
+    en: Cast
+    zh-CN: 转换
+  kind_operator:
+    en: Operator
+    zh-CN: 运算符
+  kind_collation:
+    en: Collation
+    zh-CN: 排序规则
+  kind_index:
+    en: Index
+    zh-CN: 索引
+  kind_trigger:
+    en: Trigger
+    zh-CN: 触发器
+  kind_attach:
+    en: Attach
+    zh-CN: 附加
+  kind_detach:
+    en: Detach
+    zh-CN: 分离
+  opt_algorithm:
+    en: Algorithm
+    zh-CN: 算法
+  opt_security:
+    en: Security
+    zh-CN: 安全性
+  opt_check_option:
+    en: Check option
+    zh-CN: 检查选项
+  opt_with_data:
+    en: Populate
+    zh-CN: 填充
+  opt_routine:
+    en: Type
+    zh-CN: 类型
+  opt_parameters:
+    en: Parameters
+    zh-CN: 参数
+  opt_returns:
+    en: Returns
+    zh-CN: 返回
+  opt_language:
+    en: Language
+    zh-CN: 语言
+  opt_status:
+    en: Status
+    zh-CN: 状态
+  opt_schedule:
+    en: Schedule
+    zh-CN: 计划
+  opt_charset:
+    en: Character set
+    zh-CN: 字符集
+  opt_collation:
+    en: Collation
+    zh-CN: 排序规则
+  opt_owner:
+    en: Owner
+    zh-CN: 拥有者
+  opt_encoding:
+    en: Encoding
+    zh-CN: 编码
+  opt_template:
+    en: Template
+    zh-CN: 模板
+  opt_engine:
+    en: Engine
+    zh-CN: 引擎
+  opt_datafile:
+    en: Data file
+    zh-CN: 数据文件
+  opt_start:
+    en: Start
+    zh-CN: 起始
+  opt_increment:
+    en: Increment
+    zh-CN: 递增值
+  opt_type_kind:
+    en: Kind
+    zh-CN: 种类
+  opt_base_type:
+    en: Base type
+    zh-CN: 基类型
+  opt_not_null:
+    en: Not null
+    zh-CN: 非空
+  opt_default:
+    en: Default
+    zh-CN: 默认值
+  opt_action:
+    en: Action
+    zh-CN: 动作
+  opt_wrapper:
+    en: Wrapper
+    zh-CN: 包装器
+  opt_input_type:
+    en: Input type
+    zh-CN: 输入类型
+  opt_state_func:
+    en: State function
+    zh-CN: 状态函数
+  opt_state_type:
+    en: State type
+    zh-CN: 状态类型
+  opt_source:
+    en: Source
+    zh-CN: 源类型
+  opt_target:
+    en: Target
+    zh-CN: 目标类型
+  opt_function:
+    en: Function
+    zh-CN: 函数
+  opt_left:
+    en: Left type
+    zh-CN: 左类型
+  opt_right:
+    en: Right type
+    zh-CN: 右类型
+  opt_provider:
+    en: Provider
+    zh-CN: 提供者
+  opt_locale:
+    en: Locale
+    zh-CN: 区域
+  opt_table:
+    en: Table
+    zh-CN: 表
+  opt_timing:
+    en: Timing
+    zh-CN: 时机
+  opt_events:
+    en: Events
+    zh-CN: 事件
+  opt_path:
+    en: File
+    zh-CN: 文件
+  tool_users:
+    en: Users
+    zh-CN: 用户
+  tool_user_new:
+    en: New User
+    zh-CN: 新建用户
+  tool_design:
+    en: Design
+    zh-CN: 设计
+  tool_refresh:
+    en: Refresh
+    zh-CN: 刷新
+  tool_filter:
+    en: Filter
+    zh-CN: 筛选
+  tool_users_count:
+    en: "%{n} users"
+    zh-CN: "%{n} 个用户"
+  tool_plugin:
+    en: Plugin
+    zh-CN: 插件
+  tool_confirm:
+    en: Confirm password
+    zh-CN: 确认密码
+  tool_ssl:
+    en: SSL type
+    zh-CN: SSL 类型
+  tool_cipher:
+    en: Cipher
+    zh-CN: 密码
+  tool_issuer:
+    en: Issuer
+    zh-CN: 发行者
+  tool_subject:
+    en: Subject
+    zh-CN: 主旨
+  tool_unlimited:
+    en: "0 (default) = no limit"
+    zh-CN: "0（默认）= 没有限制"
+  tool_default_role:
+    en: Default
+    zh-CN: 默认
+  tool_schema:
+    en: Schema
+    zh-CN: 模式
+  tool_password_mismatch:
+    en: The two passwords do not match.
+    zh-CN: 两次输入的密码不一致。
+  user_general:
+    en: General
+    zh-CN: 常规
+  user_advanced:
+    en: Advanced
+    zh-CN: 高级
+  user_member_of:
+    en: Member of
+    zh-CN: 成员属于
+  user_members:
+    en: Members
+    zh-CN: 成员
+  user_server:
+    en: Server Privileges
+    zh-CN: 服务器权限
+  user_objects:
+    en: Object Privileges
+    zh-CN: 对象权限
+  user_preview:
+    en: SQL Preview
+    zh-CN: SQL 预览
+  user_col_name:
+    en: Name
+    zh-CN: 名称
+  user_col_user:
+    en: User
+    zh-CN: 用户
+  user_col_host:
+    en: Host
+    zh-CN: 主机
+  user_col_plugin:
+    en: Plugin
+    zh-CN: 插件
+  user_col_expire:
+    en: Password expiry
+    zh-CN: 密码过期策略
+  user_col_queries:
+    en: Max queries
+    zh-CN: 最大查询
+  user_col_updates:
+    en: Max updates
+    zh-CN: 最大更新
+  user_col_connections:
+    en: Max connections
+    zh-CN: 最大连接
+  user_col_user_connections:
+    en: Max user connections
+    zh-CN: 最大用户连接数
+  user_col_kind:
+    en: Kind
+    zh-CN: 种类
+  tool_privileges:
+    en: Privileges
+    zh-CN: 权限
+  tool_monitor:
+    en: Server Monitor
+    zh-CN: 服务器监控
+  tool_find:
+    en: Find in Database
+    zh-CN: 在库中查找
+  tool_maintain:
+    en: Maintain
+    zh-CN: 维护
+  tool_host:
+    en: Host
+    zh-CN: 主机
+  tool_password:
+    en: Password
+    zh-CN: 密码
+  tool_role:
+    en: Role
+    zh-CN: 角色
+  tool_locked:
+    en: Locked
+    zh-CN: 锁定
+  tool_expire:
+    en: Expire
+    zh-CN: 过期
+  tool_max_queries:
+    en: Max queries per hour
+    zh-CN: 每小时最大查询数
+  tool_max_updates:
+    en: Max updates per hour
+    zh-CN: 每小时最大更新数
+  tool_max_connections:
+    en: Max connections per hour
+    zh-CN: 每小时最大连接数
+  tool_max_user_connections:
+    en: Max user connections
+    zh-CN: 最大用户连接数
+  tool_login:
+    en: Can log in
+    zh-CN: 可以登录
+  tool_superuser:
+    en: Superuser
+    zh-CN: 超级用户
+  tool_createdb:
+    en: Create databases
+    zh-CN: 创建数据库
+  tool_createrole:
+    en: Create roles
+    zh-CN: 创建角色
+  tool_inherit:
+    en: Inherit
+    zh-CN: 继承
+  tool_replication:
+    en: Replication
+    zh-CN: 复制
+  tool_connection_limit:
+    en: Connection limit
+    zh-CN: 连接限制
+  tool_valid_until:
+    en: Valid until
+    zh-CN: 有效期至
+  tool_preview:
+    en: Preview
+    zh-CN: 预览
+  tool_list:
+    en: List
+    zh-CN: 列出
+  tool_members:
+    en: Members
+    zh-CN: 成员
+  tool_privilege:
+    en: Privilege
+    zh-CN: 权限
+  tool_object:
+    en: Object
+    zh-CN: 对象
+  tool_grantee:
+    en: Grantee
+    zh-CN: 被授予者
+  tool_grant_option:
+    en: With grant option
+    zh-CN: 允许再授权
+  tool_grant:
+    en: Grant
+    zh-CN: 授予
+  tool_revoke:
+    en: Revoke
+    zh-CN: 撤销
+  tool_processes:
+    en: Processes
+    zh-CN: 进程
+  tool_variables:
+    en: Variables
+    zh-CN: 变量
+  tool_status:
+    en: Status
+    zh-CN: 状态
+  tool_auto:
+    en: Auto refresh
+    zh-CN: 自动刷新
+  tool_interval:
+    en: Interval (seconds)
+    zh-CN: 间隔（秒）
+  tool_process_id:
+    en: Process ID
+    zh-CN: 进程 ID
+  tool_kill:
+    en: End process
+    zh-CN: 结束进程
+  tool_variable:
+    en: Variable
+    zh-CN: 变量
+  tool_value:
+    en: Value
+    zh-CN: 值
+  tool_set:
+    en: Set
+    zh-CN: 设置
+  tool_find_text:
+    en: Find
+    zh-CN: 查找
+  tool_case:
+    en: Match case
+    zh-CN: 区分大小写
+  tool_data:
+    en: Search data
+    zh-CN: 搜索数据
+  tool_mode_contains:
+    en: Contains
+    zh-CN: 包含
+  tool_mode_word:
+    en: Whole word
+    zh-CN: 全字匹配
+  tool_mode_prefix:
+    en: Prefix
+    zh-CN: 前缀
+  tool_mode_regex:
+    en: Regular expression
+    zh-CN: 正则表达式
+  tool_analyze:
+    en: Analyze
+    zh-CN: 分析
+  tool_check:
+    en: Check
+    zh-CN: 检查
+  tool_optimize:
+    en: Optimize
+    zh-CN: 优化
+  tool_repair:
+    en: Repair
+    zh-CN: 修复
+  tool_vacuum:
+    en: Vacuum
+    zh-CN: 清理
+  tool_reindex:
+    en: Reindex
+    zh-CN: 重建索引
+  tool_integrity:
+    en: Integrity check
+    zh-CN: 完整性检查
+  tool_no_privileges:
+    en: This connection has no privilege manager.
+    zh-CN: 此连接没有权限管理员。
+  tool_no_monitor:
+    en: Server monitor is not available for this database.
+    zh-CN: 此数据库没有服务器监控。
+  tool_no_maintenance:
+    en: Select a table. SQLite can only vacuum the main database.
+    zh-CN: 请选择一张表。SQLite 只能清理 main 数据库。
+  tool_not_connected:
+    en: The connection is not open.
+    zh-CN: 连接未打开。
+  tool_need_name:
+    en: Enter a name.
+    zh-CN: 请输入名称。
+  tool_no_hits:
+    en: No matches.
+    zh-CN: 没有匹配。
+  tool_discard:
+    en: Close without running the preview?
+    zh-CN: 不执行预览就关闭？
+  tool_discard_body:
+    en: The statements in the preview will not run.
+    zh-CN: 预览中的语句不会执行。
+

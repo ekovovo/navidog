@@ -112,6 +112,11 @@ pub(super) fn create(ddl: &str, name: &str, d: &dyn Dialect) -> DbResult<TableDe
         options: body_and_options[end + 1..].trim().into(),
         ..Default::default()
     };
+    let options_upper = design.options.to_uppercase();
+    if let Some(ix) = options_upper.find("PARTITION BY") {
+        design.partition = design.options[ix..].trim().to_string();
+        design.options = design.options[..ix].trim().to_string();
+    }
     let mut begin = 0;
     for finish in positions(body, b',', d)?
         .into_iter()

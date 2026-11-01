@@ -15,9 +15,10 @@ use gpui_kit::{
     Render, Styled as _, Subscription, Window, div,
 };
 use navidog_app_state::actions::{
-    DesignTable, InsertText, NewQuery, NewQueryText, NewTable, OpenConnection, OpenConsole,
-    OpenExternalQuery, OpenHistoryLog, OpenObject, RunQuery, ToggleFocusMode,
-    ToggleHideObjectGroups, ToggleOnlyActive, ToggleShowHidden, ToggleShowTableProfile,
+    DesignField, DesignTable, InsertText, NewQuery, NewQueryText, NewTable, OpenConnection,
+    OpenConsole, OpenDefinition, OpenExternalQuery, OpenHistoryLog, OpenObject, OpenTool, RunQuery,
+    ToggleFocusMode, ToggleHideObjectGroups, ToggleOnlyActive, ToggleShowHidden,
+    ToggleShowTableProfile,
 };
 use navidog_app_state::favorites::Favorites;
 use navidog_app_state::registry::CommandRegistry;
@@ -738,6 +739,29 @@ impl MainWindow {
     }
 }
 
+/// The open connection's database, for tools opened from the menu rather than a tree node.
+fn tool_scope(cx: &App) -> Option<navidog_model::object::Scope> {
+    let selection = Workspace::global(cx).read(cx).selection().clone();
+    if let Some(scope) = selection.scope() {
+        return Some(scope);
+    }
+    let id = selection.connection_id()?.clone();
+    let (file, saved) = {
+        let store = ConnectionStore::global(cx).read(cx);
+        let connection = store.get(&id)?;
+        (
+            connection.general.file.is_some(),
+            connection.general.database.clone().unwrap_or_default(),
+        )
+    };
+    let database = if saved.is_empty() && file {
+        "main".into()
+    } else {
+        saved
+    };
+    Some(navidog_model::object::Scope::new(id, database, None))
+}
+
 /// Width the right dock gets when the info pane is maximized: whatever the
 /// viewport leaves after the left dock, minus one row-height sliver of the
 /// centre pane. The caller supplies the left dock's actual width (zero when
@@ -842,6 +866,40 @@ impl Render for MainWindow {
                 if let Some(object) = a.object.as_ref().filter(|o| o.kind == ObjectKind::Table) {
                     this.open_editor(object, true, window, cx);
                 }
+            }))
+            .on_action(cx.listener(|this, a: &DesignField, window, cx| {
+                let editor = navidog_designer::TableDesigner::open(a.object.clone(), window, cx);
+                editor.update(cx, |designer, _| {
+                    designer.select_column(a.column.to_string())
+                });
+                this.add_editor(panel_handle(editor), window, cx);
+            }))
+            .on_action(cx.listener(|this, a: &OpenDefinition, window, cx| {
+                let Some(editor) = navidog_designer::ObjectDesigner::blank(
+                    a.scope.clone(),
+                    &a.kind,
+                    a.name.as_ref().map(|name| name.to_string()),
+                    window,
+                    cx,
+                ) else {
+                    return;
+                };
+                this.add_editor(panel_handle(editor), window, cx);
+            }))
+            .on_action(cx.listener(|this, a: &OpenTool, window, cx| {
+                let Some(scope) = a.scope.clone().or_else(|| tool_scope(cx)) else {
+                    return;
+                };
+                let Some(editor) = navidog_designer::ToolPanel::open(
+                    scope,
+                    &a.tool,
+                    a.target.as_ref().map(|name| name.to_string()),
+                    window,
+                    cx,
+                ) else {
+                    return;
+                };
+                this.add_editor(panel_handle(editor), window, cx);
             }))
             .on_action(cx.listener(|this, _: &NewTable, window, cx| {
                 let scope = Workspace::global(cx).read(cx).selection().scope();

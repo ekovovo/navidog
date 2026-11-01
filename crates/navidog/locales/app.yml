@@ -270,6 +270,18 @@ menu:
   history_log:
     en: History Log
     zh-CN: 历史日志
+  users:
+    en: Users
+    zh-CN: 用户
+  privileges:
+    en: Privileges
+    zh-CN: 权限
+  server_monitor:
+    en: Server Monitor
+    zh-CN: 服务器监控
+  find_in_database:
+    en: Find in Database
+    zh-CN: 在库中查找
   history_date:
     en: Show Date
     zh-CN: 显示日期

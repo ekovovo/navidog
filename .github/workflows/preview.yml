@@ -43,6 +43,7 @@ jobs:
           fetch-depth: 1
       - name: post building comment
         # A read-only token (Dependabot, fork settings) must not fail the build.
+        # The script keeps the last successful build in this comment.
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}

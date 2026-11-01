@@ -16,7 +16,7 @@
 | M1 应用外壳和连接管理 | 完成 | `m1-shell-connection` | 10-shell、11-connection | 部分 token 仍是暂定值，待 AX 实测（见第 3 节） |
 | M2 对象树、对象选项卡、表查看器 | 进行中 | `m2-specs`、`m2-objects-grid` | 20-objects、21-table-viewer | 任务都已完成，剩两份规格验收清单里的并排目测 |
 | M3 查询编辑器 | 进行中 | `feat/m3`、`codex/m3-completion` | 30-query-editor、31-query-results | 运行/选择/当前语句/停止、存储过程、结果上限和命令列交互验收已补齐；剩配色、解释视图和消息措辞的目测项。见 [本机验收记录](pr/acceptance-m3.md)。查询创建工具（F-QRY-013）移到 M7 |
-| M4 表设计器及其他对象设计器 | 进行中 | `codex/m4-table-designer` | 40-table-designer | 已按原规格重做字段网格、下方属性区及索引/外键/检查表单；其他对象设计器和方言高级项未完成，见 [验收记录](pr/acceptance-m4.md) |
+| M4 表设计器及其他对象设计器 | 完成 | `feat/m4-remainder` | 40、41、42、43 | 查询创建工具留在 M7。偏差见第 4 节。见 [验收记录](pr/acceptance-m4-remainder.md) |
 | M5 插件体系 | 未开始 | | 03-plugin-api | |
 | M6 导入导出 | 未开始 | | | |
 | M7 模型和 ER 图 | 未开始 | | | 含查询创建工具，与 ER 图共用画布 |
@@ -99,6 +99,7 @@ M2 的任务都已完成，逐项记录见 git 历史；M2 的功能状态仍在
 | 字段、约束、索引、选项与 SQL 预览 | 部分 | 八列字段网格、类型/长度/默认值等属性控件、结构化索引/外键/检查已完成；表达式和高级 SQL 框已接补全。三种方言选项表单和迁移已接入，存储引擎私有属性仍经高级定义编辑 |
 | 迁移计划与保存 | 完成 | 三种方言及 MariaDB 实库验证；SQLite 重建先把旧表改名为 `_表_old_日期` 并留下，不删除；预览页去掉保存、改为执行；外键校验/依赖检查；外部结构变化拒绝覆盖；失败保留草稿 |
 | 界面与本机检查 | 完成 | headless 编辑/预览/执行/失败恢复、条目重载重排、关闭守卫与无改动关闭；浅深色截图与第 5 节检查，详见验收记录 |
+| 其余对象、安全与工具 | 完成 | 共用定义设计器、表设计器排除/触发器/分区、整表重建、用户与权限、维护、信息窗格依赖与成员、服务器监控、在库中查找。SQLite 用户认证扩展未编入发行版，面板只说明原因。见 [验收记录](pr/acceptance-m4-remainder.md) |
 | 依赖审计补丁 | 完成 | `ctutils` 升至 0.4.5（RUSTSEC-2026-0385）、`tokio` 升至 1.54.1（RUSTSEC-2026-0386）；audit 与 deny 均通过，未新增忽略项 |
 | 界面对齐 | 完成 | 表设计器编辑字号、连续关闭未保存选项卡、测试连接底栏、选中色、对象列表详细信息、系统对象开关、新建连接菜单、缺省主题与行底纹、关于文案、全局解锁；CI lint 修复后全工作区 clippy 与 334 项测试通过。见 [验收记录](pr/acceptance-ui-polish.md) |
 
@@ -165,7 +166,7 @@ M2 的任务都已完成，逐项记录见 git 历史；M2 的功能状态仍在
 | F-CONN-019 重载 [My] | 完成 | reload 单元测试、MySQL 8.4 / MariaDB 11 实测 | 只提供两者都支持的 FLUSH 选项，见第 4 节 |
 | F-CONN-021 连接配置文件 | 完成 | connection、store 单元测试、ui 测试 | 右键“切换连接配置文件”；PostgreSQL 多节点在常规页，live 测试覆盖。切换时编辑器选项卡保留并重新连上 |
 | F-NAV-001 连接树（到对象层级） | 完成 | navigator 单元测试、database_refresh UI 测试、snapshot | PostgreSQL 多一层模式。打开连接后已展开的节点会重新加载；查询完成后刷新同连接已加载目录及打开的 DDL，旧请求不覆盖新缓存。目录在渲染中被读取时，树比较修订号后重绘。单击或方向键选到别的对象时回到“对象”选项卡 |
-| F-NAV-002 表下元素 | 部分 | sqlite 测试、live 测试 | 字段、索引、外键、触发器已完成；主键字段用钥匙图标。重命名字段、双击打开设计器在 M4 |
+| F-NAV-002 表下元素 | 完成 | sqlite 测试、live 测试 | 字段、索引、外键、触发器。主键字段用钥匙图标。字段可右键重命名，双击打开表设计器并选中该字段 |
 | F-NAV-003 筛选 | 完成 | navigator UI 测试 | 搜索与快速筛选（连接类型、活跃对象、已标星） |
 | F-NAV-004 仅显示活跃对象 | 完成 | 目测 | 已打开的连接和已展开的数据库 |
 | F-NAV-005 扁平连接 | 完成 | 目测 | 即“隐藏连接组” |
@@ -233,9 +234,31 @@ M2 的任务都已完成，逐项记录见 git 历史；M2 的功能状态仍在
 | F-DSG-002 表设计器：索引 | 部分 | 三服务端与 SQLite 实库、snapshot | 结构化索引列表、字段选择、方法、唯一、注释/部分索引条件表单；MySQL KEY 同页编辑；复杂索引属性保留到高级页 |
 | F-DSG-003 表设计器：外键 | 部分 | 三服务端实库、SQLite 级联 UI/外键校验/回滚测试、浅深色截图 | 独立外键列表及结构化表单；引用模式/表/字段从连接元数据级联选择，支持按序多字段、自引用草稿、异步过期隔离与失败重试；刷新图标至少转半圈；类型/唯一键兼容性由执行检查，完整方言属性待做 |
 | F-DSG-004 唯一与检查 | 部分 | SQL 计划测试、三服务端与 SQLite 实库、`an_unedited_definition_and_check_keep_their_line_breaks` | 检查名称与表达式表单、索引唯一开关；MySQL 移除部分 CHECK 明确拒绝；唯一约束有单独定义并保留，完整方言属性待做 |
-| F-DSG-007 表设计器：选项 | 部分 | 选项单元测试、三服务端与 SQLite 实库、designer UI、浅深色截图 | MySQL 23 项常用选项；PG 拥有者/表空间/继承/存储参数/UNLOGGED，含事务修改与并发检测；SQLite STRICT、WITHOUT ROWID（仅新表切换）。引擎私有属性经高级定义保留，未知参数变更明确拒绝 |
+| F-DSG-007 表设计器：选项 | 部分 | 选项单元测试、三服务端与 SQLite 实库、designer UI、浅深色截图 | MySQL 23 项常用选项；PG 拥有者/表空间/继承/存储参数/UNLOGGED，含事务修改与并发检测；SQLite STRICT、WITHOUT ROWID（含已有表，预览写明隐式 rowid 会丢掉）。引擎私有属性经高级定义保留，未知参数变更明确拒绝 |
 | F-DSG-009 注释与 SQL 预览 | 完成 | designer headless（含预览页放弃修改后立即清掉 SQL）、PG 实库、浅深色 snapshot、注释计划测试 | 表/字段注释与只读 SQL 预览；PG 支持已有注释读取、修改、清空、重命名跟随、复制、旧草稿迁移、失败回滚和外部变化检查；SQLite 无数据库注释语法 |
-| F-DSG-010 表设计器：保存 | 完成 | table_design 实库、designer headless、tabs 测试 | 新建/差异迁移、先预览后执行、失败保留草稿、目录与补全刷新；保存和执行进行中只禁用，重新加载图标至少转半圈；不支持的迁移明确拒绝，详见 40 规格 |
+| F-DSG-010 表设计器：保存 | 完成 | table_design 实库、designer headless、tabs 测试、`postgres_column_reorder_rebuilds_without_cascade`、`postgres_rebuild_keeps_constraint_names_and_serial_defaults`、`postgres_identity_can_be_added_and_sequence_options_stay_fixed`、`sqlite_rebuild_keeps_generated_columns_and_combines_renames`、`sqlite_rename_with_a_trigger_edit_keeps_the_other_trigger`、`sqlite_rename_and_trigger_edit_keeps_update_of_and_the_view`、`sqlite_strict_rebuild_preserves_data_and_converts_without_rowid`、`live_type_names_round_trip_from_the_server` | 新建/差异迁移、先预览后执行、失败保留草稿、目录与补全刷新。PostgreSQL 现有列重排、identity 添加/删除/模式切换、SQLite 生成列、已有表 WITHOUT ROWID 和合并重命名走事务内整表重建。命名主键/唯一/排除先用临时名，原来就有的列上的 `nextval` 默认值先解除序列归属再挂回。新建列的 `nextval` 不改序列归属。序列的 start/increment 不能改。未知选项、删除仍被依赖的字段、附加库上的表重建仍拒绝 |
+| F-DSG-005 排除约束 | 完成 | `exclude` SQL 计划测试 | PostgreSQL 排除约束可添加、修改、删除并预览 |
+| F-DSG-006 触发器 | 完成 | 表设计计划测试 | 三种库可编辑触发器文本；SQLite 只改触发器时不重建整表。PostgreSQL/MySQL 打开已有表时读取触发器定义，列重排重建会按原文建回。表单仍是自由文本，事件固定为 `FOR EACH ROW` |
+| F-DSG-008 分区 | 完成 | 表设计计划测试、`mysql_partition_keeps_the_partition_name` | MySQL 可改分区，填写的分区名写入 `PARTITION` 子句；PostgreSQL 已有表不能改分区方式，已有子分区不加载 |
+| F-DSG-011 视图设计器 | 完成 | `definition_plans_cover_each_object_kind` | 定义、MySQL 算法/安全性/检查选项、SQL 预览、预览数据。已有视图仍按整段 DDL 打开。新建后再次保存时，外部变更守卫比较服务器 DDL，不拿编辑器正文去比。查询创建工具在 M7，面板里不出现 |
+| F-DSG-012 实体化视图 | 完成 | 同上、`refresh_materialized_view` | 新建、SQL 预览、刷新、预览数据 |
+| F-DSG-013 函数与过程 | 完成 | 同上 | 新建、SQL 预览、带参数时先询问再运行 |
+| F-DSG-014 事件 | 完成 | 同上 | 名称、计划、定义；计划必须是一条语句 |
+| F-DSG-015 数据库与模式 | 完成 | 同上 | 新建和编辑。已有库不能改字符集；删除数据库的菜单项仍禁用 |
+| F-DSG-016 附加数据库 | 完成 | 同上 | 附加、分离、查看 sqlite_master。不能分离 main |
+| F-DSG-017 表空间 | 完成 | 同上 | 新建；已有表空间不能改位置 |
+| F-DSG-018 PostgreSQL 其他对象 | 完成 | 同上 | 类型、域、序列、扩展、外部服务器、聚合、转换、运算符、排序规则。计划测试覆盖每种语句 |
+| F-DSG-019 MySQL 其他对象 | 完成 | 同上、`lists_kind` | MariaDB 10.3+ 显示序列；MySQL 不显示 |
+| F-OBJ-009 维护 | 完成 | `security_statements_cover_each_product` | 表和数据库菜单打开维护面板，先显示语句再执行。SQLite 只对 main 做 VACUUM |
+| F-INFO-003 使用与被使用 | 完成 | `relation_plan` | 信息窗格页。PostgreSQL 用 pg_depend；MySQL 只用外键目录；SQLite 在 sqlite_master 里按名字匹配 |
+| F-INFO-008 成员、成员属于、权限 | 完成 | 同上 | 信息窗格页，只读。SQLite 显示缺少用户认证扩展，不执行 SQL |
+| F-SEC-001 MySQL 用户 | 部分 | `security_statements_cover_each_product` | 工具栏打开用户列表；双击进入设计器（常规、高级、成员属于、成员、服务器权限、对象权限、SQL 预览）。密码不回读，预览里显示为 `***`。实库创建仍未跑 |
+| F-SEC-002 MySQL 角色 | 完成 | 同上 | 角色走 CREATE ROLE，不带主机 |
+| F-SEC-003 PostgreSQL 用户、角色、组 | 完成 | 同上 | 组是 NOLOGIN。可改登录、超级用户、建库、建角色、继承、复制、连接限制和有效期 |
+| F-SEC-004 权限管理员 | 完成 | 同上 | 以对象为中心授予或撤销。SQLite 不提供，面板说明原因 |
+| F-SEC-005 SQLite 用户 | 部分 | 同上 | 发行版没有用户认证扩展。面板说明原因，不执行 SQL |
+| F-TOOL-001 服务器监控 | 完成 | 同上 | 进程、变量、状态，当前页有选中态，自动刷新走当前页。PostgreSQL 结束进程用 `pg_cancel_backend`，变量页只读。移到新窗口不停止刷新。SQLite 不提供 |
+| F-TOOL-002 在库中查找 | 完成 | 同上 | ⇧⌘F。包含、全字、前缀、正则和区分大小写。非法正则在查找时报告，不发给服务器。SQLite 正则在计划阶段拒绝；MySQL 区分大小写的 LIKE 用 `LIKE BINARY`，正则在模式前加 `(?-i)`。结果仍是文本，不能双击。数据搜索每个对象最多 100 行 |
 
 ### M15
 
@@ -250,12 +273,13 @@ M2 的任务都已完成，逐项记录见 git 历史；M2 的功能状态仍在
 
 | 项目 | 引入于 | 计划处理 |
 | --- | --- | --- |
-| 表设计器已恢复字段网格和结构化表单；引擎私有属性表单、拖放和运行态视觉对照仍待完成 | M4 | 按 40 规格继续；不能将本次本机截图检查当作 Navicat 并排视觉验收 |
-| 表设计器类型名与服务器建表回读尚未在 MySQL、PostgreSQL、SQLite 实库上逐项核对；单元测试只覆盖草稿拼写 | M4 | 实库创建后重新打开设计器，核对类型名和长度 |
-| SQLite 仅主数据库；生成列表的结构重建拒绝；重命名须单独保存；删除依赖字段须先移除依赖。PostgreSQL 现有字段重排与复杂特殊属性修改拒绝；identity 仅模式切换，未知表选项变更拒绝；SQLite 不转换已有表的 WITHOUT ROWID | M4 | 扩展方言计划与覆盖测试后逐项解除，现有索引变更不重建 SQLite 表 |
+| 表设计器已恢复字段网格和结构化表单；引擎私有属性表单、字段拖放和运行态 Navicat 并排仍未做 | M4 | ⌘↑ / ⌘↓ 移动字段。并排对照不阻塞本里程碑 |
+| 未知表选项、删除仍被依赖的字段、附加库上的表重建仍然拒绝 | M4 | 不自动丢掉依赖对象，不猜测生成表达式里的标识符 |
+| 不做加密 SQLite，不换 `bundled`，不做就地加密或解密，不做 SQLite 2 | M4 | 保持 rusqlite `bundled` |
+| 发行版没有编入 SQLite 用户认证扩展 | M4 | F-SEC-005 保持部分：面板说明原因，不执行 SQL |
 | 类型选择和连接表单是窗口内的模态对话框，而不是独立窗口 | M1 | AX 实测后决定 |
 | 暂定 token：工具栏、导航树行、按钮高度、连接表单尺寸、偏好设置分类栏宽度 | M1 | 运行 `tools/ax-dump.swift` 后替换。偏好设置窗口已按 nib 改为 640 × 480 |
-| SQLite 加密数据库、新建 SQLite 2 不支持 | M1 | M4 评估 SQLCipher |
+| SQLite 加密数据库、新建 SQLite 2 不支持 | M1 | 已决定不做。见上一行 |
 | 结果网格每个可排序列的表头都显示默认排序图标，Navicat 只在已排序的列上显示 | M2 | 自绘表头，或向 gpui-component 提议选项 |
 | 修改标记颜色（已修改单元格、待删除行）是暂定值 | M2 | 与 Navicat 并排实测后替换 |
 | SQL 编辑器的语法配色未与 Navicat 并排实测 | M2 | 与 Navicat 并排实测后替换 `themes/navicat.json`；偏好设置“编辑器”页可以自定义 |
@@ -300,6 +324,7 @@ M2 的任务都已完成，逐项记录见 git 历史；M2 的功能状态仍在
 | 弹出窗口里的查询编辑器没有代码段和标识符页 | M3 | 无 |
 | MySQL 的“写入超时”仍只保存 | M3 | mysql_async 提供发送超时后接上 |
 | `navidog-schema` 的表选项解析（`mysql_span`/`pg_storage`/`pg_clause`）仍在通用 crate 里，只按 `TableOptionStyle` 分派；表设计在 `enriches_from_catalog` / `rebuilds_tables` 下仍直接执行 PostgreSQL catalog SQL 和 SQLite 重建 SQL（`sqlite_schema`、`sqlite_sequence`、`PRAGMA`）；关键字表是手抄的保留字集合，不是脚本从官方文件生成 | 拆 crate | 接第四个数据库前把选项解析和上述 SQL 搬进方言方法（会形成 schema → 方言 crate 的依赖，需要在 00-overview 里先定方向），并让关键字表由脚本生成 |
+| 已有视图/函数/事件仍按整段 DDL 打开；用户面板不能改已有账号；查找结果不能双击；PostgreSQL 已有分区子表不加载；触发器表单没有事件和语句级；库/模式选项不标脏。列重排丢触发器、命名约束/`serial` 重建失败、二次保存被拒、移窗取消监控、分区名、监控语义和查找 SQL 已在 `9dccbb6` 修掉。其后补了冲突检查读失败、空基线禁止再保存、新建列不改序列归属，以及 MySQL 区分大小写正则 | M4 | 按 [pr/review-pr-31.md](pr/review-pr-31.md) 第 7 节的未修清单做。相关功能行仍标「完成」，不在本轮整批改成「部分」 |
 
 ## 5. 验证
 

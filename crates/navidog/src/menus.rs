@@ -4,7 +4,7 @@ use gpui_kit::base::input::{Copy, Cut, Paste, Redo, SelectAll, Undo};
 use gpui_kit::{App, KeyBinding, Menu, MenuItem, OsAction, SystemMenuType};
 use navidog_app_state::actions::{
     CloseConnection, ManageConnections, NewConnection, NewConnectionOf, NewGroup, NewQuery,
-    OpenConsole, OpenExternalQuery, OpenHistoryLog, Refresh, ToggleFocusMode,
+    OpenConsole, OpenExternalQuery, OpenHistoryLog, OpenTool, Refresh, ToggleFocusMode,
     ToggleHideObjectGroups, ToggleOnlyActive, ToggleShowHidden, ToggleShowTableProfile,
 };
 use navidog_app_state::favorites::Favorites;
@@ -38,6 +38,15 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-y", NewQuery, None),
         KeyBinding::new("shift-cmd-c", OpenConsole, None),
         KeyBinding::new("shift-cmd-h", OpenHistoryLog, None),
+        KeyBinding::new(
+            "shift-cmd-f",
+            OpenTool {
+                scope: None,
+                tool: "find".into(),
+                target: None,
+            },
+            None,
+        ),
     ]);
     for id in 1..=9u8 {
         cx.bind_keys([
@@ -463,6 +472,39 @@ pub fn set_menus(cx: &mut App) {
         Menu::new(t!("menu.tools").to_string()).items([
             MenuItem::action(t!("menu.console").to_string(), OpenConsole),
             MenuItem::action(t!("menu.history_log").to_string(), OpenHistoryLog),
+            MenuItem::separator(),
+            MenuItem::action(
+                t!("menu.users").to_string(),
+                OpenTool {
+                    scope: None,
+                    tool: "users".into(),
+                    target: None,
+                },
+            ),
+            MenuItem::action(
+                t!("menu.privileges").to_string(),
+                OpenTool {
+                    scope: None,
+                    tool: "privileges".into(),
+                    target: None,
+                },
+            ),
+            MenuItem::action(
+                t!("menu.server_monitor").to_string(),
+                OpenTool {
+                    scope: None,
+                    tool: "monitor".into(),
+                    target: None,
+                },
+            ),
+            MenuItem::action(
+                t!("menu.find_in_database").to_string(),
+                OpenTool {
+                    scope: None,
+                    tool: "find".into(),
+                    target: None,
+                },
+            ),
         ]),
         Menu::new(t!("menu.window").to_string()).items([
             MenuItem::action(t!("menu.minimize").to_string(), Minimize),

@@ -154,6 +154,10 @@ pub struct DialectFeatures {
     pub supports_index_expression: bool,
     /// A foreign key names a schema (or database) besides the table.
     pub fk_reference_schema: bool,
+    /// PostgreSQL `EXCLUDE` constraints.
+    pub supports_exclude: bool,
+    /// `PARTITION BY` on a table (MySQL and PostgreSQL).
+    pub supports_partitions: bool,
 }
 
 impl Default for DialectFeatures {
@@ -197,6 +201,8 @@ impl Default for DialectFeatures {
             supports_index_method: true,
             supports_index_expression: true,
             fk_reference_schema: true,
+            supports_exclude: false,
+            supports_partitions: false,
         }
     }
 }
@@ -371,8 +377,104 @@ pub trait Dialect: std::fmt::Debug + Send + Sync {
             ObjectKind::Trigger if self.features().drop_trigger_by_name => "TRIGGER",
             ObjectKind::Index if self.features().drop_index_by_name => "INDEX",
             ObjectKind::Sequence => "SEQUENCE",
-            _ => return None,
+            ObjectKind::Tablespace => "TABLESPACE",
+            ObjectKind::Type => "TYPE",
+            ObjectKind::Domain => "DOMAIN",
+            ObjectKind::Extension => "EXTENSION",
+            ObjectKind::ForeignServer => "SERVER",
+            ObjectKind::Collation => "COLLATION",
+            // Aggregate and operator drops need an argument signature this name cannot supply.
+            ObjectKind::Aggregate
+            | ObjectKind::Operator
+            | ObjectKind::Trigger
+            | ObjectKind::Index
+            | ObjectKind::Cast
+            | ObjectKind::Function
+            | ObjectKind::Query => return None,
         })
+    }
+
+    /// Kinds this connection shows. MariaDB sequences depend on the driver id and server version.
+    fn lists_kind(&self, kind: ObjectKind, _driver: &str, _version: &str) -> bool {
+        self.object_kinds().contains(&kind)
+    }
+
+    /// Statement family for the shared object designer. `None` when the product has no designer.
+    fn definition_family(&self) -> Option<crate::definition::DefinitionFamily> {
+        None
+    }
+
+    /// `SELECT` of the catalog table that lists every object, such as SQLite's `sqlite_master`.
+    /// Products without that table return `None`, so the menu item is absent.
+    fn master_table_sql(&self, _database: &str) -> Option<String> {
+        None
+    }
+
+    /// One column: `CREATE TRIGGER` text for this table. `None` when the snapshot loads triggers another way.
+    fn trigger_definitions_sql(&self, _scope: &Scope, _table: &str) -> Option<String> {
+        None
+    }
+
+    /// Preview SQL for a definition draft. Empty means nothing changed.
+    fn definition_statements(
+        &self,
+        _scope: &Scope,
+        _draft: &crate::definition::DefinitionDraft,
+    ) -> Result<Vec<String>, String> {
+        Err("This database cannot change that object.".into())
+    }
+
+    /// `REFRESH MATERIALIZED VIEW`, when the product has materialized views.
+    fn refresh_materialized_view(
+        &self,
+        _scope: &Scope,
+        _name: &str,
+        _with_data: bool,
+    ) -> Option<String> {
+        None
+    }
+
+    /// Which account form to show. SQLite explains the missing extension and runs nothing.
+    fn account_form(&self) -> crate::security::AccountForm {
+        crate::security::account_form(self.definition_family())
+    }
+
+    fn account_list_sql(&self) -> Option<&'static str> {
+        crate::security::account_list_sql(self.definition_family())
+    }
+
+    fn manages_privileges(&self) -> bool {
+        crate::security::manages_privileges(self.definition_family())
+    }
+
+    fn monitors_server(&self) -> bool {
+        crate::security::monitors_server(self.definition_family())
+    }
+
+    fn process_sql(&self) -> Option<&'static str> {
+        crate::security::process_sql(self.definition_family())
+    }
+
+    fn kill_sql(&self, id: &str) -> Result<Option<String>, String> {
+        crate::security::kill_sql(self.definition_family(), id)
+    }
+
+    fn variables_sql(&self) -> Option<&'static str> {
+        crate::security::variables_sql(self.definition_family())
+    }
+
+    fn status_sql(&self) -> Option<&'static str> {
+        crate::security::status_sql(self.definition_family())
+    }
+
+    /// `ALTER TABLE … RENAME COLUMN`.
+    fn rename_column(&self, scope: &Scope, table: &str, old: &str, new: &str) -> String {
+        format!(
+            "ALTER TABLE {} RENAME COLUMN {} TO {}",
+            self.qualified(scope, table),
+            self.quote_ident(old),
+            self.quote_ident(new)
+        )
     }
 
     #[allow(clippy::too_many_arguments)]

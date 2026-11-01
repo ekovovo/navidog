@@ -34,6 +34,54 @@ pub async fn list_objects<R: Relational + ?Sized>(
     Ok(metadata::objects(&set.rows, kind, props))
 }
 
+fn extra_object_sql(
+    d: &dyn navidog_sql::Dialect,
+    scope: &Scope,
+    kind: ObjectKind,
+) -> Option<(String, &'static [&'static str])> {
+    let schema = d.string_literal(scope.schema.as_deref().unwrap_or("public"));
+    let sql = match kind {
+        ObjectKind::Type => format!(
+            "SELECT t.typname FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace \
+             WHERE n.nspname = {schema} AND t.typtype IN ('b', 'c', 'e', 'r') \
+             AND t.typname NOT LIKE '\\_%' ORDER BY 1"
+        ),
+        ObjectKind::Domain => format!(
+            "SELECT t.typname FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace \
+             WHERE n.nspname = {schema} AND t.typtype = 'd' ORDER BY 1"
+        ),
+        ObjectKind::Extension => "SELECT extname FROM pg_extension ORDER BY 1".into(),
+        ObjectKind::Tablespace => {
+            "SELECT spcname FROM pg_tablespace WHERE spcname NOT LIKE 'pg\\_%' ORDER BY 1".into()
+        }
+        ObjectKind::ForeignServer => "SELECT srvname FROM pg_foreign_server ORDER BY 1".into(),
+        ObjectKind::Aggregate => format!(
+            "SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace \
+             WHERE n.nspname = {schema} AND p.prokind = 'a' ORDER BY 1"
+        ),
+        ObjectKind::Cast => format!(
+            "SELECT format('%s AS %s', format_type(c.castsource, NULL), format_type(c.casttarget, NULL)) \
+             FROM pg_cast c JOIN pg_type s ON s.oid = c.castsource \
+             JOIN pg_namespace n ON n.oid = s.typnamespace WHERE n.nspname = {schema} ORDER BY 1"
+        ),
+        ObjectKind::Operator => format!(
+            "SELECT o.oprname FROM pg_operator o JOIN pg_namespace n ON n.oid = o.oprnamespace \
+             WHERE n.nspname = {schema} ORDER BY 1"
+        ),
+        ObjectKind::Collation => format!(
+            "SELECT c.collname FROM pg_collation c JOIN pg_namespace n ON n.oid = c.collnamespace \
+             WHERE n.nspname = {schema} ORDER BY 1"
+        ),
+        _ => return None,
+    };
+    Some((sql, &[]))
+}
+
+async fn simple_ddl<R: Relational + ?Sized>(r: &mut R, sql: &str) -> DbResult<String> {
+    let set = metadata::query(r, sql).await?;
+    Ok(set.rows.first().map(|row| cell(row, 0)).unwrap_or_default())
+}
+
 fn relkind(kind: ObjectKind) -> Option<&'static str> {
     Some(match kind {
         ObjectKind::Table => "'r', 'p'",
@@ -50,6 +98,9 @@ fn object_sql(
     kind: ObjectKind,
 ) -> DbResult<(String, &'static [&'static str])> {
     let schema = d.string_literal(scope.schema.as_deref().unwrap_or("public"));
+    if let Some((sql, props)) = extra_object_sql(d, scope, kind) {
+        return Ok((sql, props));
+    }
     if kind == ObjectKind::Function {
         return Ok((
             format!(
@@ -114,6 +165,98 @@ pub async fn object_ddl<R: Relational + ?Sized>(
             );
             Ok(first(metadata::query(r, &sql).await?))
         }
+        ObjectKind::Type => simple_ddl(
+            r,
+            &format!(
+                "SELECT 'CREATE TYPE ' || format('%I', t.typname) || CASE t.typtype \
+                 WHEN 'e' THEN ' AS ENUM (' || COALESCE((SELECT string_agg(quote_literal(e.enumlabel), ', ' ORDER BY e.enumsortorder) FROM pg_enum e WHERE e.enumtypid = t.oid), '') || ')' \
+                 WHEN 'd' THEN '' ELSE '' END \
+                 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace \
+                 WHERE n.nspname = {} AND t.typname = {}",
+                d.string_literal(scope.schema.as_deref().unwrap_or("public")),
+                d.string_literal(name)
+            ),
+        )
+        .await,
+        ObjectKind::Domain => simple_ddl(
+            r,
+            &format!(
+                "SELECT 'CREATE DOMAIN ' || format('%I.%I', n.nspname, t.typname) || ' AS ' || format_type(t.typbasetype, t.typtypmod) \
+                 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace \
+                 WHERE n.nspname = {} AND t.typname = {} AND t.typtype = 'd'",
+                d.string_literal(scope.schema.as_deref().unwrap_or("public")),
+                d.string_literal(name)
+            ),
+        )
+        .await,
+        ObjectKind::Extension => simple_ddl(
+            r,
+            &format!(
+                "SELECT 'CREATE EXTENSION ' || quote_ident(extname) FROM pg_extension WHERE extname = {}",
+                d.string_literal(name)
+            ),
+        )
+        .await,
+        ObjectKind::Tablespace => simple_ddl(
+            r,
+            &format!(
+                "SELECT 'CREATE TABLESPACE ' || quote_ident(spcname) || ' LOCATION ' || quote_literal(pg_tablespace_location(oid)) \
+                 FROM pg_tablespace WHERE spcname = {}",
+                d.string_literal(name)
+            ),
+        )
+        .await,
+        ObjectKind::ForeignServer => simple_ddl(
+            r,
+            &format!(
+                "SELECT 'CREATE SERVER ' || quote_ident(s.srvname) || ' FOREIGN DATA WRAPPER ' || quote_ident(w.fdwname) \
+                 FROM pg_foreign_server s JOIN pg_foreign_data_wrapper w ON w.oid = s.srvfdw WHERE s.srvname = {}",
+                d.string_literal(name)
+            ),
+        )
+        .await,
+        ObjectKind::Aggregate => simple_ddl(
+            r,
+            &format!(
+                "SELECT pg_get_functiondef(p.oid) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace \
+                 WHERE n.nspname = {} AND p.proname = {} AND p.prokind = 'a' LIMIT 1",
+                d.string_literal(scope.schema.as_deref().unwrap_or("public")),
+                d.string_literal(name)
+            ),
+        )
+        .await,
+        ObjectKind::Collation => simple_ddl(
+            r,
+            &format!(
+                "SELECT 'CREATE COLLATION ' || format('%I.%I', n.nspname, c.collname) \
+                 FROM pg_collation c JOIN pg_namespace n ON n.oid = c.collnamespace \
+                 WHERE n.nspname = {} AND c.collname = {}",
+                d.string_literal(scope.schema.as_deref().unwrap_or("public")),
+                d.string_literal(name)
+            ),
+        )
+        .await,
+        ObjectKind::Cast => simple_ddl(
+            r,
+            &format!(
+                "SELECT 'CREATE CAST (' || format_type(castsource, NULL) || ' AS ' || format_type(casttarget, NULL) || ')' \
+                 FROM pg_cast c JOIN pg_type s ON s.oid = c.castsource JOIN pg_type t ON t.oid = c.casttarget \
+                 JOIN pg_namespace n ON n.oid = s.typnamespace \
+                 WHERE format('%s AS %s', format_type(castsource, NULL), format_type(casttarget, NULL)) = {}",
+                d.string_literal(name)
+            ),
+        )
+        .await,
+        ObjectKind::Operator => simple_ddl(
+            r,
+            &format!(
+                "SELECT 'CREATE OPERATOR ' || oprname FROM pg_operator o JOIN pg_namespace n ON n.oid = o.oprnamespace \
+                 WHERE n.nspname = {} AND o.oprname = {} LIMIT 1",
+                d.string_literal(scope.schema.as_deref().unwrap_or("public")),
+                d.string_literal(name)
+            ),
+        )
+        .await,
         ObjectKind::Sequence => {
             let set = metadata::query(
                 r,

@@ -1,12 +1,13 @@
 //! Explain tabs (31-query-results.md §5): plans fetched without running the statement, shown as a
 //! grid, text and JSON.
 
-use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::TestSupportExt;
 use gpui_kit::component::input::{Editor, EditorState};
-use gpui_kit::component::{Selectable as _, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::tab::{Tab, TabBar};
+use gpui_kit::component::{Sizable as _, v_flex};
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render,
-    SharedString, Styled as _, Window, div,
+    AnyElement, App, AppContext as _, Context, Entity, IntoElement, Render, SharedString, Window,
+    div, prelude::*,
 };
 use navidog_db::{Column, DbResult, Relational, ResultSet};
 use navidog_grid::{GridColumn, ResultGrid};
@@ -300,7 +301,6 @@ impl ExplainView {
 
 impl Render for ExplainView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let p = palette(cx);
         let views = self.views();
         if !views.contains(&self.view) {
             self.view = views[0];
@@ -334,26 +334,38 @@ impl Render for ExplainView {
             View::Stats => self.render_stats(cx),
             View::Info => self.render_info(cx),
         };
+        let selected = views
+            .iter()
+            .position(|view| *view == self.view)
+            .unwrap_or(0);
+        let views_for_bar = views.clone();
         v_flex()
             .size_full()
             .min_h_0()
             .child(
-                h_flex()
-                    .h(tokens::explain::VIEW_SWITCH_HEIGHT.rems())
-                    .px_2()
-                    .gap_1()
-                    .border_b_1()
-                    .border_color(p.separator)
+                TabBar::new("explain-views")
+                    .underline()
+                    .small()
+                    .w_full()
+                    .selected_index(selected)
+                    .on_click(cx.listener(move |this, ix: &usize, _, cx| {
+                        if let Some(view) = views_for_bar.get(*ix) {
+                            this.view = *view;
+                            cx.notify();
+                        }
+                    }))
                     .children(views.into_iter().map(|v| {
-                        Button::new(SharedString::from(format!("explain-view-{v:?}")))
-                            .ghost()
-                            .small()
-                            .label(label(v))
-                            .selected(self.view == v)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.view = v;
-                                cx.notify();
-                            }))
+                        Tab::new().aria_label(label(v)).child(
+                            div()
+                                .id(SharedString::from(format!("explain-view-{v:?}")))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    cx.stop_propagation();
+                                    this.view = v;
+                                    cx.notify();
+                                }))
+                                .child(label(v))
+                                .test_support(),
+                        )
                     })),
             )
             .child(

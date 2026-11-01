@@ -153,6 +153,51 @@ nav:
   new_database:
     en: New Database…
     zh-CN: 新建数据库…
+  attach_database:
+    en: Attach Database…
+    zh-CN: 附加数据库…
+  detach_database:
+    en: Detach Database
+    zh-CN: 分离数据库
+  view_master:
+    en: View Master
+    zh-CN: 查看主表
+  maintain:
+    en: Maintain
+    zh-CN: 维护
+  maintain_analyze:
+    en: Analyze
+    zh-CN: 分析
+  maintain_check:
+    en: Check
+    zh-CN: 检查
+  maintain_optimize:
+    en: Optimize
+    zh-CN: 优化
+  maintain_repair:
+    en: Repair
+    zh-CN: 修复
+  maintain_vacuum:
+    en: Vacuum
+    zh-CN: 清理
+  maintain_reindex:
+    en: Reindex
+    zh-CN: 重建索引
+  maintain_integrity:
+    en: Integrity check
+    zh-CN: 完整性检查
+  maintain_done:
+    en: Done
+    zh-CN: 完成
+  maintain_offline:
+    en: The connection is not open.
+    zh-CN: 连接未打开。
+  new_schema:
+    en: New Schema…
+    zh-CN: 新建模式…
+  edit_schema:
+    en: Edit Schema…
+    zh-CN: 编辑模式…
 kind:
   table:
     en: Tables
@@ -178,6 +223,33 @@ kind:
   sequence:
     en: Sequences
     zh-CN: 序列
+  tablespace:
+    en: Tablespaces
+    zh-CN: 表空间
+  type:
+    en: Types
+    zh-CN: 类型
+  domain:
+    en: Domains
+    zh-CN: 域
+  extension:
+    en: Extensions
+    zh-CN: 扩展
+  foreign_server:
+    en: Foreign Servers
+    zh-CN: 外部服务器
+  aggregate:
+    en: Aggregates
+    zh-CN: 聚合
+  cast:
+    en: Casts
+    zh-CN: 转换
+  operator:
+    en: Operators
+    zh-CN: 运算符
+  collation:
+    en: Collations
+    zh-CN: 排序规则
   query:
     en: Queries
     zh-CN: 查询
@@ -263,6 +335,12 @@ obj:
   rename:
     en: Rename
     zh-CN: 重命名
+  refresh_mview:
+    en: Refresh Materialized View
+    zh-CN: 刷新实体化视图
+  refresh_mview_empty:
+    en: Refresh Materialized View With No Data
+    zh-CN: 刷新实体化视图（无数据）
   new_object:
     en: "New %{kind}"
     zh-CN: "新建%{kind}"
@@ -418,6 +496,24 @@ info:
   fields:
     en: Fields
     zh-CN: 字段
+  used:
+    en: Used By
+    zh-CN: 被使用
+  members:
+    en: Members
+    zh-CN: 成员
+  uses:
+    en: Uses
+    zh-CN: 使用
+  used_by:
+    en: Used by
+    zh-CN: 被使用
+  member_of:
+    en: Member of
+    zh-CN: 隶属于
+  privileges:
+    en: Privileges
+    zh-CN: 权限
   nothing_selected:
     en: No object selected
     zh-CN: 没有选择对象

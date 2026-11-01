@@ -345,6 +345,7 @@ enum RenameTarget {
     Group(String),
     VGroup(String),
     Object(ObjectRef),
+    Field(ObjectRef, String),
 }
 
 /// Objects being dragged onto a virtual group (or onto their category, meaning no group).
@@ -670,6 +671,15 @@ impl NavigatorPanel {
             Node::Object(o) => {
                 window.dispatch_action(Box::new(OpenObject { object: o.clone() }), cx);
             }
+            Node::TableItem(object, Child::Fields, name) => {
+                window.dispatch_action(
+                    Box::new(DesignField {
+                        object: object.clone(),
+                        column: name.clone().into(),
+                    }),
+                    cx,
+                );
+            }
             Node::TableItem(object, _, _) => {
                 window.dispatch_action(
                     Box::new(DesignTable {
@@ -780,6 +790,15 @@ pub(crate) fn kind_icon(kind: ObjectKind) -> &'static str {
         ObjectKind::Trigger => "zap",
         ObjectKind::Index => "key-round",
         ObjectKind::Sequence => "list-ordered",
+        ObjectKind::Tablespace => "server",
+        ObjectKind::Type => "braces",
+        ObjectKind::Domain => "blocks",
+        ObjectKind::Extension => "shapes",
+        ObjectKind::ForeignServer => "cable",
+        ObjectKind::Aggregate => "hash",
+        ObjectKind::Cast => "code",
+        ObjectKind::Operator => "binary",
+        ObjectKind::Collation => "list",
         ObjectKind::Query => "file-code",
     }
 }
@@ -1020,6 +1039,18 @@ pub fn bind_actions<E: gpui_kit::InteractiveElement>(el: E) -> E {
             if let Selection::Object(o) = Workspace::global(cx).read(cx).selection().clone() {
                 with_navigator(cx, |this, cx| this.start_rename_object(o, window, cx));
             }
+        })
+        .on_action(|a: &RenameColumn, window, cx| {
+            let object = a.object.clone();
+            let column = a.column.to_string();
+            with_navigator(cx, move |this, cx| {
+                this.start_rename_target(
+                    RenameTarget::Field(object, column.clone()),
+                    column,
+                    window,
+                    cx,
+                );
+            });
         })
         .on_action(|_: &NewVirtualGroup, window, cx| {
             with_navigator(cx, |this, cx| this.new_virtual_group(window, cx))

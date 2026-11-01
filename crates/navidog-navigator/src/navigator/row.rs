@@ -134,6 +134,9 @@ impl NavigatorPanel {
             (Some(Node::Group(g)), Some(r)) => r.target == RenameTarget::Group(g.clone()),
             (Some(Node::VGroup(_, _, g)), Some(r)) => r.target == RenameTarget::VGroup(g.clone()),
             (Some(Node::Object(o)), Some(r)) => r.target == RenameTarget::Object(o.clone()),
+            (Some(Node::TableItem(table, Child::Fields, name)), Some(r)) => {
+                r.target == RenameTarget::Field(table.clone(), name.clone())
+            }
             _ => false,
         };
         let label = match &self.renaming {

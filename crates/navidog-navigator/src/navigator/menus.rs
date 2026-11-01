@@ -159,21 +159,72 @@ impl NavigatorPanel {
                 refresh(menu)
             }
             // Items of later milestones (designers M4, queries M3, SQL files M6) are disabled
-            Some(Node::Database(..)) => refresh(
-                NativeMenu::new()
+            Some(Node::Database(conn, db)) => {
+                let dialect = Sessions::global(cx).read(cx).dialect(conn);
+                let features = dialect.as_ref().map(|d| d.features());
+                let mysql = features.is_some_and(|f| f.inline_table_options);
+                let postgres = features.is_some_and(|f| f.has_schemas);
+                let sqlite = features.is_some_and(|f| f.rebuilds_tables);
+                let scope = Scope::new(conn.clone(), db.clone(), None);
+                let mut menu = NativeMenu::new()
                     .menu(t!("nav.open_database").to_string(), Box::new(OpenDatabase))
                     .menu(
                         t!("nav.close_database").to_string(),
                         Box::new(CloseDatabase),
                     )
                     .separator()
-                    .menu_with_disabled(t!("nav.new_database").to_string(), true, Box::new(Refresh))
                     .menu_with_disabled(
-                        t!("nav.edit_database").to_string(),
-                        true,
-                        Box::new(Refresh),
+                        t!("nav.new_database").to_string(),
+                        !(mysql || postgres),
+                        Box::new(OpenDefinition {
+                            scope: scope.clone(),
+                            kind: "database".into(),
+                            name: None,
+                        }),
                     )
                     .menu_with_disabled(
+                        t!("nav.edit_database").to_string(),
+                        !(mysql || postgres),
+                        Box::new(OpenDefinition {
+                            scope: scope.clone(),
+                            kind: "database".into(),
+                            name: Some(db.clone().into()),
+                        }),
+                    )
+                    .menu_with_disabled(
+                        t!("nav.attach_database").to_string(),
+                        !sqlite,
+                        Box::new(OpenDefinition {
+                            scope: scope.clone(),
+                            kind: "attach".into(),
+                            name: None,
+                        }),
+                    )
+                    .menu_with_disabled(
+                        t!("nav.detach_database").to_string(),
+                        !sqlite || db.eq_ignore_ascii_case("main"),
+                        Box::new(OpenDefinition {
+                            scope: scope.clone(),
+                            kind: "detach".into(),
+                            name: Some(db.clone().into()),
+                        }),
+                    );
+                if let Some(sql) = dialect.as_ref().and_then(|d| d.master_table_sql(db)) {
+                    menu = menu.menu(
+                        t!("nav.view_master").to_string(),
+                        Box::new(NewQueryText {
+                            connection: conn.clone().into(),
+                            database: db.clone().into(),
+                            schema: None,
+                            sql: sql.into(),
+                        }),
+                    );
+                }
+                if let Some(d) = dialect.as_ref() {
+                    menu = with_maintain(menu, d.as_ref(), &scope, None);
+                }
+                refresh(
+                    menu.menu_with_disabled(
                         t!("nav.delete_database").to_string(),
                         true,
                         Box::new(Refresh),
@@ -186,19 +237,44 @@ impl NavigatorPanel {
                         true,
                         Box::new(Refresh),
                     ),
-            ),
-            Some(Node::Schema(_)) => {
-                refresh(NativeMenu::new().menu(t!("nav.new_query").to_string(), Box::new(NewQuery)))
+                )
             }
-            Some(Node::Category(_, k)) => refresh(
+            Some(Node::Schema(scope)) => refresh(
+                NativeMenu::new()
+                    .menu(
+                        t!("nav.new_schema").to_string(),
+                        Box::new(OpenDefinition {
+                            scope: scope.clone(),
+                            kind: "schema".into(),
+                            name: None,
+                        }),
+                    )
+                    .menu(
+                        t!("nav.edit_schema").to_string(),
+                        Box::new(OpenDefinition {
+                            scope: scope.clone(),
+                            kind: "schema".into(),
+                            name: scope.schema.clone().map(Into::into),
+                        }),
+                    )
+                    .menu(t!("nav.new_query").to_string(), Box::new(NewQuery)),
+            ),
+            Some(Node::Category(scope, k)) => refresh(
                 NativeMenu::new()
                     .menu_with_disabled(
                         t!("obj.new_object", kind = kind_label(*k)).to_string(),
-                        !matches!(*k, ObjectKind::Query | ObjectKind::Table),
+                        !matches!(*k, ObjectKind::Query | ObjectKind::Table)
+                            && navidog_sql::definition::DefinitionKind::from_object(*k).is_none(),
                         if *k == ObjectKind::Query {
                             Box::new(NewQuery)
-                        } else {
+                        } else if *k == ObjectKind::Table {
                             Box::new(NewTable)
+                        } else {
+                            Box::new(OpenDefinition {
+                                scope: scope.clone(),
+                                kind: k.key().into(),
+                                name: None,
+                            })
                         },
                     )
                     .separator()
@@ -224,6 +300,23 @@ impl NavigatorPanel {
                     ),
             ),
             Some(Node::Object(o)) => refresh(Self::object_menu(o, cx)),
+            Some(Node::TableItem(table, Child::Fields, name)) => refresh(
+                NativeMenu::new()
+                    .menu(
+                        t!("obj.design").to_string(),
+                        Box::new(DesignField {
+                            object: table.clone(),
+                            column: name.clone().into(),
+                        }),
+                    )
+                    .menu(
+                        t!("obj.rename").to_string(),
+                        Box::new(RenameColumn {
+                            object: table.clone(),
+                            column: name.clone().into(),
+                        }),
+                    ),
+            ),
             Some(_) => NativeMenu::new().menu(t!("nav.refresh").to_string(), Box::new(Refresh)),
         }
     }
@@ -280,24 +373,57 @@ impl NavigatorPanel {
                 t!("obj.open_kind", kind = kind).to_string(),
                 Box::new(OpenObject { object: o.clone() }),
             )
-            .menu_with_disabled(
+            .menu(
                 t!("obj.design_kind", kind = kind).to_string(),
-                o.kind != ObjectKind::Table,
-                Box::new(DesignTable {
-                    object: Some(o.clone()),
-                }),
+                if o.kind == ObjectKind::Table {
+                    Box::new(DesignTable {
+                        object: Some(o.clone()),
+                    })
+                } else {
+                    Box::new(OpenObject { object: o.clone() })
+                },
             )
-            .menu_with_disabled(
+            .menu(
                 t!("obj.new_object", kind = kind).to_string(),
-                o.kind != ObjectKind::Table,
-                Box::new(NewTable),
+                if o.kind == ObjectKind::Table {
+                    Box::new(NewTable)
+                } else {
+                    Box::new(OpenDefinition {
+                        scope: o.scope.clone(),
+                        kind: o.kind.key().into(),
+                        name: None,
+                    })
+                },
             )
             .menu_with_disabled(
                 t!("obj.delete_kind", kind = kind).to_string(),
                 !droppable,
                 Box::new(DeleteObjects),
             );
+        if d.as_ref()
+            .and_then(|d| d.refresh_materialized_view(&o.scope, &o.name, true))
+            .is_some()
+        {
+            menu = menu
+                .menu(
+                    t!("obj.refresh_mview").to_string(),
+                    Box::new(RefreshMaterializedView {
+                        object: o.clone(),
+                        with_data: true,
+                    }),
+                )
+                .menu(
+                    t!("obj.refresh_mview_empty").to_string(),
+                    Box::new(RefreshMaterializedView {
+                        object: o.clone(),
+                        with_data: false,
+                    }),
+                );
+        }
         if o.kind == ObjectKind::Table {
+            if let Some(d) = d {
+                menu = with_maintain(menu, d.as_ref(), &o.scope, Some(&o.name));
+            }
             menu = menu.menu(t!("obj.empty_table").to_string(), Box::new(EmptyTables));
             if d.as_ref().is_none_or(|d| !d.features().exposes_rowid) {
                 menu = menu.menu(
@@ -353,5 +479,42 @@ impl NavigatorPanel {
             ),
         )
         .menu(t!("obj.copy_name").to_string(), Box::new(CopyObjectNames))
+    }
+}
+
+fn with_maintain(
+    menu: NativeMenu,
+    dialect: &dyn Dialect,
+    scope: &Scope,
+    target: Option<&str>,
+) -> NativeMenu {
+    let jobs =
+        navidog_sql::security::maintenance(dialect, dialect.definition_family(), scope, target);
+    if jobs.is_empty() {
+        return menu;
+    }
+    let sub = jobs.into_iter().fold(NativeMenu::new(), |menu, job| {
+        menu.menu(
+            maintain_label(job.key),
+            Box::new(RunMaintenance {
+                connection: scope.connection.clone().into(),
+                database: scope.database.clone().into(),
+                sql: job.sql.into(),
+            }),
+        )
+    });
+    menu.submenu(t!("nav.maintain").to_string(), sub)
+}
+
+fn maintain_label(key: &str) -> String {
+    match key {
+        "analyze" => t!("nav.maintain_analyze").to_string(),
+        "check" => t!("nav.maintain_check").to_string(),
+        "optimize" => t!("nav.maintain_optimize").to_string(),
+        "repair" => t!("nav.maintain_repair").to_string(),
+        "vacuum" => t!("nav.maintain_vacuum").to_string(),
+        "reindex" => t!("nav.maintain_reindex").to_string(),
+        "integrity" => t!("nav.maintain_integrity").to_string(),
+        _ => key.to_string(),
     }
 }

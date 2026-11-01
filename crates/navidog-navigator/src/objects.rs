@@ -17,8 +17,8 @@ use gpui_kit::{
     Styled as _, Subscription, UniformListScrollHandle, WeakEntity, Window, div, img, uniform_list,
 };
 use navidog_app_state::actions::{
-    DeleteObjects, DesignTable, EmptyTables, NewQuery, NewTable, OpenConnection, OpenObject,
-    RunQuery, TruncateTables,
+    DeleteObjects, DesignTable, EmptyTables, NewQuery, NewTable, OpenConnection, OpenDefinition,
+    OpenObject, RunQuery, TruncateTables,
 };
 use navidog_app_state::settings::Settings;
 use navidog_app_state::store::ConnectionStore;
@@ -565,7 +565,7 @@ impl ObjectsPanel {
             )
             .child(
                 button("obj-design", "pencil", t!("obj.design").to_string())
-                    .disabled((!is_query && !is_table) || selected.is_none())
+                    .disabled(selected.is_none())
                     .on_click(cx.listener(|_, _, window, cx| {
                         if let Some(object) = Self::selected_object(cx) {
                             if object.kind == ObjectKind::Table {
@@ -583,12 +583,32 @@ impl ObjectsPanel {
             )
             .child(
                 button("obj-new", "plus", t!("obj.new").to_string())
-                    .disabled(!is_query && !is_table)
-                    .on_click(move |_, window, cx| {
-                        if is_table {
-                            window.dispatch_action(Box::new(NewTable), cx);
-                        } else {
-                            window.dispatch_action(Box::new(NewQuery), cx);
+                    .disabled(
+                        listed.is_none()
+                            || !(is_query
+                                || is_table
+                                || kind.is_some_and(|k| {
+                                    navidog_sql::definition::DefinitionKind::from_object(k)
+                                        .is_some()
+                                })),
+                    )
+                    .on_click({
+                        let listed = listed.cloned();
+                        move |_, window, cx| {
+                            if is_table {
+                                window.dispatch_action(Box::new(NewTable), cx);
+                            } else if is_query {
+                                window.dispatch_action(Box::new(NewQuery), cx);
+                            } else if let Some((scope, kind)) = listed.clone() {
+                                window.dispatch_action(
+                                    Box::new(OpenDefinition {
+                                        scope,
+                                        kind: kind.key().into(),
+                                        name: None,
+                                    }),
+                                    cx,
+                                );
+                            }
                         }
                     }),
             )

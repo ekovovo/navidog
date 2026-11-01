@@ -9,9 +9,7 @@ use gpui_kit::component::input::{
     Editor, EditorState, Enter, IndentInline, Input, InputEvent, InputState, MoveDown, MoveUp,
 };
 use gpui_kit::component::table::{DataTable, TableEvent, TableState};
-use gpui_kit::component::{
-    Disableable as _, Selectable as _, Sizable as _, WindowExt as _, h_flex, v_flex,
-};
+use gpui_kit::component::{Disableable as _, Sizable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::{
     App, Context, Entity, EventEmitter, FocusHandle, Focusable, KeyBinding, SharedString,
     Subscription, Task, WeakEntity, Window, div, prelude::*,
@@ -97,14 +95,14 @@ pub(crate) fn init(cx: &mut App) {
 }
 
 /// Shown when a saved table-design tab outlives its connection.
-struct MissingConnection {
+pub(crate) struct MissingConnection {
     focus: FocusHandle,
     state: PanelState,
     close_approved: bool,
 }
 
 impl MissingConnection {
-    fn open(state: PanelState, cx: &mut App) -> Entity<Self> {
+    pub(crate) fn open(state: PanelState, cx: &mut App) -> Entity<Self> {
         cx.new(|cx| Self {
             focus: cx.focus_handle().tab_stop(true),
             state,
@@ -135,6 +133,8 @@ impl MissingConnection {
         let weak = cx.entity().downgrade();
         confirm_discard(
             PanelId::from(cx.entity_id()),
+            t!("designer.close_title").to_string(),
+            t!("designer.close_body").to_string(),
             window,
             cx,
             move |window, cx| {
@@ -234,7 +234,7 @@ impl Render for MissingConnection {
     }
 }
 
-fn connection_dialect(cx: &App, connection: &str) -> Option<Arc<dyn Dialect>> {
+pub(crate) fn connection_dialect(cx: &App, connection: &str) -> Option<Arc<dyn Dialect>> {
     Sessions::global(cx)
         .read(cx)
         .dialect(connection)
@@ -262,6 +262,9 @@ enum Page {
     Fields,
     ForeignKeys,
     Checks,
+    Exclusions,
+    Triggers,
+    Partitions,
     Advanced,
     Indexes,
     Options,
@@ -292,6 +295,10 @@ pub struct TableDesigner {
     indexes: Entity<EditorState>,
     options: Entity<EditorState>,
     sql: Entity<EditorState>,
+    more_name: Entity<InputState>,
+    more_detail: Entity<InputState>,
+    more_extra: Entity<InputState>,
+    more_body: Entity<EditorState>,
     selected: Option<u64>,
     next_id: u64,
     page: Page,
@@ -306,6 +313,8 @@ pub struct TableDesigner {
     error: Option<String>,
     preview: Option<Vec<String>>,
     close_approved: bool,
+    /// Column to select once the table snapshot arrives.
+    focus_column: Option<String>,
     task: Option<Task<()>>,
     references: references::ReferenceChoices,
     reference_task: Option<Task<()>>,
@@ -416,6 +425,10 @@ impl TableDesigner {
             window,
             cx,
         )
+    }
+    /// Selects this column after the table snapshot loads.
+    pub fn select_column(&mut self, name: impl Into<String>) {
+        self.focus_column = Some(name.into());
     }
     pub fn open(object: ObjectRef, window: &mut Window, cx: &mut App) -> Entity<Self> {
         let entity = Self::new(object.scope.clone(), window, cx);
@@ -689,6 +702,10 @@ impl TableDesigner {
                 indexes,
                 options,
                 sql,
+                more_name: input(String::new(), window, cx),
+                more_detail: input(String::new(), window, cx),
+                more_extra: input(String::new(), window, cx),
+                more_body: editor(String::new(), window, cx),
                 page: Page::Fields,
                 dialect,
                 busy: false,
@@ -699,6 +716,7 @@ impl TableDesigner {
                 error: migration_error,
                 preview: None,
                 close_approved: false,
+                focus_column: None,
                 task: None,
                 references: Default::default(),
                 reference_task: None,
@@ -1130,7 +1148,13 @@ impl TableDesigner {
         self.loaded = true;
         self.needs_reload = false;
         self.preview = None;
-        self.selected = self.draft.columns.first().map(|c| c.id);
+        self.selected = self
+            .focus_column
+            .as_deref()
+            .and_then(|name| self.draft.columns.iter().find(|c| c.name == name))
+            .or_else(|| self.draft.columns.first())
+            .map(|c| c.id);
+        self.focus_column = None;
         self.next_id = self.draft.columns.iter().map(|c| c.id).max().unwrap_or(0) + 1;
         self.sync_all(window, cx);
         // The preview editor stays mounted on this page, so discarding the
@@ -1173,6 +1197,8 @@ impl TableDesigner {
         let weak = cx.entity().downgrade();
         confirm_discard(
             PanelId::from(cx.entity_id()),
+            t!("designer.close_title").to_string(),
+            t!("designer.close_body").to_string(),
             window,
             cx,
             move |window, cx| {
@@ -1193,8 +1219,10 @@ impl TableDesigner {
     }
 }
 
-fn confirm_discard(
+pub(crate) fn confirm_discard(
     panel: PanelId,
+    title: String,
+    body: String,
     window: &mut Window,
     cx: &mut App,
     on_discard: impl Fn(&mut Window, &mut App) + 'static,
@@ -1204,12 +1232,12 @@ fn confirm_discard(
     window.open_dialog(cx, move |dialog, _, _| {
         let on_discard = on_discard.clone();
         dialog
-            .title(t!("designer.close_title").to_string())
+            .title(title.clone())
             .on_cancel(move |_, _, cx| {
                 tabs::abort_pending_dirty_closes(panel, cx);
                 true
             })
-            .child(t!("designer.close_body").to_string())
+            .child(body.clone())
             .footer(
                 h_flex()
                     .justify_end()
@@ -1235,6 +1263,7 @@ fn confirm_discard(
 }
 mod complete;
 mod grid;
+mod more;
 mod options;
 mod references;
 mod structured;

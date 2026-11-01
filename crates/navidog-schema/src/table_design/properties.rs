@@ -161,6 +161,11 @@ fn generated(s: &str, d: &dyn Dialect) -> Option<(usize, usize, String, String)>
     };
     Some((start, end, expr, storage))
 }
+
+pub(super) fn is_generated(s: &str, d: &dyn Dialect) -> bool {
+    generated(s, d).is_some()
+}
+
 pub(super) fn identity(s: &str, d: &dyn Dialect) -> Option<(usize, usize, String, String)> {
     for (key, mode) in [
         ("GENERATED ALWAYS AS IDENTITY", "ALWAYS"),

@@ -37,7 +37,55 @@ impl Dialect for PostgresDialect {
             ObjectKind::MaterializedView,
             ObjectKind::Function,
             ObjectKind::Sequence,
+            ObjectKind::Tablespace,
+            ObjectKind::Type,
+            ObjectKind::Domain,
+            ObjectKind::Extension,
+            ObjectKind::ForeignServer,
+            ObjectKind::Aggregate,
+            ObjectKind::Cast,
+            ObjectKind::Operator,
+            ObjectKind::Collation,
         ]
+    }
+    fn definition_family(&self) -> Option<navidog_sql::definition::DefinitionFamily> {
+        Some(navidog_sql::definition::DefinitionFamily::Postgres)
+    }
+    fn trigger_definitions_sql(&self, scope: &Scope, table: &str) -> Option<String> {
+        let schema = self.string_literal(scope.schema.as_deref().unwrap_or("public"));
+        let table = self.string_literal(table);
+        Some(format!(
+            "SELECT pg_get_triggerdef(t.oid, true) \
+             FROM pg_trigger t \
+             JOIN pg_class c ON c.oid = t.tgrelid \
+             JOIN pg_namespace n ON n.oid = c.relnamespace \
+             WHERE n.nspname = {schema} AND c.relname = {table} AND NOT t.tgisinternal \
+             ORDER BY t.tgname"
+        ))
+    }
+    fn definition_statements(
+        &self,
+        scope: &Scope,
+        draft: &navidog_sql::definition::DefinitionDraft,
+    ) -> Result<Vec<String>, String> {
+        navidog_sql::definition::plan(
+            self,
+            navidog_sql::definition::DefinitionFamily::Postgres,
+            scope,
+            draft,
+        )
+    }
+    fn refresh_materialized_view(
+        &self,
+        scope: &navidog_model::object::Scope,
+        name: &str,
+        with_data: bool,
+    ) -> Option<String> {
+        let tail = if with_data { "" } else { " WITH NO DATA" };
+        Some(format!(
+            "REFRESH MATERIALIZED VIEW {}{tail}",
+            self.qualified(scope, name)
+        ))
     }
     fn begin_transaction(&self) -> &'static str {
         "BEGIN"
@@ -83,6 +131,8 @@ impl Dialect for PostgresDialect {
             text_rejects_nul: true,
             case_insensitive_like: true,
             supports_virtual_generated: false,
+            supports_exclude: true,
+            supports_partitions: true,
             ..DialectFeatures::default()
         }
     }
@@ -254,3 +304,13 @@ const COLUMN_TYPES: &[ColumnType] = &[
         args: TypeArgs::None,
     },
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn postgres_has_no_master_table() {
+        assert!(PostgresDialect.master_table_sql("pagila").is_none());
+    }
+}

@@ -173,6 +173,16 @@ impl NavigatorPanel {
                 }
             }
             RenameTarget::Object(_) => {}
+            RenameTarget::Field(table, old) if old != name => {
+                let sql = Sessions::global(cx)
+                    .read(cx)
+                    .dialect(&table.scope.connection)
+                    .map(|d| d.rename_column(&table.scope, &table.name, &old, &name));
+                if let Some(sql) = sql {
+                    crate::ops::run(vec![(table, sql)], None, window, cx);
+                }
+            }
+            RenameTarget::Field(_, _) => {}
         }
     }
 }

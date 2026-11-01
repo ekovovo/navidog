@@ -11,7 +11,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable,
     Global, InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString,
-    Styled as _, Subscription, WeakEntity, Window, div,
+    StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, div,
 };
 use navidog_app_state::store::ConnectionStore;
 use navidog_app_state::workspace::{Selection, Workspace};
@@ -48,6 +48,11 @@ pub(crate) enum Page {
     /// While a query editor is active (F-INFO-005, F-INFO-006)
     Snippets,
     Identifiers,
+    /// Objects this one uses, and objects that use it.
+    Used,
+    /// Members, member-of, and privileges. Hidden until a user or role is a navigator object (43 §4).
+    #[allow(dead_code)]
+    Members,
 }
 
 pub struct InfoPanel {
@@ -65,6 +70,9 @@ pub struct InfoPanel {
     ddl: Entity<EditorState>,
     /// Object currently shown in the DDL editor
     shown_ddl: Option<ObjectRef>,
+    relation: String,
+    /// Object and page (membership or not) already loaded into `relation`.
+    relation_key: Option<(ObjectRef, bool)>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -116,6 +124,16 @@ fn selected_object(cx: &App) -> Option<ObjectRef> {
     }
 }
 
+fn section_label(section: navidog_sql::security::Section) -> String {
+    match section {
+        navidog_sql::security::Section::Uses => t!("info.uses").to_string(),
+        navidog_sql::security::Section::UsedBy => t!("info.used_by").to_string(),
+        navidog_sql::security::Section::Members => t!("info.members").to_string(),
+        navidog_sql::security::Section::MemberOf => t!("info.member_of").to_string(),
+        navidog_sql::security::Section::Privileges => t!("info.privileges").to_string(),
+    }
+}
+
 pub(crate) fn sql_editor(window: &mut Window, cx: &mut App) -> Entity<EditorState> {
     let editor = cx.new(|cx| {
         EditorState::new(window, cx)
@@ -159,6 +177,7 @@ impl InfoPanel {
                     this.sync_ddl(window, cx);
                     this.sync_preview(window, cx);
                     this.follow_query_editor(cx);
+                    this.sync_relation(cx);
                 }),
             ];
             Self {
@@ -174,6 +193,8 @@ impl InfoPanel {
                 on_toggle_maximize: None,
                 ddl,
                 shown_ddl: None,
+                relation: String::new(),
+                relation_key: None,
                 _subscriptions: subs,
             }
         });
@@ -206,6 +227,132 @@ impl InfoPanel {
             _ => return,
         };
         Catalog::global(cx).update(cx, |c, cx| c.require(requirement, cx));
+    }
+
+    /// Loads uses/used-by or members for the selected object. SQLite membership shows the
+    /// missing-extension reason and does not run SQL.
+    fn sync_relation(&mut self, cx: &mut Context<Self>) {
+        let membership = match self.page {
+            Page::Used => false,
+            Page::Members => true,
+            _ => return,
+        };
+        let Some(object) = selected_object(cx) else {
+            self.relation.clear();
+            self.relation_key = None;
+            return;
+        };
+        let key = (object.clone(), membership);
+        if self.relation_key.as_ref() == Some(&key) {
+            return;
+        }
+        self.relation_key = Some(key);
+        let Some(dialect) = Sessions::global(cx)
+            .read(cx)
+            .dialect(&object.scope.connection)
+        else {
+            self.relation.clear();
+            return;
+        };
+        let plan = navidog_sql::security::relation_plan(
+            dialect.as_ref(),
+            dialect.definition_family(),
+            &object,
+            membership,
+        );
+        if let Some(note) = plan.note {
+            self.relation = note.to_string();
+            return;
+        }
+        if plan.queries.is_empty() {
+            self.relation.clear();
+            return;
+        }
+        let labeled: Vec<(String, String)> = plan
+            .queries
+            .into_iter()
+            .map(|query| (section_label(query.section), query.sql))
+            .collect();
+        self.relation = "…".into();
+        let database = if object.scope.database.is_empty() {
+            None
+        } else {
+            Some(object.scope.database.clone())
+        };
+        let Some(job) = Sessions::global(cx)
+            .read(cx)
+            .new_session(&object.scope.connection, database.as_deref())
+        else {
+            self.relation = t!("info.nothing_selected").to_string();
+            return;
+        };
+        let expected = self.relation_key.clone();
+        cx.spawn(async move |this, cx| {
+            let result: navidog_db::DbResult<String> = async {
+                let mut session = job
+                    .await
+                    .map_err(|e| navidog_db::DbError::msg(e.to_string()))??;
+                let job = navidog_db::runtime::spawn(async move {
+                    let result = async {
+                        let r = session.relational().ok_or_else(|| {
+                            navidog_db::DbError::msg(
+                                "This connection is not a relational database.",
+                            )
+                        })?;
+                        if let Some(database) = database.as_deref()
+                            && let Some(sql) = r.dialect().prepare_database_sql(database)
+                        {
+                            r.execute(&sql).await?;
+                        }
+                        let mut out = String::new();
+                        for (label, sql) in &labeled {
+                            out.push_str(label);
+                            out.push('\n');
+                            match r.execute_read(sql).await {
+                                Ok(sets) => {
+                                    for set in sets {
+                                        if set.rows.is_empty() {
+                                            out.push_str("(0)\n");
+                                        }
+                                        for row in set.rows {
+                                            for (i, cell) in row.iter().enumerate() {
+                                                if i > 0 {
+                                                    out.push('\t');
+                                                }
+                                                out.push_str(cell.as_deref().unwrap_or("NULL"));
+                                            }
+                                            out.push('\n');
+                                        }
+                                    }
+                                }
+                                Err(error) => {
+                                    out.push_str(&error.to_string());
+                                    out.push('\n');
+                                }
+                            }
+                        }
+                        Ok(out)
+                    }
+                    .await;
+                    let _ = session.close().await;
+                    result
+                });
+                job.await
+                    .map_err(|e| navidog_db::DbError::msg(e.to_string()))?
+            }
+            .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.relation_key != expected {
+                    return;
+                }
+                this.relation = match result {
+                    Ok(text) => text,
+                    Err(error) => error.to_string(),
+                };
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     /// The snippets and identifiers pages come with an active query editor and go with it,
@@ -545,6 +692,7 @@ impl InfoPanel {
                 if page == Page::Identifiers {
                     this.ensure_identifiers(cx);
                 }
+                this.sync_relation(cx);
                 cx.notify();
             }))
     }
@@ -562,6 +710,9 @@ impl Render for InfoPanel {
             Page::Fields => has_object,
             Page::Preview => is_query_object,
             Page::Snippets | Page::Identifiers => in_query,
+            Page::Used => has_object && !is_query_object,
+            // Users and roles are not navigator objects yet (43 §4).
+            Page::Members => false,
         };
         if !page_ok {
             self.page = Page::General;
@@ -598,6 +749,19 @@ impl Render for InfoPanel {
                 .into_any_element(),
             Page::Snippets => self.render_snippets(cx),
             Page::Identifiers => self.render_identifiers(cx),
+            Page::Used | Page::Members => v_flex()
+                .id("info-relation")
+                .flex_1()
+                .min_h_0()
+                .p(tokens::info::INSET.rems())
+                .gap_1()
+                .overflow_y_scroll()
+                .children(
+                    self.relation
+                        .lines()
+                        .map(|line| div().child(line.to_string())),
+                )
+                .into_any_element(),
         };
         let is_table = selected_object(cx).is_some_and(|o| o.kind == ObjectKind::Table);
         v_flex()
@@ -674,6 +838,15 @@ impl Render for InfoPanel {
                                     cx,
                                 ))
                             })
+                            .when(has_object && !is_query_object, |r| {
+                                r.child(self.page_button(
+                                    "info-used",
+                                    "list",
+                                    Page::Used,
+                                    t!("info.used").to_string(),
+                                    cx,
+                                ))
+                            })
                             .child(div().min_w_0().overflow_hidden().child(heading(
                                 match self.page {
                                     Page::General => t!("info.general").to_string(),
@@ -682,6 +855,8 @@ impl Render for InfoPanel {
                                     Page::Preview => t!("info.preview").to_string(),
                                     Page::Snippets => t!("info.snippets").to_string(),
                                     Page::Identifiers => t!("info.identifiers").to_string(),
+                                    Page::Used => t!("info.used").to_string(),
+                                    Page::Members => t!("info.members").to_string(),
                                 },
                             ))),
                     )

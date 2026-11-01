@@ -9,7 +9,7 @@ use gpui_kit::component::WindowExt as _;
 use gpui_kit::{App, InteractiveElement, Window};
 use navidog_app_state::actions::{
     DeleteObjects, DuplicateQuery, DuplicateTable, EmptyTables, OpenQueryExternally, QueryRenamed,
-    ReopenConnectionId, RevealQuery, TruncateTables,
+    RefreshMaterializedView, ReopenConnectionId, RevealQuery, RunMaintenance, TruncateTables,
 };
 use navidog_app_state::workspace::{Selection, Workspace};
 use navidog_db::DbError;
@@ -43,6 +43,18 @@ pub(crate) fn bind<E: InteractiveElement>(el: E) -> E {
         .on_action(|_: &EmptyTables, window, cx| empty(false, window, cx))
         .on_action(|_: &TruncateTables, window, cx| empty(true, window, cx))
         .on_action(|a: &DuplicateTable, window, cx| duplicate(a.with_data, window, cx))
+        .on_action(|a: &RunMaintenance, window, cx| run_maintenance(a, window, cx))
+        .on_action(|a: &RefreshMaterializedView, window, cx| {
+            let sql = Sessions::global(cx)
+                .read(cx)
+                .dialect(&a.object.scope.connection)
+                .and_then(|d| {
+                    d.refresh_materialized_view(&a.object.scope, &a.object.name, a.with_data)
+                });
+            if let Some(sql) = sql {
+                run(vec![(a.object.clone(), sql)], None, window, cx);
+            }
+        })
         .on_action(|_: &DuplicateQuery, window, cx| duplicate_query(window, cx))
         .on_action(|_: &OpenQueryExternally, _, cx| {
             for o in selected_queries(cx) {
@@ -138,11 +150,12 @@ fn delete(window: &mut Window, cx: &mut App) {
         .into_iter()
         .filter_map(|o| {
             let d = dialect(&o, cx)?;
-            let sql = format!(
-                "DROP {} {}",
-                d.drop_keyword(o.kind)?,
+            let target = if o.kind == ObjectKind::Tablespace {
+                d.quote_ident(&o.name)
+            } else {
                 d.qualified(&o.scope, &o.name)
-            );
+            };
+            let sql = format!("DROP {} {target}", d.drop_keyword(o.kind)?);
             Some((o, sql))
         })
         .collect();
@@ -296,6 +309,84 @@ fn refresh<'a>(objects: impl Iterator<Item = &'a ObjectRef>, cx: &mut App) {
         })
         .collect();
     Catalog::global(cx).update(cx, |c, cx| c.reload_all(requirements, cx));
+}
+
+fn run_maintenance(action: &RunMaintenance, window: &mut Window, cx: &mut App) {
+    let connection = action.connection.to_string();
+    let database = action.database.to_string();
+    let opened = database.clone();
+    let sql = action.sql.to_string();
+    let generation = Sessions::global(cx).read(cx).generation(&connection);
+    let dialect = Sessions::global(cx).read(cx).dialect(&connection);
+    let Some(job) =
+        Sessions::global(cx)
+            .read(cx)
+            .run_operation_rel(&connection, Some(&opened), move |r| {
+                Box::pin(async move {
+                    if let Some(dialect) = dialect
+                        && let Some(prep) = dialect.prepare_database_sql(&database)
+                    {
+                        r.execute(&prep).await?;
+                    }
+                    r.execute(&sql).await
+                })
+            })
+    else {
+        show_error(t!("nav.maintain_offline").to_string(), window, cx);
+        return;
+    };
+    window
+        .spawn(cx, async move |cx| {
+            let result = match job.await {
+                Ok(result) => result,
+                Err(error) => Err(DbError::msg(error.to_string())),
+            };
+            let _ = cx.update(|window, cx| {
+                if Sessions::global(cx).read(cx).generation(&connection) != generation {
+                    return;
+                }
+                match result {
+                    Ok(sets) => show_maintenance(format_maintenance(sets), window, cx),
+                    Err(error) => show_database_error(error, connection, window, cx),
+                }
+            });
+        })
+        .detach();
+}
+
+fn format_maintenance(sets: Vec<navidog_db::ResultSet>) -> String {
+    let mut out = String::new();
+    for set in sets {
+        if set.rows.is_empty() {
+            if let Some(rows) = set.affected_rows {
+                out.push_str(&format!("({rows})\n"));
+            }
+            continue;
+        }
+        for row in set.rows {
+            for (i, cell) in row.iter().enumerate() {
+                if i > 0 {
+                    out.push('\t');
+                }
+                out.push_str(cell.as_deref().unwrap_or("NULL"));
+            }
+            out.push('\n');
+        }
+    }
+    if out.trim().is_empty() {
+        t!("nav.maintain_done").to_string()
+    } else {
+        out
+    }
+}
+
+fn show_maintenance(text: String, window: &mut Window, cx: &mut App) {
+    window.open_alert_dialog(cx, move |alert, _, _| {
+        alert
+            .icon(lucide("check"))
+            .title(t!("nav.maintain").to_string())
+            .description(text.clone())
+    });
 }
 
 fn show_error(message: String, window: &mut Window, cx: &mut App) {
