@@ -23,13 +23,13 @@ pub enum Source {
     Plugin(PluginId),
 }
 
-pub struct Registry<K, V> { /* 按 K 索引，保持注册顺序 */ }
+pub struct Registry<V> { /* 按 CommandId 索引，保持注册顺序 */ }
 
-impl<K: Eq + Hash + Clone, V> Registry<K, V> {
-    pub fn register(&mut self, key: K, source: Source, value: V) -> Result<(), RegistryError>;
+impl<V> Registry<V> {
+    pub fn register(&mut self, key: CommandId, source: Source, value: V) -> Result<(), RegistryError>;
     pub fn unregister_source(&mut self, source: &Source);
-    pub fn get(&self, key: &K) -> Option<&V>;
-    pub fn iter(&self) -> impl Iterator<Item = (&K, &Source, &V)>;
+    pub fn get(&self, key: &str) -> Option<&V>;
+    pub fn iter(&self) -> impl Iterator<Item = (&CommandId, &Source, &V)>;
 }
 ```
 
@@ -42,6 +42,39 @@ impl<K: Eq + Hash + Clone, V> Registry<K, V> {
 | `PanelRegistry` | `PanelId` | 面板元数据（标题、默认停靠位置、尺寸）和构造函数 | 导航窗格、信息窗格 |
 
 注册表是 `navidog-app-state` 中的 GPUI `Global`；修改时调用 `cx.refresh_windows()`，菜单栏通过 `cx.set_menus` 重建。
+
+### 2.1 命令目录的落地顺序
+
+M1 建立了 `CommandRegistry`，但现有代码是先有菜单、快捷键和 `on_action`，命令注册表只覆盖少数工具栏项。为了不一次性改动 100 多个菜单表达式，按下面的阶段改造：
+
+| 阶段 | 状态 | 内容 |
+| --- | --- | --- |
+| 0 边界 | 完成 | 借鉴 Herdr 的单一命令表（菜单、快捷键、命令面板和文档共享）与可搜索入口；保留 typed GPUI Action，不引入字符串 dispatcher、QuickJS 受信 mod、可变 JSON 布局或独立 core daemon |
+| 1 影子目录 | 完成 | 静态内置菜单命令写入 `CommandRegistry`，补齐标题、分组、默认快捷键、搜索词、目标和执行条件。菜单仍由 `set_menus` 生成，快捷键仍由 `bind_keys` 绑定，执行仍走现有 typed GPUI `Action` |
+| 2 命令面板 | 未开始 | 新面板只读取 `CommandRegistry`，按标题、ID、关键词和目标过滤；选中后 dispatch 现有 Action。菜单和快捷键不动 |
+| 3 Quick Open | 未开始 | 对象 URI 与命令共享一个输入框时，用 `CommandTarget` 决定是否需要先选择连接、数据库或对象；补上命令参数 schema 和校验，由 Quick Open 解析后构造带参数的 typed Action，不进入普通命令列表 |
+| 4 快捷键目录 | 未开始 | 用一个可检查的快捷键投影替换手写 `bind_keys`，保留上下文谓词和同一 Action 的多个绑定；菜单只显示实际生效的绑定 |
+| 5 菜单投影 | 未开始 | 静态菜单项从目录投影；动态收藏夹、最近对象、checked 项和数据库类型子菜单继续手写，直到它们有明确的数据提供者 |
+
+阶段 1 的元数据模型：
+
+```rust
+pub struct CommandInfo {
+    pub group: CommandGroup,
+    pub title: CommandTitle,       // i18n 键加注册 crate 的 translator，语言切换后重新解析
+    pub icon: Option<SharedString>,
+    pub shortcut: Option<SharedString>,
+    pub keywords: &'static [&'static str],
+    pub target: CommandTarget,     // None / Workspace / Connection / Database / Object / Panel / Tab
+    pub show_in_palette: bool,
+    pub action: fn() -> Box<dyn Action>,
+    pub enabled: Option<fn(&App) -> bool>,
+}
+```
+
+`CommandInfo.action` 只构造已有的 Action，不执行命令；这样工具栏、菜单栏、命令面板和以后的 Quick Open 不会各自复制一遍业务回调。
+
+动态收藏夹、最近对象、数据库类型子菜单、带参数的上下文菜单项，以及 GPUI 自带的撤销、剪切、拷贝、粘贴和选择全部不在这份静态目录里。命令面板要等对应阶段具备目标解析或改为由输入框自身处理系统编辑命令后，再把它们显示出来。
 
 ## 3. 插件目录
 

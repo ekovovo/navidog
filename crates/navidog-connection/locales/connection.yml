@@ -63,6 +63,24 @@ conn:
   manage_hide:
     en: Hide / Unhide
     zh-CN: 隐藏 / 取消隐藏
+  edit:
+    en: Edit Connection
+    zh-CN: 编辑连接
+  duplicate:
+    en: Duplicate Connection
+    zh-CN: 复制连接
+  open:
+    en: Open Connection
+    zh-CN: 打开连接
+  close:
+    en: Close Connection
+    zh-CN: 关闭连接
+  refresh:
+    en: Refresh
+    zh-CN: 刷新
+  new_group:
+    en: New Group
+    zh-CN: 新建组
   node_type:
     en: Node Type
     zh-CN: 节点类型

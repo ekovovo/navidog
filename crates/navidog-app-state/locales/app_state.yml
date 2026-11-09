@@ -18,3 +18,41 @@ app_state:
   kdf_failed:
     en: "The master password key could not be derived: %{detail}"
     zh-CN: "主密码派生失败：%{detail}"
+command:
+  group:
+    app:
+      en: Application
+      zh-CN: 应用
+    file:
+      en: File
+      zh-CN: 文件
+    edit:
+      en: Edit
+      zh-CN: 编辑
+    view:
+      en: View
+      zh-CN: 视图
+    connection:
+      en: Connection
+      zh-CN: 连接
+    navigator:
+      en: Navigator
+      zh-CN: 导航
+    query:
+      en: Query
+      zh-CN: 查询
+    table:
+      en: Table
+      zh-CN: 表
+    tools:
+      en: Tools
+      zh-CN: 工具
+    window:
+      en: Window
+      zh-CN: 窗口
+    help:
+      en: Help
+      zh-CN: 帮助
+    tabs:
+      en: Tabs
+      zh-CN: 选项卡

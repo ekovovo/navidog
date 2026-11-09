@@ -75,6 +75,18 @@ M2 的任务都已完成，逐项记录见 git 历史；M2 的功能状态仍在
 
 初版及 CI 时序修复在 2026-10-21 验证过 215 项测试与 29 张截图；两项基线证书依赖漏洞已补丁更新，deny 与在线 audit 当时通过。PR #14 的 Intel 代码段对话框测试已固定动画/调度时序，并连续复跑 20 次。本轮 review 修复的行为、逐条评论映射、回归入口及最终验证见 [验收记录](pr/acceptance-architecture-foundations.md)。
 
+### 命令目录渐进改造
+
+参考 Herdr 的单一命令表（菜单、快捷键、命令面板和文档共享）与可搜索入口；保留 typed GPUI Action，不采用字符串 dispatcher、QuickJS 受信 mod、可变 JSON 布局或独立 core daemon。改造顺序和边界写在 [03-plugin-api.md](design/03-plugin-api.md#21-命令目录的落地顺序)。
+
+| 任务 | 状态 | 验证与说明 |
+| --- | --- | --- |
+| 阶段 1：内置命令影子目录 | 完成 | `CommandRegistry` 登记菜单级内置命令及连接、导航分类命令；标题按 crate-local i18n 在语言切换后重新解析。`cargo test -p navidog --test command_catalog` 检查唯一 ID、完整标题、可解析快捷键和真实 Action；`scripts/check-i18n.sh` 通过 |
+| 阶段 2：命令面板 | 未开始 | 只读目录并 dispatch 现有 typed Action；不改菜单、快捷键和 `on_action` 执行路径 |
+| 阶段 3：Quick Open | 未开始 | 复用 `CommandTarget` 解析连接、数据库和对象；带参数命令不进普通命令列表 |
+| 阶段 4：快捷键投影 | 未开始 | 替换手写 `bind_keys` 前必须先覆盖上下文谓词与同一 Action 的多绑定 |
+| 阶段 5：静态菜单投影 | 未开始 | 收藏夹、最近对象、checked 状态和数据库类型子菜单保持手写 |
+
 ### 整体审查遗留工作（`refactor/remaining-work`）
 
 来源：[2026-10-26 遗留清单](cr/2026-10-26-remaining-work.md)。该清单建议按主题拆成多个 PR；本次按用户要求放在同一个分支/PR，逐项纯迁移。验收记录见 [pr/acceptance-remaining-work.md](pr/acceptance-remaining-work.md)。

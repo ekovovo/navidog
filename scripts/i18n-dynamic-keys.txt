@@ -34,3 +34,6 @@ crates/navidog-navigator/src/objects.rs	format!("col.{key}")
 crates/navidog-navigator/src/snippets.rs	*l
 crates/navidog-ui/src/lib.rs	key
 crates/navidog/src/main_window.rs	*label
+crates/navidog/src/menu_catalog.rs	key
+crates/navidog-connection/src/lib.rs	key
+crates/navidog-navigator/src/lib.rs	key

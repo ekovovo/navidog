@@ -21,9 +21,11 @@ pub fn open_type_picker(window: &mut Window, cx: &mut App) {
 use std::sync::Arc;
 
 use gpui_kit::component::WindowExt as _;
-use gpui_kit::{App, InteractiveElement, SharedString, Window};
+use gpui_kit::{Action, App, InteractiveElement, SharedString, Window};
 use navidog_app_state::actions::*;
-use navidog_app_state::registry::{CommandInfo, CommandRegistry, Source};
+use navidog_app_state::registry::{
+    CommandGroup, CommandInfo, CommandRegistry, CommandTarget, CommandTitle, Source,
+};
 use navidog_app_state::store::ConnectionStore;
 use navidog_app_state::workspace::{Selection, Workspace};
 use navidog_model::connection::SecretField;
@@ -32,17 +34,98 @@ use rust_i18n::t;
 
 pub fn init(cx: &mut App) {
     let commands = &mut cx.global_mut::<CommandRegistry>().0;
-    let _ = commands.register(
-        "connection.new",
-        Source::Builtin,
-        CommandInfo {
-            title: "conn.new_connection".into(),
-            icon: Some("icons/plug.svg".into()),
-            shortcut: None,
-            action: || Box::new(NewConnection),
-            enabled: None,
-        },
+    type Entry = (
+        &'static str,
+        &'static str,
+        fn() -> Box<dyn Action>,
+        CommandTarget,
+        Option<&'static str>,
     );
+    let entries: [Entry; 9] = [
+        (
+            "connection.new",
+            "conn.new_connection",
+            || Box::new(NewConnection),
+            CommandTarget::None,
+            Some("icons/plug.svg"),
+        ),
+        (
+            "connection.edit",
+            "conn.edit",
+            || Box::new(EditConnection),
+            CommandTarget::Connection,
+            None,
+        ),
+        (
+            "connection.duplicate",
+            "conn.duplicate",
+            || Box::new(DuplicateConnection),
+            CommandTarget::Connection,
+            None,
+        ),
+        (
+            "connection.delete",
+            "conn.delete",
+            || Box::new(DeleteConnection),
+            CommandTarget::Connection,
+            None,
+        ),
+        (
+            "connection.open",
+            "conn.open",
+            || Box::new(OpenConnection),
+            CommandTarget::Connection,
+            None,
+        ),
+        (
+            "connection.close",
+            "conn.close",
+            || Box::new(CloseConnection),
+            CommandTarget::Connection,
+            None,
+        ),
+        (
+            "connection.refresh",
+            "conn.refresh",
+            || Box::new(Refresh),
+            CommandTarget::Connection,
+            None,
+        ),
+        (
+            "connection.new_group",
+            "conn.new_group",
+            || Box::new(NewGroup),
+            CommandTarget::Workspace,
+            None,
+        ),
+        (
+            "connection.manage",
+            "conn.manage_title",
+            || Box::new(ManageConnections),
+            CommandTarget::None,
+            None,
+        ),
+    ];
+    for (id, title, action, target, icon) in entries {
+        let info = CommandInfo::new(
+            CommandGroup::Connection,
+            CommandTitle::localized(title, translated_command_title),
+            action,
+        )
+        .target(target);
+        let info = if let Some(icon) = icon {
+            info.icon(icon)
+        } else {
+            info
+        };
+        commands
+            .register(id, Source::Builtin, info)
+            .unwrap_or_else(|error| panic!("built-in connection commands: {error}"));
+    }
+}
+
+fn translated_command_title(key: &str) -> SharedString {
+    t!(key).to_string().into()
 }
 
 /// Opens the connections marked "auto connect" at startup.

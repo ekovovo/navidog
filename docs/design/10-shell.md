@@ -154,6 +154,8 @@ M1 实现以下菜单。各菜单的完整结构参考 `reference/tree/MainMenu.
 
 所有菜单项都是 Action，菜单栏调用 `cx.set_menus` 之前必须先调用 `cx.bind_keys`，否则菜单里不会显示快捷键。
 
+内置菜单命令同时在 `navidog::menu_catalog` 登记到 `CommandRegistry`。这一层当前是影子目录：标题、分组、快捷键文本、搜索词和目标先统一，菜单与快捷键的实际执行仍由 `set_menus`、`bind_keys` 和窗口根上的 `on_action` 负责；业务回调仍属于各 feature crate。后续命令面板、Quick Open 和快捷键设置都从这份目录取数据，不再另建命令清单。动态收藏夹、最近对象、数据库类型子菜单和 checked 状态仍由菜单代码生成。
+
 「检查更新」和「关于」在菜单回调里可能没有活动窗口（macOS 的 `mainWindow` 为空），这时用最前面的窗口。手动检查有新版本时打开对话框；已是最新、还没有发布版本、检查失败各显示一条通知。启动时的自动检查不提示后两种。
 
 「关于 navidog」显示版本和一句说明。nightly 构建显示 `nightly (YYYY-MM-DD HH:MM UTC)`，时间是编译时写入的 `NAVIDOG_BUILD_TIMESTAMP`，和 GitHub nightly 发布说明里的构建时间是同一次时钟，不显示 Cargo.toml 里的 `0.0.1`。稳定构建显示编译进二进制的版本号。打 `v*` tag 时，CI 在编译前把 workspace 版本改成去掉 `v` 的 tag（不提交），关于页、更新比较和安装包元数据都跟这个 tag 走；仓库里的 Cargo.toml 可以停在 `0.0.1`。本地构建显示 Cargo.toml 的版本。

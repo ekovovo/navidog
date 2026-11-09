@@ -183,7 +183,7 @@ gpui-kit 的[编码指南](https://gpui-kit.com/zh-CN/docs/coding-guides)和[设
 - **token 规则**：Navicat 的实测数值只出现在 `navidog-ui` 的 token 和主题 JSON 里，单位是 macOS 的 pt，在 token 定义处换算成 rem（基准 13）。组件代码只引用具名 token（如 `tokens.toolbar.height`），这样应用缩放仍然有效。规范明确允许“主题或 token 定义本身”使用像素值。
 - **裸值检查**：`scripts/check-raw-px.sh` 在 `crates/navidog-ui/src/tokens*` 和 `themes/` 之外查找 `px(`、`rgb(`、`rgba(`、`hsla(`、`hsl(`。必须例外的位置（运行时测量的几何、平台边界）在行尾加注释 `// raw-px: <理由>`。
 - **rem 缓存**：任何根据布局结果缓存的几何（行高、文本测量、画布尺寸），失效键都必须包含 `window.rem_size()`。
-- **命令**：一个命令只定义一个 Action，工具栏、菜单、右键菜单、快捷键共用。快捷键表照 Navicat（见 `hot_keys.html`）。
+- **命令**：一个命令只定义一个 Action，工具栏、菜单、右键菜单、快捷键共用。`CommandRegistry` 先统一命令元数据和可发现性，不替换现有的 typed Action、菜单或快捷键分发；快捷键表照 Navicat（见 `hot_keys.html`）。
 - **焦点**：可聚焦元素显式 `.tab_stop(true)`；`key_context` 和 `on_action` 挂在同一区域；对话框困住焦点，关闭后把焦点还给打开它的元素。
 - **ElementId**：使用稳定的领域 ID（连接 ID、对象路径），禁止用索引、随机值或翻译后的文本。
 - **render 纯声明**：render 里不调 `cx.notify()`、不启动任务。

@@ -39,6 +39,12 @@ menu:
   close_tab:
     en: Close Tab
     zh-CN: 关闭选项卡
+  next_tab:
+    en: Next Tab
+    zh-CN: 下一个选项卡
+  previous_tab:
+    en: Previous Tab
+    zh-CN: 上一个选项卡
   open_recent:
     en: Open Recent
     zh-CN: 打开最近使用过的

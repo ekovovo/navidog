@@ -202,6 +202,9 @@ kind:
   table:
     en: Tables
     zh-CN: 表
+  user:
+    en: User
+    zh-CN: 用户
   view:
     en: Views
     zh-CN: 视图

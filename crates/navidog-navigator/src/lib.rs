@@ -32,7 +32,9 @@ mod test_env {
 
 use gpui_kit::{Action, App, SharedString};
 use navidog_app_state::actions::OpenTool;
-use navidog_app_state::registry::{CommandInfo, CommandRegistry, Source};
+use navidog_app_state::registry::{
+    CommandGroup, CommandInfo, CommandRegistry, CommandTarget, CommandTitle, Source,
+};
 use navidog_app_state::store::ConnectionStore;
 use navidog_app_state::workspace::{Selection, Workspace};
 use navidog_model::object::ObjectKind;
@@ -160,7 +162,7 @@ fn register_commands(cx: &mut App) {
         ),
         (
             "objects.users",
-            "toolbar.user",
+            "kind.user",
             "icons/user.svg",
             || {
                 Box::new(OpenTool {
@@ -173,18 +175,22 @@ fn register_commands(cx: &mut App) {
         ),
     ];
     for (id, title, icon, action, enabled) in commands {
-        let _ = registry.register(
-            id,
-            Source::Builtin,
-            CommandInfo {
-                title: title.into(),
-                icon: Some(icon.into()),
-                shortcut: None,
-                action,
-                enabled: Some(enabled),
-            },
-        );
+        let info = CommandInfo::new(
+            CommandGroup::Navigator,
+            CommandTitle::localized(title, translated_command_title),
+            action,
+        )
+        .icon(icon)
+        .target(CommandTarget::Workspace)
+        .enabled(enabled);
+        registry
+            .register(id, Source::Builtin, info)
+            .unwrap_or_else(|error| panic!("built-in navigator commands: {error}"));
     }
+}
+
+fn translated_command_title(key: &str) -> SharedString {
+    t!(key).to_string().into()
 }
 
 /// Status bar text (10-shell.md §8): item count of the objects tab, or the selected connection's type and address.
