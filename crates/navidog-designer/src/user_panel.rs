@@ -11,15 +11,37 @@ const SSL_TYPES: &[&str] = &["", "NONE", "ANY", "X509", "SPECIFIED"];
 
 impl ToolPanel {
     fn start(&mut self, cx: &mut Context<Self>) {
-        if self.tool != Tool::Users
-            || matches!(self.dialect.account_form(), AccountForm::Unavailable(_))
-        {
+        if self.tool != Tool::Users {
+            return;
+        }
+        if matches!(self.dialect.account_form(), AccountForm::Unavailable(_)) {
+            // A designer-less product that can still list accounts (Dameng) shows the
+            // read-only list; SQLite has neither and stays on the reason text.
+            if self.readonly_accounts() && self.target.is_none() {
+                self.list_accounts(cx);
+            }
             return;
         }
         match self.target.as_deref() {
             None => self.list_accounts(cx),
             Some("new") => self.loaded_draft = self.account_draft(cx),
             Some(_) => self.load_detail(cx),
+        }
+    }
+
+    /// The account designer is unavailable, but the server still lists accounts, so the
+    /// list renders read-only: no create or design buttons, no double-click open
+    /// (140-dameng.md §6.5).
+    fn readonly_accounts(&self) -> bool {
+        matches!(self.dialect.account_form(), AccountForm::Unavailable(_))
+            && self.dialect.account_list_sql().is_some()
+    }
+
+    /// The reason the account designer is unavailable, for error messages.
+    fn account_reason(&self) -> String {
+        match self.dialect.account_form() {
+            AccountForm::Unavailable(reason) => reason.to_string(),
+            _ => security::SQLITE_AUTH_REASON.into(),
         }
     }
 
@@ -412,7 +434,9 @@ impl ToolPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui_kit::AnyElement {
-        if let AccountForm::Unavailable(reason) = self.dialect.account_form() {
+        if let AccountForm::Unavailable(reason) = self.dialect.account_form()
+            && !self.readonly_accounts()
+        {
             return v_flex()
                 .id("tool-users")
                 .flex_1()
@@ -420,6 +444,7 @@ impl ToolPanel {
                 .p_3()
                 .child(reason.to_string())
                 .into_any_element();
+            // Read-only list: fall through with the create and design buttons hidden.
         }
         if self.target.is_none() {
             self.render_user_list(disabled, window, cx)
@@ -447,71 +472,89 @@ impl ToolPanel {
             .map(|(ix, row)| (ix, row.clone()))
             .collect();
         let count = rows.len();
+        let readonly = self.readonly_accounts();
+        let mut toolbar = h_flex()
+            .h(tokens::object_toolbar::HEIGHT.rems())
+            .px_2()
+            .gap_1()
+            .border_b_1()
+            .border_color(p.separator);
+        if !readonly {
+            toolbar = toolbar
+                .child(
+                    Button::new("user-new")
+                        .ghost()
+                        .small()
+                        .icon(lucide("plus"))
+                        .label(t!("designer.tool_user_new").to_string())
+                        .disabled(disabled)
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            window.dispatch_action(
+                                Box::new(OpenTool {
+                                    scope: Some(this.scope.clone()),
+                                    tool: "users".into(),
+                                    target: Some("new".into()),
+                                }),
+                                cx,
+                            );
+                        })),
+                )
+                .child(
+                    Button::new("user-design")
+                        .ghost()
+                        .small()
+                        .icon(lucide("pencil"))
+                        .label(t!("designer.tool_design").to_string())
+                        .disabled(disabled || self.selected_account.is_none())
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            let Some(ix) = this.selected_account else {
+                                return;
+                            };
+                            let Some(row) = this.account_rows.get(ix) else {
+                                return;
+                            };
+                            let (name, host) = row_identity(&this.account_columns, row);
+                            this.open_account(name, host, window, cx);
+                        })),
+                );
+        }
+        let mut toolbar = toolbar.child(
+            Button::new("user-refresh")
+                .ghost()
+                .small()
+                .icon(lucide("refresh-cw"))
+                .label(t!("designer.tool_refresh").to_string())
+                .disabled(disabled)
+                .on_click(cx.listener(|this, _, _, cx| this.list_accounts(cx))),
+        );
+        if readonly {
+            // The reason the designer is missing stays visible above the list.
+            toolbar = toolbar.child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .px_2()
+                    .text_color(p.label_secondary)
+                    .child(truncated(
+                        "user-readonly-reason",
+                        self.account_reason(),
+                    )),
+            );
+        }
+        let toolbar = toolbar
+            .child(div().flex_1())
+            .child(
+                Input::new(&self.user_filter)
+                    .id("user-list-filter")
+                    .small()
+                    .w(tokens::form::POPUP_WIDTH_SHORT.rems()),
+            );
         v_flex()
             .id("tool-users")
             .flex_1()
             .min_h_0()
             .size_full()
-            .child(
-                h_flex()
-                    .h(tokens::object_toolbar::HEIGHT.rems())
-                    .px_2()
-                    .gap_1()
-                    .border_b_1()
-                    .border_color(p.separator)
-                    .child(
-                        Button::new("user-new")
-                            .ghost()
-                            .small()
-                            .icon(lucide("plus"))
-                            .label(t!("designer.tool_user_new").to_string())
-                            .disabled(disabled)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                window.dispatch_action(
-                                    Box::new(OpenTool {
-                                        scope: Some(this.scope.clone()),
-                                        tool: "users".into(),
-                                        target: Some("new".into()),
-                                    }),
-                                    cx,
-                                );
-                            })),
-                    )
-                    .child(
-                        Button::new("user-design")
-                            .ghost()
-                            .small()
-                            .icon(lucide("pencil"))
-                            .label(t!("designer.tool_design").to_string())
-                            .disabled(disabled || self.selected_account.is_none())
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                let Some(ix) = this.selected_account else {
-                                    return;
-                                };
-                                let Some(row) = this.account_rows.get(ix) else {
-                                    return;
-                                };
-                                let (name, host) = row_identity(&this.account_columns, row);
-                                this.open_account(name, host, window, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("user-refresh")
-                            .ghost()
-                            .small()
-                            .icon(lucide("refresh-cw"))
-                            .label(t!("designer.tool_refresh").to_string())
-                            .disabled(disabled)
-                            .on_click(cx.listener(|this, _, _, cx| this.list_accounts(cx))),
-                    )
-                    .child(div().flex_1())
-                    .child(
-                        Input::new(&self.user_filter)
-                            .id("user-list-filter")
-                            .small()
-                            .w(tokens::form::POPUP_WIDTH_SHORT.rems()),
-                    ),
-            )
+            .child(toolbar)
             .child(
                 h_flex()
                     .h(tokens::list::HEADER_HEIGHT.rems())
@@ -560,7 +603,9 @@ impl ToolPanel {
                             ))
                             .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                                 this.selected_account = Some(ix);
-                                if event.click_count() >= 2 {
+                                if event.click_count() >= 2
+                                    && !this.readonly_accounts()
+                                {
                                     this.open_account(name.clone(), host.clone(), window, cx);
                                 }
                                 cx.notify();

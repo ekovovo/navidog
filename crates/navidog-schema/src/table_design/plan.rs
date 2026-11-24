@@ -155,11 +155,9 @@ pub(super) fn plan_on(
             String::new()
         };
         match original {
-            None => out.push(format!(
-                "ALTER TABLE {table} ADD COLUMN {} {}{position}",
-                d.quote_ident(&c.name),
-                c.definition
-            )),
+            None => {
+                out.push(d.add_column(&table, &d.quote_ident(&c.name), &c.definition, &position))
+            }
             Some(previous) => {
                 let moved = old.columns.iter().position(|v| v.name == previous.name) != Some(ix);
                 if c.name == previous.name
@@ -176,6 +174,24 @@ pub(super) fn plan_on(
                         c.definition
                     ));
                 } else {
+                    // A dialect may take over the whole rename/type/default sequence
+                    // (`modify_column`); names and the table are quoted for it, matching
+                    // `add_column` (140-dameng.md §5.4.1).
+                    let taken = if c.name != previous.name || c.definition != previous.definition {
+                        d.modify_column(
+                            &table,
+                            &d.quote_ident(&previous.name),
+                            &d.quote_ident(&c.name),
+                            &previous.definition,
+                            &c.definition,
+                        )
+                    } else {
+                        None
+                    };
+                    if let Some(statements) = taken {
+                        out.extend(statements.map_err(DbError::msg)?);
+                        continue;
+                    }
                     if c.name != previous.name {
                         out.push(format!(
                             "ALTER TABLE {table} RENAME COLUMN {} TO {}",

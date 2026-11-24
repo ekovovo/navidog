@@ -1,0 +1,22 @@
+[package]
+name = "navidog-dameng"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Dameng DM8 driver and SQL dialect for navidog."
+
+[dependencies]
+navidog-model.workspace = true
+navidog-sql = { path = "../navidog-sql" }
+navidog-db = { path = "../navidog-db" }
+rust-i18n.workspace = true
+tokio.workspace = true
+futures.workspace = true
+tracing.workspace = true
+hex.workspace = true
+# Pinned: the upstream repository disappeared (404) and 1.2.4 needs four protocol
+# patches hosted on a self-hosted mirror, wired through [patch.crates-io] in the
+# workspace root (140-dameng.md, acceptance-dameng.md).
+dm-pure = "=1.2.4"

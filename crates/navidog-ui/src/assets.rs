@@ -35,6 +35,10 @@ const OWN: &[(&str, &[u8])] = &[
         "icons/db/sqlite.svg",
         include_bytes!("../assets/icons/db/sqlite.svg"),
     ),
+    (
+        "icons/db/dameng.svg",
+        include_bytes!("../assets/icons/db/dameng.svg"),
+    ),
 ];
 
 /// App assets: our own icons, then the picked Lucide icons, then gpui-kit's defaults.
@@ -82,7 +86,7 @@ mod tests {
         assert!(a.load("icons/db/sqlite.svg").unwrap().is_some());
         assert!(a.load("icons/plug.svg").unwrap().is_some());
         assert!(a.load("icons/check.svg").unwrap().is_some());
-        assert!(a.list("icons/db/").unwrap().len() == 4);
+        assert!(a.list("icons/db/").unwrap().len() == 5);
     }
 
     /// A missing icon only logs an error and draws nothing, so check every name the sources use.

@@ -24,7 +24,7 @@ pub fn session_setup(sql: &str) -> Option<String> {
     if body.is_empty() || body.contains(';') {
         return None;
     }
-    if use_statement(body) || search_path_statement(body) {
+    if use_statement(body) || search_path_statement(body) || set_schema_statement(body) {
         Some(body.to_string())
     } else {
         None
@@ -59,6 +59,14 @@ fn search_path_statement(sql: &str) -> bool {
     }
     let after = &rest["search_path".len()..];
     after.is_empty() || after.starts_with(|c: char| c.is_whitespace()) || after.starts_with('=')
+}
+
+/// Dameng `SET SCHEMA "name"` switches the current schema and is replayed on reconnect.
+fn set_schema_statement(sql: &str) -> bool {
+    let Some(rest) = keyword(sql, "set") else {
+        return false;
+    };
+    keyword(rest, "schema").is_some_and(|value| !value.is_empty())
 }
 
 /// The statements' text only; see [`split_script`].
@@ -234,7 +242,7 @@ mod tests {
     }
 
     #[test]
-    fn session_setup_is_only_use_or_search_path() {
+    fn session_setup_replays_use_search_path_and_set_schema() {
         assert_eq!(session_setup("USE `shop`"), Some("USE `shop`".to_string()));
         assert_eq!(
             session_setup("  set search_path TO \"app\", \"public\"; "),
@@ -248,6 +256,11 @@ mod tests {
         assert_eq!(session_setup("SELECT 1"), None);
         assert_eq!(session_setup("USE shop; SELECT 1"), None);
         assert_eq!(session_setup("UPDATE t SET search_path = 1"), None);
+        assert_eq!(
+            session_setup("SET SCHEMA \"SYSDBA\""),
+            Some("SET SCHEMA \"SYSDBA\"".to_string())
+        );
+        assert_eq!(session_setup("SET SCHEMA"), None);
     }
 
     #[test]

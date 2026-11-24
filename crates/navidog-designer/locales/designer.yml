@@ -249,6 +249,9 @@ designer:
   advanced_help:
     en: Advanced definitions preserve attributes that the forms cannot represent. Changes still require SQL preview and execution.
     zh-CN: 高级定义保留表单无法表达的属性，修改后仍需 SQL 预览及执行。
+  ddl_no_rollback:
+    en: DDL on this server commits implicitly; a failed migration will not roll back the statements already executed.
+    zh-CN: 达梦 DDL 隐式提交，迁移失败不会回滚已执行的语句。
   generated_help:
     en: Generated expressions and storage are preserved; unsupported migrations are rejected.
     zh-CN: 生成表达式和存储方式会保留，不支持的迁移会明确拒绝。

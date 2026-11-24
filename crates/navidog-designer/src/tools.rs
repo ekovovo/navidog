@@ -403,7 +403,7 @@ impl ToolPanel {
         }
         if matches!(self.dialect.account_form(), AccountForm::Unavailable(_)) {
             self.preview.clear();
-            self.error = Some(security::SQLITE_AUTH_REASON.into());
+            self.error = Some(self.account_reason());
             return;
         }
         let password = Self::text(&self.password, cx);
@@ -607,7 +607,7 @@ impl ToolPanel {
 
     fn list_accounts(&mut self, cx: &mut Context<Self>) {
         let Some(sql) = self.dialect.account_list_sql() else {
-            self.error = Some(security::SQLITE_AUTH_REASON.into());
+            self.error = Some(self.account_reason());
             cx.notify();
             return;
         };

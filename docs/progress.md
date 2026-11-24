@@ -26,7 +26,7 @@
 | M11 AI 助手 | 未开始 | | | |
 | M12 同步（替代 Cloud） | 未开始 | | | |
 | M13 HTTP 隧道 | 未开始 | | | |
-| M14 其他数据库 | 未开始 | | db/ | 已实现的 MySQL/MariaDB、PostgreSQL、SQLite 各自一个 crate。接入一个新数据库：新建不依赖 GPUI 的 crate，实现 `Driver`（`info()`、`connect()`）；关系型再实现 `Relational`（八个目录/补全方法用 `relational_catalog!` 转发，漏实现是编译错误）和 `Dialect`（词法、引用、`features()` 与少量返回 SQL 的方法）；最后在 `navidog-session::init` 注册具体驱动。界面只读能力方法与 `DialectFeatures`，不按产品名分支（`scripts/check-dialect-branches.sh` 检查） |
+| M14 其他数据库 | 进行中 | `feat/dameng` | db/、140-dameng | 达梦 DM8 已接入（`navidog-dameng`，dm-pure 驱动）：连接/导航/表查看器/查询编辑器/表设计器迁移/用户只读列表，实库测试 10 项本地通过。dm-pure 1.2.4 的四处协议补丁待接自建镜像仓库（第 4 节），接上后 LOB/EXPLAIN/SET SCHEMA/取消响应的守卫自动转正。见 [验收记录](pr/acceptance-dameng.md) |
 | M15 发布 | 部分 | `codex/macos-adhoc-signing` | 150-macos-distribution | 工作流、安装包、`latest.json`、应用内更新已在仓库里；无证书时免费临时签名与验签已接入并经本机验证。正式公证仍需证书与凭据（第 4 节），配置迁移（F-REL-004）未做 |
 
 ## 2. 当前里程碑：M4（表设计器）
@@ -102,7 +102,23 @@ M2 的任务都已完成，逐项记录见 git 历史；M2 的功能状态仍在
 | A-10 Connection `profiles + active` | 完成 | `profiles: Vec<Profile>` + `active` 取代字段交换；`connections.json` 写旧布局、读两种布局；7+ 配置文件/重名/空名/两种 JSON/panic 恢复都有测试 |
 | S-07 共享 i18n 后端 | 完成（方案 1） | 保持 crate-local 契约；动态 key 必须登记 `scripts/i18n-dynamic-keys.txt`（19 条），`check-i18n.sh` 检查；契约写入 00-overview |
 
+### M14 达梦 DM8 接入
+
+规格与阶段 0 技术验证见 [140-dameng.md](design/140-dameng.md) 和 [验收记录](pr/acceptance-dameng.md)。
+
+| 任务 | 状态 | 验证与说明 |
+| --- | --- | --- |
+| 阶段 0 技术验证与规格 PR | 完成 | 九项验证 + 四补丁定位见验收记录；规格 `140-dameng.md`、`db/dameng/features.md` |
+| 能力层（界面零分支） | 完成 | `DialectFeatures` 三新字段、`ExplainStyle::TextLines`、设计器方言钩子、`DefinitionFamily::Dameng` 各臂、`session_setup` 识别 `SET SCHEMA`（`0012f4e`） |
+| `navidog-dameng` crate | 完成 | dialect/words/metadata/driver + locales；方言、目录 SQL、类型映射、错误码映射 23 项单元测试；plan 测试在 `navidog-schema`（迁移语句四项） |
+| 共享层接线 | 完成 | `plan.rs` 调 `add_column`/`modify_column`（PG/MySQL/SQLite 回归不变）；`navidog-session::init` 注册；`check-deps.sh` 加名单；自绘图标 `icons/db/dameng.svg` |
+| 用户工具只读列表 | 完成 | `Unavailable` + `account_list_sql=Some` 时渲染只读列表（隐藏新建/设计、禁双击）；SQLite 原因文本行为不变；`security_plan` 测试补 Dameng 契约 |
+| 迁移不可回滚提示 | 完成 | 预览页在 `transactional_ddl=false` 时显示固定提示（达梦与 MySQL 同样适用，能力驱动不按产品分支） |
+| 实库测试 | 完成 | `NAVIDOG_DM_LIVE=1` 10 项本地通过：连接/错误密码、目录八方法、中文、LOB、事务与 DDL 隐式提交、取消杀会话、SET SCHEMA、分页、EXPLAIN、lazy fetch、设计器迁移语法；DM 镜像不进 CI（许可），LOB/EXPLAIN/SET SCHEMA 三项在未打补丁的 dm-pure 上自动跳过 |
+| dm-pure 补丁接线 | 未开始 | 补丁文件随 /tmp 清理已丢失，需按验收记录重建四补丁并推送到自建镜像 `ekovovo/dm8_pure_rs`（仓库尚未创建），再经 `[patch.crates-io]` git 依赖接线；上游恢复后提 PR |
+
 ### M4 表设计器
+
 
 | 任务 | 状态 | 说明 |
 | --- | --- | --- |
@@ -288,6 +304,10 @@ M2 的任务都已完成，逐项记录见 git 历史；M2 的功能状态仍在
 
 | 项目 | 引入于 | 计划处理 |
 | --- | --- | --- |
+| dm-pure 1.2.4 四处协议缺陷未打补丁（行外 LOB 读空、EXPLAIN 挂起、SET SCHEMA/CALL 挂起、错误消息偶发前缀）；补丁托管仓库 `ekovovo/dm8_pure_rs` 尚未创建 | M14 | 按验收记录「dm-pure 缺陷与补丁」重建四补丁推送到自建镜像，根 Cargo.toml 加 `[patch.crates-io]`；接线前实库测试对 LOB/EXPLAIN/SET SCHEMA 自动跳过 |
+| DM 实库测试为本地可选，不进 CI（DM 开发版许可仅限学习/测试/开发，1 年试用） | M14 | `NAVIDOG_DM_LIVE=1` + `DM_PORT` 手动执行；起容器命令见 live.rs 文件头 |
+| 迁移预览的不可回滚提示按 `transactional_ddl=false` 能力显示，MySQL 预览页也因此新增同一提示（此前没有） | M14 | 能力驱动、文案事实正确；与 Navicat 并排实测后如需收敛再按能力细分 |
+| 连接表单/导航树/表查看器/查询编辑器对 DM 的整体界面目测未做（需要本机连 DM 实例走查） | M14 | 下一轮连同 CS=0 与 mode 2/4 实例一起验收 |
 | 表设计器已恢复字段网格和结构化表单；引擎私有属性表单、字段拖放和运行态 Navicat 并排仍未做 | M4 | ⌘↑ / ⌘↓ 移动字段。并排对照不阻塞本里程碑 |
 | 未知表选项、删除仍被依赖的字段、附加库上的表重建仍然拒绝 | M4 | 不自动丢掉依赖对象，不猜测生成表达式里的标识符 |
 | 不做加密 SQLite，不换 `bundled`，不做就地加密或解密，不做 SQLite 2 | M4 | 保持 rusqlite `bundled` |
@@ -360,3 +380,4 @@ M2 的任务都已完成，逐项记录见 git 历史；M2 的功能状态仍在
 | 导航树性能 | `cargo run --release -p navidog-navigator --example tree_spike` | 本地执行，需要 Metal |
 | SQL 编辑器性能 | `cargo run --release -p navidog-query --example editor_spike` | 本地执行，需要 Metal；`NAVIDOG_SPIKE_LINES` 改行数，截图写到 `target/editor-spike-*.png` |
 | 查询解释实库测试 | `docker compose up -d --wait && NAVIDOG_LIVE=1 cargo test -p navidog-query live_plans` | 本地执行；MySQL 8、MariaDB 11、PostgreSQL 16 的计划都能解析 |
+| 达梦实库测试（本地可选） | `NAVIDOG_DM_LIVE=1 cargo test -p navidog-dameng --test live` | 手动起 DM8 容器后执行（命令见 live.rs 文件头），测完 `docker stop dm8-utf8 && docker rm dm8-utf8`；LOB/EXPLAIN/SET SCHEMA 三项在未打补丁的 dm-pure 上自动跳过 |

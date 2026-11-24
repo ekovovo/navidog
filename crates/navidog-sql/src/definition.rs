@@ -14,6 +14,7 @@ pub enum DefinitionFamily {
     Mysql,
     Postgres,
     Sqlite,
+    Dameng,
 }
 
 /// One designer form. Database and schema are navigator nodes, not [`ObjectKind`]s.
@@ -194,6 +195,7 @@ pub fn plan(
         DefinitionFamily::Mysql => mysql(d, scope, draft),
         DefinitionFamily::Postgres => postgres(d, scope, draft),
         DefinitionFamily::Sqlite => sqlite(d, scope, draft),
+        DefinitionFamily::Dameng => dameng(d, scope, draft),
     }
 }
 
@@ -218,6 +220,15 @@ fn raw_statements(
             Ok(vec![ensure_or_replace(&body, "FUNCTION")])
         }
         (DefinitionFamily::Postgres, DefinitionKind::Procedure) => {
+            Ok(vec![ensure_or_replace(&body, "PROCEDURE")])
+        }
+        (DefinitionFamily::Dameng, DefinitionKind::View) => {
+            Ok(vec![ensure_or_replace(&body, "VIEW")])
+        }
+        (DefinitionFamily::Dameng, DefinitionKind::Function) => {
+            Ok(vec![ensure_or_replace(&body, "FUNCTION")])
+        }
+        (DefinitionFamily::Dameng, DefinitionKind::Procedure) => {
             Ok(vec![ensure_or_replace(&body, "PROCEDURE")])
         }
         (DefinitionFamily::Postgres, DefinitionKind::MaterializedView) => {
@@ -946,6 +957,64 @@ fn sqlite(d: &dyn Dialect, scope: &Scope, draft: &DefinitionDraft) -> Result<Vec
                 "DETACH DATABASE {}",
                 d.quote_ident(&draft.name)
             )])
+        }
+        _ => Err("This database cannot change that object.".into()),
+    }
+}
+
+/// Dameng DM8: views and routines use `CREATE OR REPLACE`; sequences use `CREATE` / `ALTER
+/// SEQUENCE` and cannot be renamed. Indexes and triggers are edited in the table designer, not
+/// here (140-dameng.md §6.5).
+fn dameng(d: &dyn Dialect, scope: &Scope, draft: &DefinitionDraft) -> Result<Vec<String>, String> {
+    let name = d.qualified(scope, &draft.name);
+    match draft.kind {
+        DefinitionKind::View => {
+            let body = require_body(draft)?;
+            let verb = if draft.previous.is_some() {
+                "CREATE OR REPLACE"
+            } else {
+                "CREATE"
+            };
+            Ok(vec![format!("{verb} VIEW {name} AS\n{body}")])
+        }
+        DefinitionKind::Function | DefinitionKind::Procedure => {
+            let body = require_body(draft)?;
+            let keyword = if draft.kind == DefinitionKind::Procedure {
+                "PROCEDURE"
+            } else {
+                "FUNCTION"
+            };
+            let verb = if draft.previous.is_some() {
+                "CREATE OR REPLACE"
+            } else {
+                "CREATE"
+            };
+            Ok(vec![format!("{verb} {keyword} {name}\n{body}")])
+        }
+        DefinitionKind::Sequence => {
+            let start = opt(draft, "start");
+            let increment = opt(draft, "increment");
+            if draft.previous.is_none() {
+                let mut sql = format!("CREATE SEQUENCE {name}");
+                if !start.is_empty() {
+                    sql.push_str(&format!(" START WITH {start}"));
+                }
+                if !increment.is_empty() {
+                    sql.push_str(&format!(" INCREMENT BY {increment}"));
+                }
+                return Ok(vec![sql]);
+            }
+            if draft.previous.as_deref() != Some(draft.name.as_str()) {
+                return Err("Renaming a sequence is not supported.".into());
+            }
+            let mut out = Vec::new();
+            if !increment.is_empty() {
+                out.push(format!("ALTER SEQUENCE {name} INCREMENT BY {increment}"));
+            }
+            if !start.is_empty() {
+                out.push(format!("ALTER SEQUENCE {name} RESTART WITH {start}"));
+            }
+            Ok(out)
         }
         _ => Err("This database cannot change that object.".into()),
     }

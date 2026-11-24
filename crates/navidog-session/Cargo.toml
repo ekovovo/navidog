@@ -15,6 +15,7 @@ navidog-db = { path = "../navidog-db" }
 navidog-mysql = { path = "../navidog-mysql" }
 navidog-postgres = { path = "../navidog-postgres" }
 navidog-sqlite = { path = "../navidog-sqlite" }
+navidog-dameng = { path = "../navidog-dameng" }
 gpui-kit.workspace = true
 tokio.workspace = true
 futures.workspace = true

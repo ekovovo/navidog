@@ -111,6 +111,11 @@ pub(crate) async fn fetch_plan(
             p.tree = Some(plan::parse_sqlite(&items));
             p.grid = Some(set);
         }
+        ExplainStyle::TextLines => {
+            // Dameng EXPLAIN is indented text in one column; only the text view applies.
+            let rows = rel.execute(&format!("EXPLAIN {sql}")).await?;
+            p.text = Some(first_text(&rows));
+        }
     }
     Ok(p)
 }

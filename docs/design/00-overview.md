@@ -25,6 +25,7 @@ navidog 用 [gpui-kit](https://gpui-kit.com/zh-CN/docs/) 全家桶（GPUI、`gpu
 | [41-table-designer-more.md](41-table-designer-more.md) | M4 排除约束、触发器、分区和后续迁移 |
 | [42-object-designers.md](42-object-designers.md) | M4 视图、例程、库和其他对象设计器 |
 | [43-security-and-tools.md](43-security-and-tools.md) | M4 安全、维护、信息页和服务器工具 |
+| [140-dameng.md](140-dameng.md) | M14 达梦 DM8 接入：驱动、方言、目录与首版边界 |
 | [150-macos-distribution.md](150-macos-distribution.md) | M15 macOS 免费临时签名、打包与安装边界 |
 | [db/](db/) | MySQL、PostgreSQL、SQLite 以外数据库的专属功能清单 |
 

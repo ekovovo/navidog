@@ -1614,3 +1614,114 @@ fn live_postgres_reorder_keeps_a_loaded_and_edited_trigger() {
         session.close().await.unwrap();
     });
 }
+
+fn dameng_scope() -> Scope {
+    Scope::new("test", "DAMENG", Some("SYSDBA".into()))
+}
+
+#[test]
+fn dameng_add_column_uses_the_oracle_parenthesized_form() {
+    let sql =
+        "CREATE TABLE \"SYSDBA\".\"T\" (\"ID\" INT IDENTITY(1, 1) NOT NULL, \"NAME\" VARCHAR(100))";
+    let before = TableSnapshot {
+        design: super::parse::create(sql, "T", &navidog_dameng::DamengDialect::default()).unwrap(),
+        ddl: sql.into(),
+        triggers: Vec::new(),
+        owned_sequences: None,
+    };
+    let mut after = before.design.clone();
+    after
+        .columns
+        .push(DesignColumn::new(3, "NOTE", "VARCHAR(200)"));
+    let statements = plan(
+        &navidog_dameng::DamengDialect::default(),
+        &dameng_scope(),
+        Some(&before),
+        &after,
+    )
+    .unwrap();
+    assert_eq!(
+        statements,
+        vec!["ALTER TABLE \"SYSDBA\".\"T\" ADD (\"NOTE\" VARCHAR(200))"],
+        "{statements:?}"
+    );
+}
+
+#[test]
+fn dameng_changed_column_takes_the_dialect_sequence() {
+    let sql =
+        "CREATE TABLE \"SYSDBA\".\"T\" (\"ID\" INT IDENTITY(1, 1) NOT NULL, \"NAME\" VARCHAR(100))";
+    let before = TableSnapshot {
+        design: super::parse::create(sql, "T", &navidog_dameng::DamengDialect::default()).unwrap(),
+        ddl: sql.into(),
+        triggers: Vec::new(),
+        owned_sequences: None,
+    };
+    let mut after = before.design.clone();
+    after.columns[1].name = "TITLE".into();
+    after.columns[1].definition = "VARCHAR(200) NOT NULL".into();
+    after.columns[1].original = Some("NAME".into());
+    let statements = plan(
+        &navidog_dameng::DamengDialect::default(),
+        &dameng_scope(),
+        Some(&before),
+        &after,
+    )
+    .unwrap();
+    assert_eq!(
+        statements,
+        vec![
+            "ALTER TABLE \"SYSDBA\".\"T\" RENAME COLUMN \"NAME\" TO \"TITLE\"",
+            "ALTER TABLE \"SYSDBA\".\"T\" MODIFY (\"TITLE\" VARCHAR(200) NOT NULL)",
+        ],
+        "{statements:?}"
+    );
+}
+
+#[test]
+fn dameng_identity_column_changes_are_refused() {
+    let sql =
+        "CREATE TABLE \"SYSDBA\".\"T\" (\"ID\" INT IDENTITY(1, 1) NOT NULL, \"NAME\" VARCHAR(100))";
+    let before = TableSnapshot {
+        design: super::parse::create(sql, "T", &navidog_dameng::DamengDialect::default()).unwrap(),
+        ddl: sql.into(),
+        triggers: Vec::new(),
+        owned_sequences: None,
+    };
+    let mut after = before.design.clone();
+    after.columns[0].definition = "INT IDENTITY(2, 1) NOT NULL".into();
+    let error = plan(
+        &navidog_dameng::DamengDialect::default(),
+        &dameng_scope(),
+        Some(&before),
+        &after,
+    )
+    .expect_err("identity changes are refused");
+    assert!(format!("{error}").contains("identity"), "{error}");
+}
+
+#[test]
+fn dameng_default_change_writes_an_alter_column_statement() {
+    let sql =
+        "CREATE TABLE \"SYSDBA\".\"T\" (\"AMT\" DECIMAL(10, 2) DEFAULT 0, \"NAME\" VARCHAR(100))";
+    let before = TableSnapshot {
+        design: super::parse::create(sql, "T", &navidog_dameng::DamengDialect::default()).unwrap(),
+        ddl: sql.into(),
+        triggers: Vec::new(),
+        owned_sequences: None,
+    };
+    let mut after = before.design.clone();
+    after.columns[0].definition = "DECIMAL(10, 2)".into();
+    let statements = plan(
+        &navidog_dameng::DamengDialect::default(),
+        &dameng_scope(),
+        Some(&before),
+        &after,
+    )
+    .unwrap();
+    assert_eq!(
+        statements,
+        vec!["ALTER TABLE \"SYSDBA\".\"T\" ALTER COLUMN \"AMT\" DROP DEFAULT"],
+        "{statements:?}"
+    );
+}

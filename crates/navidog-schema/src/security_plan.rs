@@ -84,6 +84,16 @@ mod tests {
         assert!(reason.contains("user-auth"));
         assert!(!reason.contains("CREATE"));
         assert!(sqlite.account_list_sql().is_none());
+        // Dameng: the designer is unavailable, but the account list stays readable, so
+        // the user panel renders a read-only list (140-dameng.md §6.5).
+        let dameng = navidog_dameng::DamengDialect::default();
+        assert!(matches!(dameng.account_form(), AccountForm::Unavailable(_)));
+        let dameng_list = dameng.account_list_sql().unwrap();
+        assert!(dameng_list.contains("ALL_USERS"), "{dameng_list}");
+        assert!(
+            security::account_statements(&dameng, dameng.definition_family(), &user).is_err(),
+            "the read-only list must not enable account changes"
+        );
         let list = mysql.account_list_sql().unwrap();
         assert!(list.contains("AS plugin"), "{list}");
         assert!(list.contains("max_user_connections"), "{list}");

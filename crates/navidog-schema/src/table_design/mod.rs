@@ -335,79 +335,75 @@ async fn load_in_context(
     if dialect.features().enriches_from_catalog {
         design.migrate_comments(scope, dialect.as_ref())?;
         // The general DDL view omits identity/generated flags and nondefault collations.
-        // Include them in both the editable draft and the concurrency fingerprint.
-        let table = dialect.qualified(scope, name);
-        let option_query = format!(
-            "SELECT pg_get_userbyid(c.relowner), c.relpersistence, array_to_string(c.reloptions, ', '), t.spcname, (SELECT string_agg(quote_ident(n.nspname)||'.'||quote_ident(p.relname), ', ' ORDER BY i.inhseqno) FROM pg_inherits i JOIN pg_class p ON p.oid=i.inhparent JOIN pg_namespace n ON n.oid=p.relnamespace WHERE i.inhrelid=c.oid) FROM pg_class c LEFT JOIN pg_tablespace t ON t.oid=c.reltablespace WHERE c.oid={}::regclass",
-            dialect.string_literal(&table)
-        );
-        let option_sets = r.execute(&option_query).await?;
-        if let Some(row) = option_sets.iter().flat_map(|s| &s.rows).next() {
-            let cell = |i: usize| row.get(i).and_then(|v| v.as_deref()).unwrap_or("");
-            design.owner = cell(0).into();
-            design.unlogged = cell(1) == "u";
-            let mut options = Vec::new();
-            if !cell(4).is_empty() {
-                options.push(format!("INHERITS ({})", cell(4)));
+        // Include them in both the editable draft and the concurrency fingerprint. The queries
+        // and the identity clause come from the dialect (140-dameng.md §5.4.1).
+        if let Some(option_query) = dialect.table_options_sql(scope, name) {
+            let option_sets = r.execute(&option_query).await?;
+            if let Some(row) = option_sets.iter().flat_map(|s| &s.rows).next() {
+                let cell = |i: usize| row.get(i).and_then(|v| v.as_deref()).unwrap_or("");
+                design.owner = cell(0).into();
+                design.unlogged = cell(1) == "u";
+                let mut options = Vec::new();
+                if !cell(4).is_empty() {
+                    options.push(format!("INHERITS ({})", cell(4)));
+                }
+                if !cell(2).is_empty() {
+                    options.push(format!("WITH ({})", cell(2)));
+                }
+                if !cell(3).is_empty() {
+                    options.push(format!("TABLESPACE {}", dialect.quote_ident(cell(3))));
+                }
+                design.options = options.join(" ");
             }
-            if !cell(2).is_empty() {
-                options.push(format!("WITH ({})", cell(2)));
-            }
-            if !cell(3).is_empty() {
-                options.push(format!("TABLESPACE {}", dialect.quote_ident(cell(3))));
-            }
-            design.options = options.join(" ");
-        }
-        ddl.push_str(&format!(
-            "\n-- Table options: {}",
-            serde_json::to_string(&option_sets.iter().flat_map(|s| &s.rows).collect::<Vec<_>>())
+            ddl.push_str(&format!(
+                "\n-- Table options: {}",
+                serde_json::to_string(
+                    &option_sets.iter().flat_map(|s| &s.rows).collect::<Vec<_>>()
+                )
                 .unwrap_or_default()
-        ));
-        let query = format!(
-            "SELECT a.attname, format_type(a.atttypid,a.atttypmod), a.attnotnull, pg_get_expr(ad.adbin,ad.adrelid), a.attidentity, a.attgenerated, CASE WHEN a.attcollation <> ty.typcollation THEN nc.nspname END, CASE WHEN a.attcollation <> ty.typcollation THEN co.collname END, col_description(a.attrelid,a.attnum) FROM pg_attribute a JOIN pg_type ty ON ty.oid=a.atttypid LEFT JOIN pg_attrdef ad ON ad.adrelid=a.attrelid AND ad.adnum=a.attnum LEFT JOIN pg_collation co ON co.oid=a.attcollation LEFT JOIN pg_namespace nc ON nc.oid=co.collnamespace WHERE a.attrelid={}::regclass AND a.attnum>0 AND NOT a.attisdropped ORDER BY a.attnum",
-            dialect.string_literal(&table)
-        );
-        let sets = r.execute(&query).await?;
-        for row in sets.iter().flat_map(|s| &s.rows) {
-            let cell = |i: usize| row.get(i).and_then(|v| v.as_deref()).unwrap_or("");
-            let Some(column) = design.columns.iter_mut().find(|c| c.name == cell(0)) else {
-                continue;
-            };
-            let mut definition = cell(1).to_string();
-            if !cell(7).is_empty() {
-                definition.push_str(&format!(
-                    " COLLATE {}.{}",
-                    dialect.quote_ident(cell(6)),
-                    dialect.quote_ident(cell(7))
-                ));
-            }
-            if !cell(5).is_empty() {
-                definition.push_str(&format!(
-                    " GENERATED ALWAYS AS ({}) {}",
-                    cell(3),
-                    if cell(5) == "s" { "STORED" } else { "VIRTUAL" }
-                ));
-            } else if !cell(4).is_empty() {
-                definition.push_str(if cell(4) == "a" {
-                    " GENERATED ALWAYS AS IDENTITY"
-                } else {
-                    " GENERATED BY DEFAULT AS IDENTITY"
-                });
-            }
-            if cell(2) == "t" {
-                definition.push_str(" NOT NULL");
-            }
-            if cell(4).is_empty() && cell(5).is_empty() && !cell(3).is_empty() {
-                definition.push_str(&format!(" DEFAULT {}", cell(3)));
-            }
-            column.definition = definition;
-            column.comment = cell(8).into();
+            ));
         }
-        ddl.push_str(&format!(
-            "\n-- Column metadata: {}",
-            serde_json::to_string(&sets.iter().flat_map(|s| s.rows.clone()).collect::<Vec<_>>())
+        if let Some(query) = dialect.column_metadata_sql(scope, name) {
+            let sets = r.execute(&query).await?;
+            for row in sets.iter().flat_map(|s| &s.rows) {
+                let cell = |i: usize| row.get(i).and_then(|v| v.as_deref()).unwrap_or("");
+                let Some(column) = design.columns.iter_mut().find(|c| c.name == cell(0)) else {
+                    continue;
+                };
+                let mut definition = cell(1).to_string();
+                if !cell(7).is_empty() {
+                    definition.push_str(&format!(
+                        " COLLATE {}.{}",
+                        dialect.quote_ident(cell(6)),
+                        dialect.quote_ident(cell(7))
+                    ));
+                }
+                if !cell(5).is_empty() {
+                    definition.push_str(&format!(
+                        " GENERATED ALWAYS AS ({}) {}",
+                        cell(3),
+                        if cell(5) == "s" { "STORED" } else { "VIRTUAL" }
+                    ));
+                } else if !cell(4).is_empty() {
+                    definition.push_str(&dialect.identity_definition(cell(4)));
+                }
+                if cell(2) == "t" {
+                    definition.push_str(" NOT NULL");
+                }
+                if cell(4).is_empty() && cell(5).is_empty() && !cell(3).is_empty() {
+                    definition.push_str(&format!(" DEFAULT {}", cell(3)));
+                }
+                column.definition = definition;
+                column.comment = cell(8).into();
+            }
+            ddl.push_str(&format!(
+                "\n-- Column metadata: {}",
+                serde_json::to_string(
+                    &sets.iter().flat_map(|s| s.rows.clone()).collect::<Vec<_>>()
+                )
                 .unwrap_or_default()
-        ));
+            ));
+        }
     }
     let owned_sequences =
         if let Some(sql) = dialect.owned_sequences_sql(&dialect.qualified(scope, name)) {

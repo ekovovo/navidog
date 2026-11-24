@@ -11,6 +11,7 @@ description = "Compile check that navidog-model and navidog-db work without the 
 navidog-model = { path = "../navidog-model" }
 navidog-db = { path = "../navidog-db" }
 navidog-sqlite = { path = "../navidog-sqlite" }
+navidog-dameng = { path = "../navidog-dameng" }
 tokio.workspace = true
 
 [dev-dependencies]

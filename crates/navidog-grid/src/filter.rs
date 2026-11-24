@@ -356,6 +356,12 @@ fn predicate(rule: &Rule, dialect: &dyn Dialect) -> Option<String> {
         Op::NotEnds => like(&text_field, dialect, &rule.value, Like::Ends, true, false),
         Op::IsNull => format!("{field} IS NULL"),
         Op::NotNull => format!("{field} IS NOT NULL"),
+        // A server that treats '' as NULL (Dameng COMPATIBLE_MODE=2) never matches an
+        // empty-string comparison (140-dameng.md §5.2).
+        Op::Empty if dialect.features().empty_string_is_null => format!("{field} IS NULL"),
+        Op::NotEmpty if dialect.features().empty_string_is_null => {
+            format!("{field} IS NOT NULL")
+        }
         Op::Empty => format!("{field} = ''"),
         Op::NotEmpty => format!("{field} <> ''"),
         Op::Between => format!(
@@ -849,6 +855,31 @@ mod tests {
             or: false,
             negate: false,
         }
+    }
+
+    #[test]
+    fn empty_comparisons_become_null_checks_when_the_server_stores_empty_as_null() {
+        // Dameng COMPATIBLE_MODE=2: '' IS NULL, so = '' and <> '' never match.
+        let dialect = &navidog_dameng::DamengDialect {
+            case_sensitive: false,
+            compatible_mode: 2,
+        };
+        let filter = Filter {
+            rules: vec![rule("s", Op::Empty, "", "")],
+            ..Filter::default()
+        };
+        assert_eq!(where_sql(&filter, dialect), "\"s\" IS NULL");
+        let filter = Filter {
+            rules: vec![rule("s", Op::NotEmpty, "", "")],
+            ..Filter::default()
+        };
+        assert_eq!(where_sql(&filter, dialect), "\"s\" IS NOT NULL");
+        // Other servers keep the empty-string comparison.
+        let filter = Filter {
+            rules: vec![rule("s", Op::Empty, "", "")],
+            ..Filter::default()
+        };
+        assert_eq!(where_sql(&filter, &navidog_mysql::MysqlDialect), "`s` = ''");
     }
 
     fn round_trip(op: Op, value: &str, value2: &str, dialect: &dyn Dialect) {

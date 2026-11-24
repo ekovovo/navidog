@@ -248,6 +248,13 @@ pub fn edit_column(
     }
     let mut p = column_properties(s, d);
     if property == ColumnProperty::Identity {
+        if !d.features().identity_editable {
+            // Dameng first version: IDENTITY parameters are read-only; changing them
+            // would need a drop-and-re-add of the column (140-dameng.md §6.3).
+            return Err(DbError::msg(
+                "This database cannot edit identity parameters; drop the column and add it back.",
+            ));
+        }
         if !d.features().supports_identity || !["", "ALWAYS", "BY DEFAULT"].contains(&input) {
             return Err(DbError::msg(
                 "Identity mode must be ALWAYS, BY DEFAULT, or empty on PostgreSQL.",

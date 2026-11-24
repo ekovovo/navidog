@@ -12,6 +12,7 @@ use gpui_kit::App;
 use std::sync::Arc;
 
 use navidog_app_state::registry::Source;
+use navidog_dameng::DamengDriver;
 use navidog_db::Driver;
 use navidog_mysql::MySqlDriver;
 use navidog_postgres::PostgresDriver;
@@ -19,11 +20,12 @@ use navidog_sqlite::SqliteDriver;
 
 pub fn init(cx: &mut App) {
     let mut registry = DriverRegistry::default();
-    let builtin: [Arc<dyn Driver>; 4] = [
+    let builtin: [Arc<dyn Driver>; 5] = [
         Arc::new(MySqlDriver::mysql()),
         Arc::new(MySqlDriver::mariadb()),
         Arc::new(PostgresDriver::default()),
         Arc::new(SqliteDriver::default()),
+        Arc::new(DamengDriver::default()),
     ];
     for driver in builtin {
         let id = driver.info().id.clone();

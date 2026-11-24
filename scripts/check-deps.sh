@@ -10,7 +10,7 @@ fail=0
 trees="$(mktemp -d)"
 trap 'rm -rf "$trees"' EXIT
 
-for crate in navidog-model navidog-db navidog-sql navidog-schema navidog-util navidog-sql-log navidog-headless navidog-mysql navidog-postgres navidog-sqlite; do
+for crate in navidog-model navidog-db navidog-sql navidog-schema navidog-util navidog-sql-log navidog-headless navidog-mysql navidog-postgres navidog-sqlite navidog-dameng; do
     # Read the whole tree into a file first: `grep -q` in a pipeline stops reading early, and
     # with `pipefail` a cargo tree killed by SIGPIPE would make the check pass silently.
     if ! cargo tree -p "$crate" -e normal --prefix none >"$trees/$crate"; then
@@ -31,7 +31,8 @@ for manifest in \
     crates/navidog-headless/Cargo.toml \
     crates/navidog-mysql/Cargo.toml \
     crates/navidog-postgres/Cargo.toml \
-    crates/navidog-sqlite/Cargo.toml; do
+    crates/navidog-sqlite/Cargo.toml \
+    crates/navidog-dameng/Cargo.toml; do
     if grep -q 'gpui' "$manifest"; then
         echo "dependency check: $manifest depends on gpui" >&2
         fail=1

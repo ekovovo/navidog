@@ -287,7 +287,14 @@ impl TableDesigner {
                 |v| v.child(self.property_row(9, "on_update_expression", disabled, cx)),
             )
             .when(self.dialect.features().supports_identity && numeric, |v| {
-                v.child(self.property_row(10, "identity_mode", disabled || p.generated, cx))
+                // identity_editable=false (Dameng first version): the parameters are
+                // read-only; changes to an identity column are refused (140-dameng.md §6.3).
+                v.child(self.property_row(
+                    10,
+                    "identity_mode",
+                    disabled || p.generated || !self.dialect.features().identity_editable,
+                    cx,
+                ))
             })
             .when(p.generated, |v| {
                 v.child(self.property_row(7, "expression", disabled, cx))
@@ -654,7 +661,26 @@ impl Render for TableDesigner {
                         Page::Exclusions | Page::Triggers | Page::Partitions => {
                             self.render_more(cx).into_any_element()
                         }
-                        Page::Preview => Editor::new(&self.sql).size_full().into_any_element(),
+                        Page::Preview => {
+                            if self.dialect.features().transactional_ddl {
+                                Editor::new(&self.sql).size_full().into_any_element()
+                            } else {
+                                // The server's DDL commits implicitly (Dameng); the fixed
+                                // hint warns that a failed migration cannot be rolled back
+                                // (140-dameng.md §6.2).
+                                v_flex()
+                                    .size_full()
+                                    .child(
+                                        gpui_kit::div()
+                                            .px_2()
+                                            .py_1()
+                                            .text_color(p.label_secondary)
+                                            .child(t!("designer.ddl_no_rollback").to_string()),
+                                    )
+                                    .child(Editor::new(&self.sql).flex_1().min_h_0())
+                                    .into_any_element()
+                            }
+                        }
                         Page::Options => self.render_table_options(cx).into_any_element(),
                         Page::Advanced => v_flex()
                             .size_full()

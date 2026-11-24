@@ -1,0 +1,5 @@
+_version: 2
+database:
+  dameng_queued_session_closed:
+    en: The Dameng session was closed before queued work started.
+    zh-CN: 排队的操作开始前，达梦会话已关闭。

@@ -12,6 +12,10 @@ use crate::dialect::Dialect;
 pub const SQLITE_AUTH_REASON: &str =
     "SQLite user authentication needs the user-auth extension, which this build does not include.";
 
+/// Shown when the Dameng user/role designer is not available yet; the account list is still
+/// readable (140-dameng.md §6.5).
+pub const DAMENG_ACCOUNT_REASON: &str = "Dameng user and role designers are not available yet.";
+
 /// Which account form to show. The panel matches this, not a product id.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AccountForm {
@@ -264,6 +268,7 @@ pub fn account_form(family: Option<DefinitionFamily>) -> AccountForm {
         Some(DefinitionFamily::Mysql) => AccountForm::Mysql,
         Some(DefinitionFamily::Postgres) => AccountForm::Postgres,
         Some(DefinitionFamily::Sqlite) => AccountForm::Unavailable(SQLITE_AUTH_REASON),
+        Some(DefinitionFamily::Dameng) => AccountForm::Unavailable(DAMENG_ACCOUNT_REASON),
         None => AccountForm::Unavailable("This connection cannot manage users."),
     }
 }
@@ -277,6 +282,7 @@ pub fn account_statements(
         Some(DefinitionFamily::Mysql) => mysql_account(dialect, draft),
         Some(DefinitionFamily::Postgres) => postgres_account(dialect, draft),
         Some(DefinitionFamily::Sqlite) => Err(SQLITE_AUTH_REASON.into()),
+        Some(DefinitionFamily::Dameng) => Err(DAMENG_ACCOUNT_REASON.into()),
         None => Err("This connection cannot manage users.".into()),
     }
 }
@@ -297,6 +303,9 @@ pub fn account_list_sql(family: Option<DefinitionFamily>) -> Option<&'static str
              rolconnlimit AS connection_limit \
              FROM pg_roles ORDER BY rolname",
         ),
+        Some(DefinitionFamily::Dameng) => {
+            Some("SELECT USERNAME AS name FROM ALL_USERS ORDER BY USERNAME")
+        }
         _ => None,
     }
 }
@@ -309,7 +318,7 @@ pub fn grant_statements(
     match family {
         Some(DefinitionFamily::Mysql) => mysql_grant(dialect, draft),
         Some(DefinitionFamily::Postgres) => postgres_grant(dialect, draft),
-        Some(DefinitionFamily::Sqlite) | None => {
+        Some(DefinitionFamily::Sqlite) | Some(DefinitionFamily::Dameng) | None => {
             Err("This connection has no privilege manager.".into())
         }
     }
@@ -422,6 +431,8 @@ pub fn maintenance(
             }
             jobs
         }
+        // ANALYZE / REINDEX and other maintenance jobs come later (F-DM-007).
+        DefinitionFamily::Dameng => Vec::new(),
     }
 }
 
@@ -449,7 +460,7 @@ pub fn kill_sql(family: Option<DefinitionFamily>, id: &str) -> Result<Option<Str
     let sql = match family {
         DefinitionFamily::Mysql => format!("KILL {id}"),
         DefinitionFamily::Postgres => format!("SELECT pg_cancel_backend({id})"),
-        DefinitionFamily::Sqlite => return Ok(None),
+        DefinitionFamily::Sqlite | DefinitionFamily::Dameng => return Ok(None),
     };
     Ok(Some(sql))
 }
@@ -500,7 +511,7 @@ pub fn set_variable_sql(
         DefinitionFamily::Postgres => {
             return Err("PostgreSQL variables are read-only.".into());
         }
-        DefinitionFamily::Sqlite => Vec::new(),
+        DefinitionFamily::Sqlite | DefinitionFamily::Dameng => Vec::new(),
     };
     Ok(sql)
 }
@@ -715,11 +726,14 @@ pub fn relation_plan(
             }]
         }
         (DefinitionFamily::Sqlite, true) => Vec::new(),
+        (DefinitionFamily::Dameng, _) => Vec::new(),
     };
-    RelationPlan {
-        note: None,
-        queries,
-    }
+    let note = if family == DefinitionFamily::Dameng {
+        Some("Dependency information is not available for Dameng yet.")
+    } else {
+        None
+    };
+    RelationPlan { note, queries }
 }
 
 fn mysql_account(dialect: &dyn Dialect, draft: &AccountDraft) -> Result<Vec<String>, String> {
@@ -1006,6 +1020,46 @@ fn structure_queries(
                 types.join(", ")
             )])
         }
+        DefinitionFamily::Dameng => {
+            let schema = dialect.string_literal(scope.schema.as_deref().unwrap_or(""));
+            let pred = predicate(
+                dialect,
+                family,
+                "OBJECT_NAME",
+                needle,
+                mode,
+                case_sensitive,
+                false,
+            )?;
+            let mut types = Vec::new();
+            if wanted(ObjectKind::Table) {
+                types.push("'TABLE'");
+            }
+            if wanted(ObjectKind::View) {
+                types.push("'VIEW'");
+            }
+            if wanted(ObjectKind::Function) {
+                types.push("'FUNCTION'");
+                types.push("'PROCEDURE'");
+            }
+            if wanted(ObjectKind::Sequence) {
+                types.push("'SEQUENCE'");
+            }
+            if wanted(ObjectKind::Trigger) {
+                types.push("'TRIGGER'");
+            }
+            if wanted(ObjectKind::Index) {
+                types.push("'INDEX'");
+            }
+            if types.is_empty() {
+                return Ok(Vec::new());
+            }
+            Ok(vec![format!(
+                "SELECT OBJECT_TYPE, OBJECT_NAME FROM ALL_OBJECTS \
+                 WHERE OWNER = {schema} AND OBJECT_TYPE IN ({}) AND {pred}",
+                types.join(", ")
+            )])
+        }
     }
 }
 
@@ -1037,6 +1091,13 @@ fn text_columns_sql(dialect: &dyn Dialect, family: DefinitionFamily, scope: &Sco
                  OR upper(p.type) LIKE '%TEXT%' OR upper(p.type) LIKE '%CLOB%')"
             )
         }
+        DefinitionFamily::Dameng => {
+            let schema = dialect.string_literal(scope.schema.as_deref().unwrap_or(""));
+            format!(
+                "SELECT TABLE_NAME, COLUMN_NAME FROM ALL_TAB_COLUMNS \
+                 WHERE OWNER = {schema} AND DATA_TYPE IN ('VARCHAR','VARCHAR2','CHAR','CLOB','TEXT')"
+            )
+        }
     }
 }
 
@@ -1050,26 +1111,27 @@ fn predicate(
     data: bool,
 ) -> Result<String, String> {
     if mode == MatchMode::Regex {
-        if family == DefinitionFamily::Sqlite {
-            return Err("This SQLite build has no REGEXP function.".into());
-        }
         // Lowercasing the pattern turns `\S` into `\s`. PostgreSQL has `~*`;
         // MySQL `REGEXP` follows the column collation.
         let literal = dialect.string_literal(needle);
-        return Ok(match (family, case_sensitive) {
-            (DefinitionFamily::Postgres, false) => format!("{column} ~* {literal}"),
-            (DefinitionFamily::Postgres, true) => format!("{column} ~ {literal}"),
+        return match (family, case_sensitive) {
+            (DefinitionFamily::Sqlite, _) => {
+                Err("This SQLite build has no REGEXP function.".into())
+            }
+            (DefinitionFamily::Dameng, _) => {
+                Err("Regular-expression search is not available for Dameng yet.".into())
+            }
+            (DefinitionFamily::Postgres, false) => Ok(format!("{column} ~* {literal}")),
+            (DefinitionFamily::Postgres, true) => Ok(format!("{column} ~ {literal}")),
             (DefinitionFamily::Mysql, true) => {
                 // MySQL 8.0.22 rejects a binary argument to REGEXP. `(?-i)` forces a
                 // case-sensitive match without leaving the column's character set.
                 // MariaDB's PCRE engine accepts the same flag.
                 let literal = dialect.string_literal(&format!("(?-i){needle}"));
-                format!("{column} REGEXP {literal}")
+                Ok(format!("{column} REGEXP {literal}"))
             }
-            (DefinitionFamily::Mysql, false) | (DefinitionFamily::Sqlite, _) => {
-                format!("{column} REGEXP {literal}")
-            }
-        });
+            (DefinitionFamily::Mysql, false) => Ok(format!("{column} REGEXP {literal}")),
+        };
     }
     if mode == MatchMode::WholeWord && data {
         let word = escape_like(needle);
@@ -1131,6 +1193,8 @@ fn like_cmp(
                 dialect.string_literal(&like_to_glob(pattern))
             )
         }
+        // Dameng has no ILIKE; case sensitivity follows the server's CASE_SENSITIVE setting.
+        (DefinitionFamily::Dameng, _) => format!("{column} LIKE {literal} ESCAPE {escape}"),
     }
 }
 
@@ -1543,7 +1607,7 @@ pub fn privilege_statements(
         Some(DefinitionFamily::Postgres) => {
             postgres_privilege_statements(dialect, edit.grantee, edit.before, edit.after)
         }
-        Some(DefinitionFamily::Sqlite) | None => {
+        Some(DefinitionFamily::Sqlite) | Some(DefinitionFamily::Dameng) | None => {
             Err("This connection has no privilege manager.".into())
         }
     }
