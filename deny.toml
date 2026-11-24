@@ -2,9 +2,10 @@
 yanked = "warn"
 
 # Only unmaintained advisories about crates we depend on directly fail the check.
-# The unmaintained crates in this tree (`instant`, `paste`, `proc-macro-error2`,
-# `rustls-pemfile`, `rustybuzz`, `ttf-parser`) are pulled in transitively by the
-# pinned gpui-kit 0.8.0, mysql_async and usvg; none of them can be bumped here.
+# The unmaintained crates in this tree (`chrono`, `instant`, `paste`, `proc-macro-error2`,
+# `rustls-pemfile`, `rustybuzz`, `ttf-parser`) are pulled in by gpui-kit 0.8.0,
+# mysql_async and usvg, or are our own direct dependencies awaiting a migration; none of
+# them can be simply bumped here.
 unmaintained = "workspace"
 
 ignore = [
@@ -12,6 +13,10 @@ ignore = [
     # channel needs a remote attacker observing RSA *signing*; navidog only uses
     # `rsa` through russh for local SSH keys. Mirrored in `.cargo/audit.toml`.
     { id = "RUSTSEC-2023-0071", reason = "rsa has no fixed release, not exploitable for local SSH keys" },
+    # Unmaintained with no fixed release; the advisory recommends jiff. chrono is a
+    # direct dependency of eight crates (dates, timestamps, formatting), so the
+    # migration is its own task, not a lockfile bump. Mirrored in `.cargo/audit.toml`.
+    { id = "RUSTSEC-2026-0543", reason = "chrono migration to jiff is tracked as a separate task" },
 ]
 
 [licenses]
